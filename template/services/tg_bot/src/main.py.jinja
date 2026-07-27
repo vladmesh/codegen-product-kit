@@ -92,7 +92,7 @@ async def _sync_user_with_backend(telegram_id: int) -> bool | None:
     Returns:
         True if user was created, False if already exists, None on permanent failure
     """
-    payload = UserCreate(telegram_id=telegram_id, is_admin=False)
+    payload = UserCreate(telegram_id=telegram_id)
 
     try:
         async with BackendClient() as client:

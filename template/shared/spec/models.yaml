@@ -17,9 +17,14 @@ models:
         type: datetime
         readonly: true
     variants:
-      Create: {}
+      # is_admin is never accepted from the API: the backend is reachable from
+      # outside the stack, so an input variant carrying it would let anyone grant
+      # themselves the flag. It stays readable and is set out of band.
+      Create:
+        exclude: [is_admin]
       Update:
-        optional: [telegram_id, is_admin]
+        exclude: [is_admin]
+        optional: [telegram_id]
       Read: {}
 
   CommandReceived:

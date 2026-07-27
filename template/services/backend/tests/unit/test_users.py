@@ -11,12 +11,10 @@ import pytest
 import shared.generated.events as events_module
 
 
-async def _create_user(
-    client: AsyncClient, telegram_id: int = 111, is_admin: bool = False
-) -> dict[str, Any]:
+async def _create_user(client: AsyncClient, telegram_id: int = 111) -> dict[str, Any]:
     response = await client.post(
         "/users",
-        json={"telegram_id": telegram_id, "is_admin": is_admin},
+        json={"telegram_id": telegram_id},
     )
     assert response.status_code == status.HTTP_201_CREATED
     return cast(dict[str, Any], response.json())
@@ -59,13 +57,36 @@ async def test_create_user_publishes_user_registered(client: AsyncClient) -> Non
 @pytest.mark.asyncio
 async def test_update_user(client: AsyncClient) -> None:
     created = await _create_user(client, telegram_id=1111)
-    update_payload = {"telegram_id": 987654321, "is_admin": True}
+    update_payload = {"telegram_id": 987654321}
 
     updated = await client.put(f"/users/{created['id']}", json=update_payload)
     assert updated.status_code == status.HTTP_200_OK
     body = updated.json()
     assert body["telegram_id"] == 987654321  # noqa: PLR2004
-    assert body["is_admin"] is True
+    assert body["is_admin"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_user_rejects_is_admin(client: AsyncClient) -> None:
+    """The privilege flag is not an input: the backend is reachable from outside."""
+    response = await client.post("/users", json={"telegram_id": 3333, "is_admin": True})
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    listed = await client.get("/users")
+    assert listed.json() == []
+
+
+@pytest.mark.asyncio
+async def test_update_user_rejects_is_admin(client: AsyncClient) -> None:
+    created = await _create_user(client, telegram_id=4444)
+
+    updated = await client.put(f"/users/{created['id']}", json={"is_admin": True})
+
+    assert updated.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    unchanged = await client.get(f"/users/{created['id']}")
+    assert unchanged.json()["is_admin"] is False
 
 
 @pytest.mark.asyncio
@@ -83,7 +104,7 @@ async def test_delete_user(client: AsyncClient) -> None:
 async def test_create_user_rejects_duplicate_telegram_id(client: AsyncClient) -> None:
     await _create_user(client, telegram_id=42)
 
-    duplicate = await client.post("/users", json={"telegram_id": 42, "is_admin": False})
+    duplicate = await client.post("/users", json={"telegram_id": 42})
 
     assert duplicate.status_code == status.HTTP_409_CONFLICT
     assert duplicate.json()["detail"] == "Telegram user already exists"
