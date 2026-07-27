@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-07-27
+
 ### Added
+- Bot access is declared in the tg_bot environment contract instead of being written
+  per project by an engineering agent: `TG_BOT_ALLOWED_TELEGRAM_IDS` names the
+  audience (empty means public) and `TG_BOT_TEST_TELEGRAM_ID` admits one temporary
+  identity so a private bot can be tested. The test identity stays out of the
+  audience list, and removing the value revokes it with no residual state.
 - Typed environment-contract baseline fragments for infrastructure, backend and
   Telegram bot modules, with schema validation in template tests.
 - Generated-project CI now checks static environment usage against contract
