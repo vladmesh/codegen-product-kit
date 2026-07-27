@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, conint
+from typing import Any
+
+from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, conint
 
 
 class User(BaseModel):
@@ -27,7 +29,6 @@ class UserCreate(BaseModel):
         extra="forbid",
     )
     telegram_id: conint(ge=0)
-    is_admin: bool = False
 
 
 class UserUpdate(BaseModel):
@@ -35,7 +36,6 @@ class UserUpdate(BaseModel):
         extra="forbid",
     )
     telegram_id: conint(ge=0) | None = None
-    is_admin: bool | None = None
 
 
 class UserRead(BaseModel):
