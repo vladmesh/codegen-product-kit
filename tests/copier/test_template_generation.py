@@ -1302,6 +1302,8 @@ esac
         arch = (project_backend / "ARCHITECTURE.md").read_text()
         assert "PostgreSQL" in arch
         assert "python-fastapi" in arch
+        repository_secrets = arch.split("Required repository secrets:", 1)[1]
+        assert "APP_SECRET_KEY" not in repository_secrets
 
     def test_architecture_md_with_events(self, project_backend_tg_bot: Path):
         """ARCHITECTURE.md should mention Redis when event modules selected."""
