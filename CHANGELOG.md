@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Generated architecture documentation no longer tells operators to create
+  `APP_SECRET_KEY` as a GitHub repository secret. The deployment environment
+  contract correctly owns it as a generated secret.
+
 ## [0.3.6] - 2026-07-27
 
 ### Added
