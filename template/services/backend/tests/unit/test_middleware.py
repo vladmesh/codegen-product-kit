@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Generator
 import io
 import json
 import logging
-from collections.abc import AsyncGenerator, Generator
 
 from fastapi import FastAPI, Request, status
 from httpx import ASGITransport, AsyncClient

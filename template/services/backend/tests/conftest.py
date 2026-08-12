@@ -12,14 +12,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 import pytest
 import pytest_asyncio
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.engine import Connection
-from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 
 # Ensure the backend uses a lightweight SQLite database for tests.
