@@ -54,6 +54,8 @@ def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
     workflow = Path(".github/workflows/test-template.yml").read_text()
 
     assert "fetch-depth: 0" in workflow
+    assert "uses: astral-sh/setup-uv@v7" in workflow
+    assert 'version: "0.11.29"' in workflow
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "if: matrix.modules == 'backend'" in workflow
     assert "make setup && make typecheck" in workflow
