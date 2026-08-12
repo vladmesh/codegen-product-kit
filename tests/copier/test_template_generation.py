@@ -49,11 +49,14 @@ def test_root_infra_readme_points_to_template_contract() -> None:
     assert "worker-mode\ncontract" in root_readme
 
 
-def test_template_ci_validates_compose_with_env_file() -> None:
-    """Template CI should validate root compose calls with explicit env file."""
+def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
+    """Template CI should validate compose and typecheck the exact candidate."""
     workflow = Path(".github/workflows/test-template.yml").read_text()
 
-    assert "--defaults --trust --vcs-ref=HEAD" in workflow
+    assert "fetch-depth: 0" in workflow
+    assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
+    assert "if: matrix.modules == 'backend'" in workflow
+    assert "make setup && make typecheck" in workflow
     assert ("docker compose --env-file .env -f infra/compose.base.yml config") in workflow
     assert (
         "docker compose --env-file .env -f infra/compose.base.yml -f infra/compose.dev.yml config"
