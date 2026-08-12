@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 from fastapi import status
 from httpx import AsyncClient
@@ -47,9 +48,11 @@ async def test_create_and_get_user(client: AsyncClient) -> None:
 async def test_create_user_publishes_user_registered(client: AsyncClient) -> None:
     await _create_user(client, telegram_id=123456789)
 
-    broker = events_module.get_broker()
-    broker.publish.assert_awaited_once()
-    event, channel = broker.publish.await_args.args
+    publish = cast(AsyncMock, events_module.get_broker().publish)
+    publish.assert_awaited_once()
+    await_args = publish.await_args
+    assert await_args is not None
+    event, channel = await_args.args
     assert channel == "user_registered"
     assert event.telegram_id == 123456789  # noqa: PLR2004
 

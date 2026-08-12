@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.pool import ConnectionPoolEntry
 
 # Ensure the backend uses a lightweight SQLite database for tests.
 # Use /tmp to avoid PermissionError when running as non-root inside Docker.
@@ -59,11 +62,13 @@ async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
     # Without this, pysqlite intercepts BEGIN/COMMIT and breaks rollback isolation.
     # See: https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#serializable-isolation-savepoints-transactional-ddl
     @event.listens_for(engine.sync_engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, connection_record):
+    def _set_sqlite_pragma(
+        dbapi_conn: DBAPIConnection, connection_record: ConnectionPoolEntry
+    ) -> None:
         dbapi_conn.isolation_level = None
 
     @event.listens_for(engine.sync_engine, "begin")
-    def _do_begin(conn):
+    def _do_begin(conn: Connection) -> None:
         conn.exec_driver_sql("BEGIN")
 
     async with engine.begin() as conn:

@@ -59,7 +59,9 @@ def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "if: matrix.modules == 'backend'" in workflow
     assert "make setup && make typecheck" in workflow
-    assert 'targets="$$svc/src"' in Path("template/Makefile.jinja").read_text()
+    makefile = Path("template/Makefile.jinja").read_text()
+    assert '"$$svc/.venv/bin/mypy" "$$svc"' in makefile
+    assert 'targets="$$svc/src"' not in makefile
     assert "generated/" not in Path("template/mypy.ini.jinja").read_text()
     assert ("docker compose --env-file .env -f infra/compose.base.yml config") in workflow
     assert (

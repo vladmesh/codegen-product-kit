@@ -100,9 +100,7 @@ typecheck:
 	@for svc in services/*/; do \
 		[ -f "$$svc/.venv/bin/mypy" ] || continue; \
 		echo ">> Typechecking $$(basename $$svc)"; \
-		targets="$$svc/src"; \
-		[ ! -d "$$svc/migrations" ] || targets="$$targets $$svc/migrations"; \
-		PYTHONPATH=. MYPYPATH=. "$$svc/.venv/bin/mypy" $$targets; \
+		PYTHONPATH=. MYPYPATH=. "$$svc/.venv/bin/mypy" "$$svc"; \
 	done
 
 tests:
