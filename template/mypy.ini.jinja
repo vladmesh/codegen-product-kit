@@ -11,11 +11,7 @@ disallow_incomplete_defs = True
 show_error_codes = True
 plugins =
 follow_imports = silent
-exclude = (?x)(
-    shared/shared/generated/ |
-    ^.*generated/$ |
-    ^.framework/
-  )
+exclude = ^\.framework/
 
 [mypy-tests.*]
 disable_error_code = var-annotated

@@ -9,9 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 import time
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.types import ASGIApp
 import structlog
 
 logger = structlog.stdlib.get_logger()
@@ -38,13 +39,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app: FastAPI,
+        app: ASGIApp,
         user_id_extractor: Callable[[Request], str | None] | None = None,
     ) -> None:
         super().__init__(app)
         self._extract_user_id = user_id_extractor or default_user_id_extractor
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path in SILENT_PATHS:
             return await call_next(request)
 
