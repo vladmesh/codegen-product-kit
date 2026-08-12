@@ -35,11 +35,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.29"
 
       - name: Install copier and dependencies
         run: pip install copier pyyaml ruff
@@ -49,7 +56,13 @@ jobs:
           copier copy . /tmp/test-project \
             --data project_name=test-project \
             --data "modules=${{ matrix.modules }}" \
-            --defaults --trust --vcs-ref=HEAD
+            --defaults --trust --vcs-ref="${{ github.sha }}"
+
+      - name: Typecheck clean backend project
+        if: matrix.modules == 'backend'
+        run: |
+          cd /tmp/test-project
+          make setup && make typecheck
 
       - name: Verify no Jinja artifacts
         run: |

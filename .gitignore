@@ -20,3 +20,4 @@ apps/backend/tests/.tmp/
 **/generated/
 **/docs/openapi.json
 test-sync-markers/
+state/checks/

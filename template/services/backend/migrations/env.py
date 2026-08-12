@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from logging.config import fileConfig
+from typing import Any, Literal
 
 from alembic import context
+from alembic.autogenerate.api import AutogenContext
 from sqlalchemy import engine_from_config, pool
 
 from services.backend.src.app import models  # noqa: F401  # ensure models are imported
@@ -25,7 +27,7 @@ config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 target_metadata = Base.metadata
 
 
-def render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+def render_item(type_: str, obj: Any, _autogen_context: AutogenContext) -> str | Literal[False]:
     if type_ == "type" and isinstance(obj, TzAwareDateTime):
         return "sa.DateTime(timezone=True)"
     return False

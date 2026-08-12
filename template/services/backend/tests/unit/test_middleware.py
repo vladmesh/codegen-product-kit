@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, Generator
 import io
 import json
 import logging
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from httpx import ASGITransport, AsyncClient
 import pytest
 import pytest_asyncio
@@ -18,7 +19,7 @@ configure_logging(service_name="backend_test")
 
 
 @pytest.fixture()
-def log_capture():
+def log_capture() -> Generator[io.StringIO, None, None]:
     """Capture structlog JSON output via a dedicated handler."""
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
@@ -63,22 +64,22 @@ def log_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
 
     @app.get("/hello")
-    async def _hello():
+    async def _hello() -> dict[str, str]:
         return {"msg": "hi"}
 
     @app.get("/health")
-    async def _health():
+    async def _health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/boom")
-    async def _boom():
+    async def _boom() -> None:
         raise RuntimeError("test explosion")
 
     return app
 
 
 @pytest_asyncio.fixture()
-async def log_client(log_app: FastAPI):
+async def log_client(log_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=ASGITransport(app=log_app),
         base_url="http://test",
@@ -88,7 +89,7 @@ async def log_client(log_app: FastAPI):
 
 @pytest.mark.asyncio
 async def test_request_logged_with_standard_fields(
-    log_client: AsyncClient, log_capture
+    log_client: AsyncClient, log_capture: io.StringIO
 ) -> None:
     response = await log_client.get("/hello")
 
@@ -107,7 +108,9 @@ async def test_request_logged_with_standard_fields(
 
 
 @pytest.mark.asyncio
-async def test_health_endpoint_not_logged(log_client: AsyncClient, log_capture) -> None:
+async def test_health_endpoint_not_logged(
+    log_client: AsyncClient, log_capture: io.StringIO
+) -> None:
     response = await log_client.get("/health")
 
     assert response.status_code == status.HTTP_200_OK
@@ -120,7 +123,7 @@ async def test_health_endpoint_not_logged(log_client: AsyncClient, log_capture) 
 
 @pytest.mark.asyncio
 async def test_exception_returns_500_and_logs_error(
-    log_client: AsyncClient, log_capture
+    log_client: AsyncClient, log_capture: io.StringIO
 ) -> None:
     response = await log_client.get("/boom")
 
@@ -137,20 +140,20 @@ async def test_exception_returns_500_and_logs_error(
 
 
 @pytest.mark.asyncio
-async def test_user_id_extractor_is_called(log_capture) -> None:
+async def test_user_id_extractor_is_called(log_capture: io.StringIO) -> None:
     from services.backend.src.app.middleware import (
         RequestLoggingMiddleware,
     )
 
     app = FastAPI()
 
-    def extract_user(request) -> str | None:
+    def extract_user(request: Request) -> str | None:
         return "user:42"
 
     app.add_middleware(RequestLoggingMiddleware, user_id_extractor=extract_user)
 
     @app.get("/me")
-    async def _me():
+    async def _me() -> dict[str, str]:
         return {"user": "me"}
 
     async with AsyncClient(
