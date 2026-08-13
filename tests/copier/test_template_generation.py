@@ -59,6 +59,8 @@ def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "if: matrix.modules == 'backend'" in workflow
     assert "make setup && make typecheck" in workflow
+    assert "Smoke generated pre-commit hook" in workflow
+    assert "git init" in workflow
     makefile = Path("template/Makefile.jinja").read_text()
     assert '"$$svc/.venv/bin/mypy" "$$svc"' in makefile
     assert 'targets="$$svc/src"' not in makefile
@@ -1990,6 +1992,84 @@ class TestTemplateTestHealth:
 @pytest.mark.slow
 class TestSlowIntegration:
     """Slow integration tests — run with make test-copier-slow."""
+
+    def test_pre_commit_uses_make_format_without_ambient_ruff(self, tmp_path: Path):
+        """A bootstrapped project should format through its managed Makefile path."""
+        output = run_copier(tmp_path, "backend")
+
+        subprocess.run(  # noqa: S603, S607
+            ["git", "init"],
+            cwd=output,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        for key, value in (
+            ("user.name", "Copier hook test"),
+            ("user.email", "copier-hook-test@example.com"),
+        ):
+            subprocess.run(  # noqa: S603, S607
+                ["git", "config", key, value],
+                cwd=output,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        setup_result = subprocess.run(  # noqa: S603, S607
+            ["make", "setup"],
+            cwd=output,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert setup_result.returncode == 0, (
+            f"make setup failed:\nstdout: {setup_result.stdout}\nstderr: {setup_result.stderr}"
+        )
+
+        bin_dir = tmp_path / "hook-bin"
+        bin_dir.mkdir()
+        make_log = tmp_path / "make-invocations"
+        for command in ("bash", "env", "git"):
+            resolved = shutil.which(command)
+            assert resolved is not None
+            (bin_dir / command).symlink_to(resolved)
+        resolved_make = shutil.which("make")
+        assert resolved_make is not None
+        (bin_dir / "make").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"printf '%s\\n' \"$*\" >> {make_log}\n"
+            f'exec {resolved_make} "$@"\n'
+        )
+        (bin_dir / "make").chmod(0o755)
+
+        hook_env = {"PATH": str(bin_dir)}
+        assert shutil.which("ruff", path=hook_env["PATH"]) is None
+        smoke_file = output / "pre_commit_smoke.py"
+        smoke_file.write_text("value=1\n")
+        subprocess.run(  # noqa: S603, S607
+            ["git", "add", smoke_file.name],
+            cwd=output,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=hook_env,
+        )
+        commit_result = subprocess.run(  # noqa: S603, S607
+            ["git", "commit", "-m", "Smoke generated pre-commit hook"],
+            cwd=output,
+            capture_output=True,
+            text=True,
+            env=hook_env,
+        )
+
+        assert commit_result.returncode == 0, (
+            "pre-commit hook failed:\n"
+            f"stdout: {commit_result.stdout}\nstderr: {commit_result.stderr}"
+        )
+        assert make_log.read_text().splitlines() == ["format"]
+        assert smoke_file.read_text() == "value = 1\n"
 
     @pytest.mark.parametrize("modules", ["backend", "tg_bot", "backend,tg_bot"])
     def test_make_setup_succeeds(self, tmp_path: Path, modules: str):
