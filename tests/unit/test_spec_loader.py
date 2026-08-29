@@ -168,7 +168,11 @@ events:
             "models:\n  UserEvent:\n    fields:\n      user_id:\n        type: int\n"
         )
         (temp_repo / "shared" / "spec" / "events.yaml").write_text(
-            "events:\n  user_created:\n    message: UserEvent\n    publish: true\n    subscribe: true\n"
+            "events:\n"
+            "  user_created:\n"
+            "    message: UserEvent\n"
+            "    publish: true\n"
+            "    subscribe: true\n"
         )
 
         with pytest.raises(SpecValidationError, match="subscribe"):
