@@ -5,12 +5,10 @@ from framework.spec.events import EventSpec, EventsSpec
 from framework.spec.loader import load_specs
 from framework.spec.models import FieldSpec, ModelSpec, ModelsSpec, VariantSpec
 from framework.spec.operations import (
-    ConsumeSpec,
     DomainSpec,
     OperationSpec,
     ParamSpec,
     RestConfig,
-    ServiceManifest,
 )
 from framework.spec.types import TypeSpec
 
@@ -23,10 +21,8 @@ __all__ = [
     "EventSpec",
     "EventsSpec",
     "TypeSpec",
-    "ConsumeSpec",
     "DomainSpec",
     "OperationSpec",
     "ParamSpec",
     "RestConfig",
-    "ServiceManifest",
 ]

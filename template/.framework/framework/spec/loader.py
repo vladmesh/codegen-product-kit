@@ -15,7 +15,7 @@ import yaml
 
 from framework.spec.events import EventsSpec
 from framework.spec.models import ModelsSpec
-from framework.spec.operations import DomainSpec, ServiceManifest, unwrap_list
+from framework.spec.operations import DomainSpec, unwrap_list
 
 
 class SpecValidationError(Exception):
@@ -39,7 +39,6 @@ class AllSpecs:
     models: ModelsSpec
     events: EventsSpec
     domains: dict[str, DomainSpec] = field(default_factory=dict)
-    manifests: dict[str, ServiceManifest] = field(default_factory=dict)
 
 
 def load_yaml_file(file_path: Path) -> dict[str, Any]:
@@ -108,18 +107,6 @@ def load_domain(domain_file: Path) -> DomainSpec:
         raise SpecValidationError(str(e), str(domain_file)) from e
 
 
-def load_manifest(manifest_file: Path, service_name: str) -> ServiceManifest:
-    """Load and validate a service manifest."""
-    data = load_yaml_file(manifest_file)
-
-    try:
-        return ServiceManifest.from_yaml(service_name, data)
-    except ValidationError as e:
-        raise SpecValidationError(format_pydantic_error(e, "manifest"), str(manifest_file)) from e
-    except ValueError as e:
-        raise SpecValidationError(str(e), str(manifest_file)) from e
-
-
 def extract_base_model(model_ref: str) -> str:
     """Extract base model name from a model reference.
 
@@ -169,56 +156,12 @@ def validate_model_references(
     return errors
 
 
-def validate_consume_references(
-    manifests: dict[str, ServiceManifest],
-    domains: dict[str, DomainSpec],
-) -> list[str]:
-    """Validate that all consumed service/domain/operation references exist.
-
-    Returns list of error messages.
-    """
-    errors = []
-
-    for service_name, manifest in manifests.items():
-        for consume in manifest.consumes:
-            domain_key = f"{consume.service}/{consume.domain}"
-
-            # Check domain exists
-            if domain_key not in domains:
-                errors.append(
-                    f"Manifest '{service_name}': consumes unknown domain "
-                    f"'{consume.service}/{consume.domain}'"
-                )
-                continue
-
-            domain = domains[domain_key]
-            domain_op_names = {op.name for op in domain.operations}
-
-            # Check operations if specific ones are listed
-            if consume.operations:
-                for op_name in consume.operations:
-                    if op_name not in domain_op_names:
-                        errors.append(
-                            f"Manifest '{service_name}': consumes unknown operation "
-                            f"'{op_name}' in domain '{domain_key}'"
-                        )
-
-    return errors
-
-
-def _load_service_specs(
-    services_dir: Path,
-) -> tuple[dict[str, DomainSpec], dict[str, ServiceManifest]]:
-    """Load domains and manifests from all services.
-
-    Returns:
-        Tuple of (domains, manifests) dicts
-    """
+def _load_service_specs(services_dir: Path) -> dict[str, DomainSpec]:
+    """Load domain specs from all services."""
     domains: dict[str, DomainSpec] = {}
-    manifests: dict[str, ServiceManifest] = {}
 
     if not services_dir.exists():
-        return domains, manifests
+        return domains
 
     for service_dir in services_dir.iterdir():
         if not service_dir.is_dir():
@@ -230,7 +173,7 @@ def _load_service_specs(
 
         service_name = service_dir.name
 
-        # Load domain specs (*.yaml except manifest.yaml)
+        # Legacy manifests are intentionally ignored.
         for spec_file in spec_dir.glob("*.yaml"):
             if spec_file.stem == "manifest":
                 continue
@@ -239,12 +182,7 @@ def _load_service_specs(
             domain.service_name = service_name
             domains[domain_key] = domain
 
-        # Load manifest if exists
-        manifest_file = spec_dir / "manifest.yaml"
-        if manifest_file.exists():
-            manifests[service_name] = load_manifest(manifest_file, service_name)
-
-    return domains, manifests
+    return domains
 
 
 def load_specs(repo_root: Path) -> AllSpecs:
@@ -275,9 +213,9 @@ def load_specs(repo_root: Path) -> AllSpecs:
     events_file = shared_spec_dir / "events.yaml"
     events = load_events(events_file)
 
-    # 3. Load service domains and manifests
+    # 3. Load service domains
     services_dir = repo_root / "services"
-    domains, manifests = _load_service_specs(services_dir)
+    domains = _load_service_specs(services_dir)
 
     # 4. Cross-validate model references
     reference_errors = validate_model_references(models, domains, events)
@@ -286,14 +224,7 @@ def load_specs(repo_root: Path) -> AllSpecs:
             "Model reference validation failed:\n" + "\n".join(f"  - {e}" for e in reference_errors)
         )
 
-    # 5. Validate manifest consumes references
-    consume_errors = validate_consume_references(manifests, domains)
-    if consume_errors:
-        raise SpecValidationError(
-            "Consume reference validation failed:\n" + "\n".join(f"  - {e}" for e in consume_errors)
-        )
-
-    return AllSpecs(models=models, events=events, domains=domains, manifests=manifests)
+    return AllSpecs(models=models, events=events, domains=domains)
 
 
 def validate_specs_cli(repo_root: Path) -> tuple[bool, str]:
@@ -309,14 +240,11 @@ def validate_specs_cli(repo_root: Path) -> tuple[bool, str]:
         model_count = len(specs.models.models)
         domain_count = len(specs.domains)
         event_count = len(specs.events.events)
-        manifest_count = len(specs.manifests)
-
         return True, (
             f"Spec validation PASSED.\n"
             f"  Models: {model_count}\n"
             f"  Domains: {domain_count}\n"
-            f"  Events: {event_count}\n"
-            f"  Manifests: {manifest_count}"
+            f"  Events: {event_count}"
         )
     except SpecValidationError as e:
         return False, f"Spec validation FAILED:\n  {e}"
