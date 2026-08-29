@@ -73,14 +73,11 @@ class EventsConfig(BaseModel):
         subscribe: Channel to subscribe to for incoming events.
         publish_on_success: Channel to publish to after successful execution.
         publish_on_error: Channel to publish to if execution fails (optional).
-        message_model: Override the message model (defaults to input for subscribe,
-                       output for publish_on_success).
     """
 
     subscribe: str | None = None
     publish_on_success: str | None = None
     publish_on_error: str | None = None
-    message_model: str | None = None
 
     model_config = {"extra": "forbid"}
 

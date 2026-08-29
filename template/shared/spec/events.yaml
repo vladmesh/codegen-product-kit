@@ -2,9 +2,7 @@ events:
   user_registered:
     message: UserRead
     publish: true
-    subscribe: false
 
   command_received:
     message: CommandReceived
     publish: true
-    subscribe: true

@@ -92,6 +92,8 @@ operations:
 
     events = (shared_gen / "events.py").read_text()
     assert "broker = RedisBroker" in events
+    assert 'async def publish_UserCreated(message: UserCreated)' in events
+    assert '_pub_UserCreated = get_broker().publisher("UserCreated")' in events
 
     # Check service generated files (protocols)
     backend_gen = root / "services" / "backend" / "src" / "generated"

@@ -42,26 +42,24 @@ class TestEventsConfig:
         )
         assert config.publish_on_error == "user.import.failed"
 
-    def test_message_model_override(self) -> None:
-        """message_model overrides default input/output."""
-        config = EventsConfig(
-            subscribe="user.import.requested",
-            message_model="CustomBatchPayload",
-        )
-        assert config.message_model == "CustomBatchPayload"
+    def test_message_model_is_rejected(self) -> None:
+        """Removed message_model configuration is rejected explicitly."""
+        with pytest.raises(ValueError, match="message_model"):
+            EventsConfig(
+                subscribe="user.import.requested",
+                message_model="CustomBatchPayload",
+            )
 
-    def test_all_fields_together(self) -> None:
-        """All EventsConfig fields work together."""
+    def test_supported_fields_together(self) -> None:
+        """All supported EventsConfig fields work together."""
         config = EventsConfig(
             subscribe="user.import.requested",
             publish_on_success="user.import.completed",
             publish_on_error="user.import.failed",
-            message_model="CustomPayload",
         )
         assert config.subscribe == "user.import.requested"
         assert config.publish_on_success == "user.import.completed"
         assert config.publish_on_error == "user.import.failed"
-        assert config.message_model == "CustomPayload"
 
 
 class TestOperationSpecValidation:

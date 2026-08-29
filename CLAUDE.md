@@ -55,7 +55,7 @@ YAML specs are the single source of truth. The pipeline:
 | `schemas` | `shared/spec/models.yaml` | Pydantic models (via datamodel-code-generator) |
 | `protocols` | `services/*/spec/*.yaml` | Protocol classes (interfaces) |
 | `controllers` | `services/*/spec/*.yaml` | Controller stubs (skip if existing) |
-| `events` | `shared/spec/events.yaml` | FastStream pub/sub functions |
+| `events` | `shared/spec/events.yaml` | FastStream publisher functions |
 | `event_adapter` | `services/*/spec/*.yaml` | Event handler adapters |
 | `routers` | `services/*/spec/*.yaml` | FastAPI routers and registry |
 

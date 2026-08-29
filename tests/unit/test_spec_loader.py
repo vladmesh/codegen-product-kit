@@ -162,6 +162,18 @@ events:
         assert len(specs.events.events) == 1
         assert specs.events.events[0].name == "user_created"
 
+    def test_global_event_subscribe_is_rejected(self, temp_repo: Path) -> None:
+        """Removed global event subscribe metadata is rejected explicitly."""
+        (temp_repo / "shared" / "spec" / "models.yaml").write_text(
+            "models:\n  UserEvent:\n    fields:\n      user_id:\n        type: int\n"
+        )
+        (temp_repo / "shared" / "spec" / "events.yaml").write_text(
+            "events:\n  user_created:\n    message: UserEvent\n    publish: true\n    subscribe: true\n"
+        )
+
+        with pytest.raises(SpecValidationError, match="subscribe"):
+            load_specs(temp_repo)
+
 
 class TestValidateSpecsCli:
     """Tests for CLI-friendly validation."""
