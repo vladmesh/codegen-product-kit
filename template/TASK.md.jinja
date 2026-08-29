@@ -51,8 +51,10 @@ make dev-start
 # Run tests
 make tests
 
+{% if 'backend' in modules -%}
 # Generate code from specs
 make generate-from-spec
+{% endif -%}
 
 # Format code
 make format

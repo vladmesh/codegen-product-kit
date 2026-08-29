@@ -256,12 +256,12 @@ class TestStandaloneGeneration:
         assert services["tg_bot"]["depends_on"]["redis"]["condition"] == "service_healthy"
 
     def test_services_yml_has_tg_bot(self, project_standalone: Path):
-        """services.yml should contain tg_bot with a polling Python runtime type."""
+        """services.yml should declare the bot's event-capable runtime type."""
         import yaml
 
         content = yaml.safe_load((project_standalone / "services.yml").read_text())
         services = {service["name"]: service for service in content["services"]}
-        assert services["tg_bot"]["type"] == "python"
+        assert services["tg_bot"]["type"] == "python-faststream"
         assert "notifications_worker" not in services
         assert "frontend" not in services
 
@@ -294,7 +294,7 @@ class TestBackendWithTgBotGeneration:
         content = yaml.safe_load((project_backend_tg_bot / "services.yml").read_text())
         services = {service["name"]: service for service in content["services"]}
         assert services["backend"]["type"] == "python-fastapi"
-        assert services["tg_bot"]["type"] == "python"
+        assert services["tg_bot"]["type"] == "python-faststream"
 
     def test_tg_bot_depends_on_redis(self, project_backend_tg_bot: Path):
         """tg_bot should depend on redis: service_healthy in services.yml."""
@@ -334,13 +334,13 @@ class TestFullStackGeneration:
         assert not errors, f"Found Jinja artifacts: {errors}"
 
     def test_services_yml_types(self, project_fullstack: Path):
-        """Full generation should keep polling bots and FastStream workers distinct."""
+        """Full generation should declare each selected runtime type."""
         import yaml
 
         content = yaml.safe_load((project_fullstack / "services.yml").read_text())
         services = {service["name"]: service for service in content["services"]}
         assert services["backend"]["type"] == "python-fastapi"
-        assert services["tg_bot"]["type"] == "python"
+        assert services["tg_bot"]["type"] == "python-faststream"
         assert services["notifications_worker"]["type"] == "python-faststream"
         assert services["frontend"]["type"] == "node"
 
@@ -629,11 +629,11 @@ class TestComposeServices:
         assert '"${BACKEND_PORT:-8000}:8000"' in compose_text
         assert '"${POSTGRES_HOST_PORT:-5432}:5432"' in compose_text
         assert '"${REDIS_HOST_PORT:-6379}:6379"' in compose_text
-        assert '"${FRONTEND_PORT:-3000}:3000"' in compose_text
+        assert '"${FRONTEND_PORT:-4321}:4321"' in compose_text
         assert compose_local["services"]["backend"]["ports"] == ["${BACKEND_PORT:-8000}:8000"]
         assert compose_local["services"]["db"]["ports"] == ["${POSTGRES_HOST_PORT:-5432}:5432"]
         assert compose_local["services"]["redis"]["ports"] == ["${REDIS_HOST_PORT:-6379}:6379"]
-        assert compose_local["services"]["frontend"]["ports"] == ["${FRONTEND_PORT:-3000}:3000"]
+        assert compose_local["services"]["frontend"]["ports"] == ["${FRONTEND_PORT:-4321}:4321"]
 
     def test_prod_compose_publishes_backend_port(self, project_backend_tg_bot: Path):
         """Prod deploy (base+prod, no local) must publish backend on the host."""
@@ -1320,21 +1320,21 @@ esac
         """ARCHITECTURE.md should mention Redis when event modules selected."""
         arch = (project_backend_tg_bot / "ARCHITECTURE.md").read_text()
         assert "Redis" in arch
-        assert "python" in arch
-        assert "python-faststream" not in arch
+        assert "python-faststream" in arch
 
     def test_contributing_md_conditional_content(self, project_backend: Path):
-        """CONTRIBUTING.md should include broker lifecycle guidance for backend."""
+        """CONTRIBUTING.md should document backend ownership and lifecycle boundaries."""
         contributing = (project_backend / "CONTRIBUTING.md").read_text()
-        assert "Common Pitfalls" in contributing
-        assert "Stale Shared Code" in contributing
-        assert "Missing Broker Connection" in contributing
+        assert "shared/shared/generated/" in contributing
+        assert "Required application runtime settings" in contributing
+        assert "lazy event broker connection" in contributing
+        assert "database dependency owns commit and rollback" in contributing
 
     def test_contributing_md_with_tg_bot(self, project_backend_tg_bot: Path):
-        """CONTRIBUTING.md should include broker pitfall when event modules selected."""
+        """CONTRIBUTING.md should retain backend broker ownership with the bot selected."""
         contributing = (project_backend_tg_bot / "CONTRIBUTING.md").read_text()
-        assert "Common Pitfalls" in contributing
-        assert "Missing Broker Connection" in contributing
+        assert "lazy event broker connection" in contributing
+        assert "do not create or connect a broker inside request handlers" in contributing
 
     def test_standalone_tg_bot_docs_do_not_reference_generated_events(
         self, project_standalone: Path
@@ -1355,8 +1355,8 @@ esac
         assert "from .middleware import install_update_logging" in service_agents
         assert "`REDIS_URL` | Yes" not in service_agents
         assert "Missing Broker Connection" not in contributing
-        assert "spec validation, spec compliance, controller sync" in contributing
-        assert "service dependency checks" in contributing
+        assert "Required application runtime settings" in contributing
+        assert "isolated test fixtures" in contributing
         assert "deptry" in contributing
 
     def test_backend_tg_bot_docs_keep_event_publishing(self, project_backend_tg_bot: Path):
@@ -1370,7 +1370,8 @@ esac
         assert "Бот публикует события напрямую в Redis Streams" in service_agents
         assert "from shared.generated.schemas import CommandReceived" in service_agents
         assert "`REDIS_URL` | Yes" in service_agents
-        assert "--max-absolute B --max-modules A --max-average A" in contributing
+        assert "shared/shared/generated/" in contributing
+        assert "lazy event broker connection" in contributing
         assert "ruff format --check" in root_agents
         assert "spec validation, spec compliance, controller sync" in root_agents
         assert "`make check-deps`" in root_agents

@@ -24,15 +24,13 @@ bootstrap pages, islands, or a full SPA depending on your needs.
    npm run preview
    ```
 
-## Docker compose overlay
+## Docker Compose
 
-The `infra/compose.frontend.yml` file exposes this service under the
-`frontend` profile so you can turn it on/off with:
+The standard base and dev layers define the frontend. Local development adds the local-port layer:
 
 ```bash
-docker compose -f infra/compose.dev.yml -f infra/compose.frontend.yml \
-  --profile frontend up --build
+make dev-start svc=frontend
 ```
 
-Update `package.json` or add Astro configuration files as you flesh out
-this project.
+`FRONTEND_PORT` publishes container port `4321`. Update `package.json` or add Astro configuration
+files as you flesh out this project.

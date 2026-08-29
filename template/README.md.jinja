@@ -30,7 +30,7 @@
 - `REDIS_HOST_PORT` maps Redis to container port `6379`.
 {% endif -%}
 {% if 'frontend' in modules -%}
-- `FRONTEND_PORT` maps the frontend to container port `3000`.
+- `FRONTEND_PORT` maps the frontend to container port `4321`.
 {% endif %}
 
 Set different host ports when running multiple generated projects on one machine.
@@ -113,7 +113,7 @@ This project includes the following modules:
 - **Redis** + **FastStream** (async messaging)
 {% endif -%}
 {% if 'frontend' in modules -%}
-- **Node.js** {{ node_version }}
+- **Node.js** 20
 {% endif -%}
 - **Docker Compose** (containerized development)
 

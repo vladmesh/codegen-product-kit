@@ -6,7 +6,7 @@ This file serves as the entry point for AI Agents exploring the repository. Use 
 
 - **Philosophy & Goals:** `docs/MANIFESTO.md` (Read this first to understand *why*)
 - **System Design:** `docs/ARCHITECTURE.md` (Read this to understand *how*)
-- **Rules & Standards:** `CONTRIBUTING.md` (Strict rules for coding)
+- **Contributor Workflow:** `docs/DEVELOPMENT.md` and `docs/TESTING.md`
 - **Service Registry:** `services.yml` (List of all active services)
 
 ## Bootstrapping New Projects
@@ -48,13 +48,13 @@ Pass these as a comma-separated string to `--data modules=...`:
 After running the command:
 1.  **Read `AGENTS.md` in the new project** (it will be different from this one).
 2.  **Check `services.yml`** to confirm your services are listed.
-3.  **Run `make generate-from-spec`** to regenerate code from specs if needed.
+3.  **Run `make setup`** to install dependencies and generate any selected backend contracts.
 
-## CRITICAL: Environment Variables
+## CRITICAL: Application Environment Variables
 
-**STRICT RULE: NO DEFAULT VALUES FOR ENVIRONMENT VARIABLES**
+**STRICT RULE: NO DEFAULT VALUES FOR REQUIRED APPLICATION SETTINGS**
 
-- **NEVER** use default values in `os.getenv("VAR", "default")` or similar patterns
+- **NEVER** use fallback values for required application runtime settings
 - If a required environment variable is missing, the application **MUST FAIL IMMEDIATELY** with a clear error
 - Use this pattern:
   ```python
@@ -62,17 +62,19 @@ After running the command:
   if not value:
       raise RuntimeError("REQUIRED_VAR is not set; please add it to your environment variables")
   ```
-- **Rationale:** Default values hide configuration errors and cause silent failures in production
-- **Example:** `REDIS_URL`, `API_BASE_URL`, `DATABASE_URL` must all be explicitly configured
+- **Rationale:** Application defaults hide configuration errors and cause silent failures in production
+- **Example:** `REDIS_URL`, `BACKEND_API_URL`, `DATABASE_URL` must all be explicitly configured
 - All required environment variables must be documented in `.env.example`
+- Compose interpolation and isolated test fixtures may use explicit local defaults; those do not
+  authorize defaults in production application settings.
 
 ## Service Modules
 
 Detailed documentation for each service can be found in its respective directory. Only load these if you are working on that specific service.
 
-- **Backend:** `services/backend/AGENTS.md`
-- **Telegram Bot:** `services/tg_bot/AGENTS.md`
-- **Infrastructure:** `infra/README.md` (if available)
+- **Backend template:** `template/services/backend/AGENTS.md`
+- **Telegram Bot template:** `template/services/tg_bot/AGENTS.md.jinja`
+- **Infrastructure contract:** `template/infra/README.md`
 
 ## Operational Commands
 
@@ -102,17 +104,17 @@ When modifying YAML specs or the codegen pipeline, prefer language-neutral abstr
 
 ### Spec-First Architecture
 
-See `ARCHITECTURE.md` for detailed spec format documentation.
+See `docs/ARCHITECTURE.md` for the framework contract.
 
 **Quick Reference:**
-- Domain specs: `services/<svc>/spec/<domain>.yaml` → generates protocols, controllers, event adapters
+- Domain specs: `services/<svc>/spec/<domain>.yaml` → generates protocols, initial controllers,
+  REST routers/registry, and event adapters
 
 ### Shared Module Architecture
 
 1. **Shared generated:** `shared/shared/generated/` — schemas, events
 2. **Service generated:** `services/<svc>/src/generated/` — protocols, event adapters
-3. **CRITICAL:** Mount `../shared:/app/shared:delegated` in dev for live reloads
-4. **Workflow:** Edit specs → `make generate-from-spec` → changes applied
+3. **Workflow:** Edit specs → `make generate-from-spec` → implement user-owned controller/app code
 
 ### FastStream Event Architecture
 

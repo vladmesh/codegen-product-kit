@@ -23,7 +23,8 @@ We do not tolerate technical debt. The pipeline is designed to fail fast and fai
 Uniqueness is a bug.
 - **Batteries Included:** Services are modular units (containers) that plug into the system.
 - **No "Special Snowflakes":** If a service needs a custom build process, it probably shouldn't exist in this repo.
-- **Containerization is Law:** Nothing runs on the host. If it's not in Docker, it doesn't exist.
+- **Runtime containers are the boundary:** Services run in Docker; deterministic developer tooling
+  runs from project-owned uv environments.
 
 ### 5. Language Agnosticism as a Goal
 

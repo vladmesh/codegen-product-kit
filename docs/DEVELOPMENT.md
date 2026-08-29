@@ -1,150 +1,94 @@
-# Framework Development Guide
+# Framework development
 
-This document describes how to develop and contribute to the Service Template Framework itself.
+This guide is for contributors to service-template itself. Generated products have their own
+README, AGENTS, architecture, and infrastructure documents.
 
-> **Note**: This is for framework developers. If you're using the framework to build a product, see the generated project's README.
-
-## Prerequisites
-
-- Docker & Docker Compose
-- Python 3.12+
-- Git
-- uv
-
-## Repository Structure
-
-```
-service-template/
-├── docs/                 # Framework documentation (you are here)
-├── framework/            # Framework source code (generators, validators)
-├── tests/                # Framework tests
-├── template/             # Product template (copied by Copier)
-├── Makefile              # Framework development commands
-└── README.md             # Framework usage documentation
-```
-
-## Development Workflow
-
-### Running Tests
+## Setup and verification
 
 ```bash
-# Run all framework tests
+make setup
+make lint
 make test
-
-# Run specific test file
-make test ARGS="-k test_generators"
-
-# Run copier integration tests
 make test-copier
+make check-sync
 ```
 
-### Linting
+See `docs/TESTING.md` for when the slow Copier suite is required.
 
-```bash
-# Run all linters
-make lint
+## Repository layout
 
-# Auto-fix issues
-make format
-```
+| Path | Purpose |
+|---|---|
+| `framework/spec/` | Typed YAML models and validation |
+| `framework/generators/` | Python/codegen artifact generators |
+| `framework/templates/codegen/` | Jinja templates consumed by generators |
+| `template/` | Copier source tree |
+| `tests/unit/`, `tests/tooling/` | Framework behavior |
+| `tests/copier/` | Generated-project behavior |
 
-### Testing Template Generation
+## Framework mirror
 
-```bash
-# Test copier template generation
-make test-template
-
-# Manual test: generate a project
-uvx copier copy . /tmp/test-project \
-  --data project_name=test-project \
-  --defaults \
-  --vcs-ref=HEAD \
-  --force
-
-# Verify generated project
-cd /tmp/test-project
-make lint
-make test
-```
-
-Copier uses the latest git tag for git sources by default. `--vcs-ref=HEAD` keeps local
-framework smoke tests on the checked-out template state.
-
-## Key Components
-
-### Generators (`framework/generators/`)
-
-Code generators that transform YAML specs into Python code:
-
-| Generator | Input | Output |
-|-----------|-------|--------|
-| `schemas.py` | `shared/spec/models.yaml` | Pydantic models |
-| `routers.py` | `services/*/spec/*.yaml` | FastAPI routers |
-| `protocols.py` | `services/*/spec/*.yaml` | Protocol classes |
-| `clients.py` | `services/*/spec/manifest.yaml` | HTTP clients |
-| `events.py` | `shared/spec/events.yaml` | FastStream pub/sub |
-
-### Templates (`framework/templates/codegen/`)
-
-Jinja2 templates used by generators to produce Python code.
-
-### Spec Loaders (`framework/spec/`)
-
-YAML spec parsers and validators.
-
-## Syncing Framework to Template
-
-The `framework/` code is duplicated in `template/.framework/` for product use. After making changes to `framework/`, sync them:
+Generated projects embed the framework under `template/.framework/framework/`. After changing
+`framework/`, run:
 
 ```bash
 make sync-framework
+make check-sync
 ```
 
-This copies `framework/` contents to `template/.framework/`.
+Do not edit only the embedded copy. `make sync-framework-preview` shows the pending mirror change.
 
-## Language Agnosticism
+## Current generators
 
-When developing generators and templates, keep language-agnostic design in mind. The framework may eventually support multiple target languages from the same YAML specs, but no migration is currently planned.
+| Generator | Input | Output ownership |
+|---|---|---|
+| Schemas | `shared/spec/models.yaml` | Regenerated Pydantic schemas |
+| Protocols | domain specs | Regenerated controller protocols |
+| Controllers | domain specs | Write-once editable stubs |
+| Routers | REST operations | Regenerated FastAPI routers and registry |
+| Events | `shared/spec/events.yaml` | Regenerated publisher helpers |
+| Event adapters | subscribed operations | Regenerated FastStream adapters |
 
-**Practical tips:**
-- Separate type mapping logic from generation logic (avoid hardcoded Python types in generators)
-- Prefer JSON Schema primitives in spec examples and tests
-- Keep Jinja2 templates focused — one template per artifact, easy to port to Tera (Rust Jinja2-like engine)
+OpenAPI and TypeScript exporters are separate framework entry points. The removed manifest client
+generator and service scaffold are not supported extension points.
 
-## Adding a New Generator
+## Adding or changing a generator
 
-1. Create generator in `framework/generators/new_generator.py`
-2. Create Jinja template in `framework/templates/codegen/new_template.py.j2`
-3. Add entry point in `framework/generate.py`
-4. Add tests in `tests/unit/test_generators.py`
-5. Sync to template: `make sync-framework`
-6. Update documentation
+1. Extend the typed spec model only if the input contract changes.
+2. Implement the generator under `framework/generators/` or the relevant exporter package.
+3. Reuse the shared operation context and type renderers.
+4. Put emitted boilerplate in `framework/templates/codegen/`.
+5. Add focused unit/tooling tests and output-level Copier coverage.
+6. Sync the embedded framework mirror.
 
-## Adding a New Module
+Generated files should be atomically written, deterministic, and carry the standard warning unless
+they are intentionally write-once user files.
 
-Modules are pre-built services that ship with generated projects.
+## Changing the Copier template
 
-1. Create service in `template/services/new_module/`
-2. Add entry in `template/services.yml.jinja`
-3. Add Copier question in `copier.yml` (if selectable)
-4. Add conditional `_exclude` entries in `copier.yml` so unselected modules are never copied
-5. Add tests in `tests/copier/`
-6. Update `template/AGENTS.md.jinja` with module documentation
+Treat `template/` as source. Update Jinja conditions, module exclusions, environment contracts, and
+tests together. Do not hand-edit a generated fixture and treat it as the fix.
 
-## Release Process
+For a manual render:
 
-1. Update version in `copier.yml`
-2. Update CHANGELOG
-3. Create git tag: `git tag v0.x.x`
-4. Push tag: `git push --tags`
+```bash
+uvx copier copy . /tmp/service-template-smoke \
+  --data project_name=smoke \
+  --data modules=backend,tg_bot \
+  --defaults --vcs-ref=HEAD --overwrite
+```
 
-## Troubleshooting
+Then run the generated project's `make setup`, `make lint`, `make typecheck`, and `make tests`.
 
-### Copier shows "version None"
-Ensure you have a git tag. Copier uses tags for versioning.
+## Adding a predefined module
 
-### Generated project imports fail
-Check that `template/.framework/` is in sync with `framework/`.
+Add the service under `template/services/`, then update `copier.yml`, `services.yml.jinja`, Compose
+layers, environment contracts, generated documentation, and the Copier matrix. Module names and
+runtime service names may differ (`notifications` selects `notifications_worker`), so test both.
 
-### Tests fail after restructure
-Verify all paths in `copier.yml`, tests, and Makefile are updated.
+There is no supported command to add a previously excluded module to an existing generated project.
+
+## Release
+
+Update the Copier version and `CHANGELOG.md`, run the full validation matrix, then create and push the
+release tag. Copier uses the latest tag for remote sources unless the caller selects `HEAD`.

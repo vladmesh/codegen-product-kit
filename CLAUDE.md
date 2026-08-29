@@ -17,7 +17,6 @@ The `template/.framework/` directory is a mirror of `framework/` — kept in syn
 ```bash
 make setup              # Create .venv, install deps via uv
 make test               # Unit + tooling tests (tests/unit + tests/tooling) with coverage
-make test ARGS="-k test_name"  # Run specific test
 make test-copier        # Copier template tests (requires .venv/bin/copier)
 make test-copier-slow   # Slow copier tests
 make test-all           # All tests combined
@@ -58,6 +57,7 @@ YAML specs are the single source of truth. The pipeline:
 | `controllers` | `services/*/spec/*.yaml` | Controller stubs (skip if existing) |
 | `events` | `shared/spec/events.yaml` | FastStream pub/sub functions |
 | `event_adapter` | `services/*/spec/*.yaml` | Event handler adapters |
+| `routers` | `services/*/spec/*.yaml` | FastAPI routers and registry |
 
 Jinja2 code templates live in `framework/templates/codegen/`.
 
@@ -94,7 +94,8 @@ Post-copy tasks remove unselected module directories.
 
 ## Critical Rules
 
-- **No default env vars**: Never `os.getenv("VAR", "default")`. Fail immediately if missing.
+- **Required application env**: Never give required runtime settings a fallback. Compose and test
+  fixtures may define explicit local defaults.
 - **Lazy broker**: Use `get_broker()`, never module-level `broker = RedisBroker(...)`.
 - **Per-service venvs**: Each service has its own `.venv/`; root `.venv/` is for dev tools only.
 - **After changing framework/**: Always run `make sync-framework` before committing.
@@ -105,10 +106,9 @@ Post-copy tasks remove unselected module directories.
 ```
 tests/
 ├── unit/       # Spec parsing, validation, type system
-├── tooling/    # Generators, linters, scaffolds
-├── copier/     # Template generation (75 tests, 16 classes)
-├── framework/  # Framework-specific generator tests
-└── integration/
+├── tooling/    # Generators and linters
+├── copier/     # Template generation and generated-project checks
+└── framework/  # Extended generator integration tests
 ```
 
 Copier tests require `.venv/bin/copier`. The `copier_available` fixture verifies this.

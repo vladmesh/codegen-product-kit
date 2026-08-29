@@ -43,10 +43,10 @@ spec validation, spec compliance, controller sync, then `make check-deps`.
 `check-deps` runs deptry for each service that has it installed in its service
 venv.
 
-## Environment Variables — строгое правило
+## Required application environment variables
 
-**НИКОГДА** не используйте значения по умолчанию в `os.getenv("VAR", "default")`.
-Если переменная отсутствует — приложение **ДОЛЖНО** упасть немедленно:
+Не задавайте fallback для обязательных runtime-настроек приложения. Если переменная отсутствует,
+приложение должно упасть с понятной ошибкой:
 
 ```python
 value = os.getenv("REQUIRED_VAR")
@@ -54,13 +54,14 @@ if not value:
     raise RuntimeError("REQUIRED_VAR is not set; please add it to your environment variables")
 ```
 
-Все переменные документированы в `.env.example`.
+Все обязательные переменные документируются в `.env.example`. Явные локальные defaults допустимы
+в Compose interpolation и изолированных тестовых fixtures.
 
 ## Read-Only зоны
 
 Не редактируйте вручную:
 {%- if 'backend' in modules %}
-- `shared/generated/` — перегенерируется через `make generate-from-spec`
+- `shared/shared/generated/` — перегенерируется через `make generate-from-spec`
 - `services/*/src/generated/` — перегенерируется по спекам сервиса
 {%- endif %}
 - `.framework/` — внутренности фреймворка
@@ -68,7 +69,7 @@ if not value:
 
 ## Брокер событий — паттерн get_broker()
 
-`shared/generated/events.py` предоставляет lazy-брокер через `get_broker()`.
+`shared/shared/generated/events.py` предоставляет lazy-брокер через `get_broker()`.
 **Не** импортируйте `broker` как атрибут модуля.
 
 **Подключение (FastAPI lifespan):**
