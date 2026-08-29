@@ -3,76 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-import importlib
 from pathlib import Path
 
 import pytest
 
-from framework.lib import service_scaffold
-
 
 @pytest.fixture
-def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator:
+def fake_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path, None, None]:
     """Provide an isolated repo root that tooling modules will use."""
 
     root = tmp_path / "repo"
     monkeypatch.setenv("SERVICE_TEMPLATE_ROOT", str(root))
+    (root / "services").mkdir(parents=True)
 
-    scaffold_mod = importlib.reload(service_scaffold)
-
-    infra_dir = root / "infra"
-    infra_dir.mkdir(parents=True, exist_ok=True)
-
-    # Mock the templates directory structure
-    # 1. Scaffold templates
-    scaffold_templates_root = root / "framework" / "templates" / "scaffold" / "services"
-    scaffold_templates_root.mkdir(parents=True, exist_ok=True)
-
-    # Create minimal specs for services that need them
-    (root / "services").mkdir(exist_ok=True)
-
-    yield root, scaffold_mod
+    yield root
 
     monkeypatch.delenv("SERVICE_TEMPLATE_ROOT", raising=False)
-    importlib.reload(service_scaffold)
-
-
-def create_python_template(
-    root: Path,
-    include_docs: bool = False,
-    service_type: str = "python-fastapi",
-) -> Path:
-    """Create a minimal python template under templates/services/{service_type}."""
-
-    template_dir = root / "framework" / "templates" / "scaffold" / "services" / service_type
-    template_dir.mkdir(parents=True, exist_ok=True)
-    (template_dir / "src").mkdir(parents=True, exist_ok=True)
-    (template_dir / "tests").mkdir(parents=True, exist_ok=True)
-    (template_dir / "Dockerfile").write_text(
-        'FROM python:3.11-slim\nLABEL service="__SERVICE_NAME__"\n',
-        encoding="utf-8",
-    )
-    if include_docs:
-        (template_dir / "README.md").write_text("Template README", encoding="utf-8")
-        (template_dir / "AGENTS.md").write_text("Template AGENTS", encoding="utf-8")
-    return template_dir
-
-
-def create_node_template(root: Path, include_docs: bool = False) -> Path:
-    """Create a minimal node template under templates/services/node."""
-
-    template_dir = root / "framework" / "templates" / "scaffold" / "services" / "node"
-    template_dir.mkdir(parents=True, exist_ok=True)
-    (template_dir / "src").mkdir(parents=True, exist_ok=True)
-    (template_dir / "Dockerfile").write_text(
-        'FROM node:20-alpine\nLABEL service="__SERVICE_NAME__"\n',
-        encoding="utf-8",
-    )
-    (template_dir / "package.json").write_text(
-        '{"name": "__SERVICE_NAME__"}',
-        encoding="utf-8",
-    )
-    if include_docs:
-        (template_dir / "README.md").write_text("Template README", encoding="utf-8")
-        (template_dir / "AGENTS.md").write_text("Template AGENTS", encoding="utf-8")
-    return template_dir

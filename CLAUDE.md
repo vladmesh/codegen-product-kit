@@ -82,8 +82,6 @@ Never edit these directories manually — they are overwritten by codegen:
 | `node` | Node.js | Frontend |
 | `default` | Generic | Container placeholder |
 
-Scaffold templates for each type: `framework/templates/scaffold/services/<type>/`.
-
 ### Copier Template System
 
 `copier.yml` defines template variables. Key variable: `modules` (comma-separated: `backend`, `tg_bot`, `notifications`, `frontend`). Common configurations:

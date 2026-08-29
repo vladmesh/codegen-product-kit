@@ -57,7 +57,6 @@ uvx copier update --vcs-ref=HEAD
 
 After generating a project with `copier copy`:
 
-- **Add Service:** Edit `services.yml`, then create `services/<name>/` from scaffold template in `.framework/framework/templates/scaffold/services/<type>/`
 - **Update API:** Edit `shared/spec/*.yaml` → `make generate-from-spec`
 - **Run Tests:** `make tests`
 - **Lint:** `make lint`

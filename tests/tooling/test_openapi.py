@@ -7,7 +7,7 @@ from framework.openapi import generator
 
 def test_generate_openapi(fake_repo) -> None:
     """Test OpenAPI generation from specs."""
-    root, _ = fake_repo
+    root = fake_repo
 
     # Create specs
     spec_dir = root / "shared" / "spec"
@@ -97,7 +97,7 @@ def _generate(root):
 
 def test_openapi_list_response_is_array(fake_repo) -> None:
     """A list[...] output must produce an array schema, not a single $ref."""
-    root, _ = fake_repo
+    root = fake_repo
     _write_models(root)
 
     service_spec_dir = root / "services" / "backend" / "spec"
@@ -132,7 +132,7 @@ operations:
 
 def test_openapi_uuid_path_param(fake_repo) -> None:
     """A uuid path param must map to a primitive schema, not a dangling $ref."""
-    root, _ = fake_repo
+    root = fake_repo
     _write_models(root)
 
     service_spec_dir = root / "services" / "backend" / "spec"
@@ -165,7 +165,7 @@ operations:
 
 def test_openapi_required_excludes_optional_and_defaulted(fake_repo) -> None:
     """required must drop field-level optional, variant-level optional, and defaulted fields."""
-    root, _ = fake_repo
+    root = fake_repo
 
     spec_dir = root / "shared" / "spec"
     spec_dir.mkdir(parents=True)

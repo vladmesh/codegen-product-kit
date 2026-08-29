@@ -5,7 +5,7 @@ from framework.frontend import generator
 
 def test_generate_typescript(fake_repo) -> None:
     """Test TypeScript generation from specs."""
-    root, _ = fake_repo
+    root = fake_repo
 
     # Create specs
     spec_dir = root / "shared" / "spec"

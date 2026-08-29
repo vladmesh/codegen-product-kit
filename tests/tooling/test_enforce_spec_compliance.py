@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import ModuleType
-from typing import TypeAlias
-
 import pytest
 
-FakeRepo: TypeAlias = tuple[Path, ModuleType]
 
-
-def test_is_violation_base_model(fake_repo: FakeRepo) -> None:
+def test_is_violation_base_model(fake_repo) -> None:
     """Test is_violation detects BaseModel inheritance."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import ast
 
@@ -39,9 +33,9 @@ def test_is_violation_base_model(fake_repo: FakeRepo) -> None:
     assert violations_found
 
 
-def test_is_violation_api_router(fake_repo: FakeRepo) -> None:
+def test_is_violation_api_router(fake_repo) -> None:
     """Test is_violation detects APIRouter instantiation."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import ast
 
@@ -66,9 +60,9 @@ def test_is_violation_api_router(fake_repo: FakeRepo) -> None:
     assert violations_found
 
 
-def test_check_file_no_violations(fake_repo: FakeRepo) -> None:
+def test_check_file_no_violations(fake_repo) -> None:
     """Test check_file with no violations."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import framework.enforce_spec_compliance as enforce_mod
 
@@ -81,9 +75,9 @@ def test_check_file_no_violations(fake_repo: FakeRepo) -> None:
     assert len(violations) == 0
 
 
-def test_check_file_with_violation(fake_repo: FakeRepo) -> None:
+def test_check_file_with_violation(fake_repo) -> None:
     """Test check_file detects violations."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import framework.enforce_spec_compliance as enforce_mod
 
@@ -103,9 +97,9 @@ def test_check_file_with_violation(fake_repo: FakeRepo) -> None:
     assert any("BaseModel" in msg or "Pydantic" in msg for msg in violation_messages)
 
 
-def test_check_file_with_noqa(fake_repo: FakeRepo) -> None:
+def test_check_file_with_noqa(fake_repo) -> None:
     """Test check_file ignores violations with noqa comment."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import framework.enforce_spec_compliance as enforce_mod
 
@@ -122,9 +116,9 @@ def test_check_file_with_noqa(fake_repo: FakeRepo) -> None:
     assert len(violations) == 0
 
 
-def test_check_file_invalid_syntax(fake_repo: FakeRepo) -> None:
+def test_check_file_invalid_syntax(fake_repo) -> None:
     """Test check_file handles invalid syntax gracefully."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     import framework.enforce_spec_compliance as enforce_mod
 
@@ -139,10 +133,10 @@ def test_check_file_invalid_syntax(fake_repo: FakeRepo) -> None:
 
 
 def test_enforce_spec_compliance_main_no_violations(
-    fake_repo: FakeRepo, monkeypatch: pytest.MonkeyPatch
+    fake_repo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Test main function with no violations."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     # Create services directory with clean files
     service_dir = root / "services" / "test_service" / "src"
@@ -176,10 +170,10 @@ def test_enforce_spec_compliance_main_no_violations(
 
 
 def test_enforce_spec_compliance_main_with_violations(
-    fake_repo: FakeRepo, monkeypatch: pytest.MonkeyPatch
+    fake_repo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Test main function with violations."""
-    root, _scaffold = fake_repo
+    root = fake_repo
 
     # Create services directory with violation
     service_dir = root / "services" / "test_service" / "src"

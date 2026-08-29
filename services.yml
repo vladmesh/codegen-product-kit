@@ -20,11 +20,6 @@ services:
     type: node
     description: >
       Static frontend placeholder served separately via infra/compose.frontend.yml.
-  - name: integration
-    type: default
-    description: >
-      Shared integration tests executed via infra/compose.tests.integration.yml.
-    scaffold: false
   - name: notifications_worker
     type: python-faststream
     description: >

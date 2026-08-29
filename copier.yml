@@ -26,9 +26,6 @@ _exclude:
   - "**/*.egg-info"
   - .coverage
   - "**/.coverage"
-  # Always exclude test_service (it's for template development only)
-  - services/test_service
-  - services/test_service/**
   # Exclude modules that were not selected before Copier starts copying files.
   - "{% if 'tg_bot' not in modules %}services/tg_bot{% endif %}"
   - "{% if 'tg_bot' not in modules %}services/tg_bot/**{% endif %}"
