@@ -1,7 +1,5 @@
 #!/bin/bash
-# Sync framework/ to template/.framework/framework/
-# This ensures the product template has the latest framework code
-# Structure: .framework/framework/ allows PYTHONPATH=.framework with "import framework"
+# Sync framework/ to template/.framework/framework/.
 
 set -e
 
@@ -10,7 +8,6 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_DIR="$ROOT_DIR/framework"
 TARGET_DIR="$ROOT_DIR/template/.framework/framework"
 
-# Check for dry-run flag
 DRY_RUN=""
 if [ "$1" = "--dry-run" ] || [ "$1" = "-n" ]; then
     DRY_RUN="--dry-run"
@@ -20,12 +17,10 @@ fi
 
 echo "Syncing framework/ to template/.framework/framework/..."
 
-# Create target directory if it doesn't exist (unless dry-run)
 if [ -z "$DRY_RUN" ]; then
     mkdir -p "$TARGET_DIR"
 fi
 
-# Use rsync to sync files (delete removes files not in source)
 rsync -av --delete \
     --exclude '__pycache__/' \
     --exclude '*.pyc' \

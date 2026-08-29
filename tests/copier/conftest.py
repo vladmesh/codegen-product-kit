@@ -28,15 +28,7 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def template_source() -> Path:
-    """The template repository copier reads: this checkout, or a committed snapshot of it.
-
-    Copier records ``git describe`` of the source in ``.copier-answers.yml`` and checks that ref
-    out again on ``copier update``. On a dirty checkout it describes a throwaway commit it made in
-    its own temporary clone, so the recorded ref exists nowhere and ``update`` fails. The tests
-    still have to see uncommitted edits — that is what a worker is validating — so a dirty checkout
-    is snapshotted once per session into a temporary clone with the working tree committed on top.
-    A clean checkout is used as is.
-    """
+    """Use a session snapshot for dirty checkouts so Copier update has its source ref."""
     global _TEMPLATE_SOURCE
     if _TEMPLATE_SOURCE is not None:
         return _TEMPLATE_SOURCE

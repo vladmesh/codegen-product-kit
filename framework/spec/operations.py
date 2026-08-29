@@ -1,8 +1,4 @@
-"""Operation specifications for unified transport abstraction.
-
-This module defines the unified OperationSpec model that abstracts
-over different transport types (REST, Events, gRPC in the future).
-"""
+"""Typed operation specifications for REST and event transports."""
 
 from __future__ import annotations
 

@@ -31,8 +31,7 @@ class SchemasGenerator(BaseGenerator):
         # Convert specs to JSON Schema
         json_schema = self.specs.models.to_json_schema()
 
-        # Let datamodel-codegen write to a scratch file so cleanup happens in
-        # memory and the real output path only ever receives one atomic write.
+        # Write through a scratch file so the output is atomically replaced.
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
             dir=self.output_file.parent, prefix=f".{self.output_file.name}.", suffix=".tmp"

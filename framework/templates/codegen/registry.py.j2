@@ -22,13 +22,11 @@ from .routers import {{ domain.module_name }}
 
 {% for domain in domains %}
 def get_{{ domain.name }}_controller() -> {{ domain.protocol_name }}:
-    """Create the {{ domain.name }} controller."""
     return {{ domain.controller_class_name }}()
 
 
 {% endfor %}
 def create_api_router() -> APIRouter:
-    """Create the generated domain API router."""
     router = APIRouter()
 {% for domain in domains %}
     router.include_router(

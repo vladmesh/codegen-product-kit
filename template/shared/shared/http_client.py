@@ -14,21 +14,7 @@ LOGGER = structlog.stdlib.get_logger()
 
 
 class ServiceClient:
-    """Async HTTP client with retry for inter-service communication.
-
-    Usage::
-
-        class BackendClient(ServiceClient):
-            def __init__(self):
-                super().__init__(base_url_env="BACKEND_API_URL")
-
-            async def create_user(self, payload: UserCreate) -> UserRead:
-                resp = await self._request("post", "/users", json=payload.model_dump(mode="json"))
-                return UserRead.model_validate(resp.json())
-
-        async with BackendClient() as client:
-            user = await client.create_user(payload)
-    """
+    """Async HTTP client with retry for inter-service communication."""
 
     def __init__(
         self,

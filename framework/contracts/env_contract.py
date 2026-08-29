@@ -1,14 +1,8 @@
-"""Versioned schema and deterministic merge for environment contract fragments.
-
-The contract is intentionally separate from the live deploy resolver until the
-typed deploy migration consumes it.  This keeps schema validation available to
-template and CI callers without changing current deploy behaviour.
-"""
+"""Typed environment-contract fragments and deterministic merging."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -135,12 +129,6 @@ class CanonicalEnvContract(BaseModel):
             separators=(",", ":"),
             sort_keys=True,
         ).encode()
-
-
-def export_env_contract_json_schema(path: Path) -> None:
-    """Write the committed JSON Schema from the Pydantic source of truth."""
-    schema = EnvContractFragment.model_json_schema()
-    path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
 
 
 def validate_env_contract_fragment(fragment: object) -> EnvContractFragment:

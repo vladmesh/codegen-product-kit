@@ -1,6 +1,5 @@
 #!/bin/bash
-# Check if framework/ and template/.framework/framework/ are in sync
-# Used in CI to ensure sync-framework was run after framework changes
+# Check framework mirror synchronization.
 
 set -e
 
@@ -11,7 +10,6 @@ TARGET_DIR="$ROOT_DIR/template/.framework/framework"
 
 echo "Checking framework sync status..."
 
-# Compare directories using diff (excluding __pycache__)
 DIFF_OUTPUT=$(diff -r \
     --exclude="__pycache__" \
     --exclude="*.pyc" \

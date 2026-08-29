@@ -28,7 +28,6 @@ class TestEventAdapterGenerator:
 
     def test_generates_event_adapter_for_subscribe_operations(self, temp_repo: Path) -> None:
         """Generator creates event_adapter.py for services with subscriptions."""
-        # Setup: models.yaml
         models_yaml = """
 models:
   ImportBatch:
@@ -42,7 +41,6 @@ models:
 """
         (temp_repo / "shared" / "spec" / "models.yaml").write_text(models_yaml)
 
-        # Setup: domain spec with events
         domain_yaml = """
 domain: imports
 config:
@@ -59,12 +57,10 @@ operations:
 """
         (temp_repo / "services" / "worker" / "spec" / "imports.yaml").write_text(domain_yaml)
 
-        # Run generator
         specs = load_specs(temp_repo)
         generator = EventAdapterGenerator(specs, temp_repo)
         generated = generator.generate()
 
-        # Verify
         assert len(generated) == 1
         output_file = generated[0]
         assert output_file.exists()

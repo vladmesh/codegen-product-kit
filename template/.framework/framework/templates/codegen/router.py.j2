@@ -48,7 +48,6 @@ def create_router(
     get_broker: Callable[[], RedisBroker],
 {% endif %}
 ) -> APIRouter:
-    """Create the {{ name }} API router."""
     router = APIRouter(
         prefix="{{ router_prefix }}",
         tags={{ router_tags | list }},

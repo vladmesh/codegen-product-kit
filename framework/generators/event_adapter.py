@@ -1,9 +1,4 @@
-"""Event adapter generator for unified handlers.
-
-Generates event_adapter.py that uses existing ControllerProtocol
-instead of creating a separate EventsHandlerProtocol.
-This is part of the unified handlers architecture.
-"""
+"""Generate event adapters from controller protocols."""
 
 from pathlib import Path
 
@@ -12,13 +7,7 @@ from framework.generators.context import OperationContextBuilder
 
 
 class EventAdapterGenerator(BaseGenerator):
-    """Generate event adapters using unified controller protocols.
-
-    This generator:
-    - Uses the same ControllerProtocol as REST handlers
-    - Includes session management in generated handlers
-    - Supports publish_on_success and publish_on_error
-    """
+    """Generate event adapters using controller protocols."""
 
     def __init__(self, *args, **kwargs) -> None:
         """Initialize generator."""

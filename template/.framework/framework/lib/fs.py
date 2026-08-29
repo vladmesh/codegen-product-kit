@@ -21,12 +21,7 @@ def parse_python(path: Path) -> ast.Module | None:
 
 
 def atomic_write_text(path: Path, content: str) -> None:
-    """Write text to path atomically via a temp file + os.replace.
-
-    Avoids leaving a truncated file behind if the process is interrupted
-    mid-write, since generated files live in read-only zones that callers
-    trust to be complete or unchanged.
-    """
+    """Atomically replace *path* so generated files stay complete."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:

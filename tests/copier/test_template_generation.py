@@ -699,14 +699,7 @@ class TestComposeServices:
         )
 
     def test_prod_compose_no_env_prod_file(self, project_backend: Path):
-        """compose.prod.yml must not reference .env.prod.
-
-        The orchestrator assembles all env vars into a single DOTENV_B64 secret
-        decoded into .env at deploy time. .env.prod is always empty — it only
-        exists because compose.prod.yml references it and deploy.yml touches it
-        to prevent 'file not found'. This is a fragile no-op that misleads
-        developers and agents into thinking prod overrides belong there.
-        """
+        """compose.prod.yml must not reference .env.prod."""
         prod_compose = (project_backend / "infra" / "compose.prod.yml").read_text()
         assert ".env.prod" not in prod_compose, (
             "compose.prod.yml still references .env.prod — "
@@ -714,11 +707,7 @@ class TestComposeServices:
         )
 
     def test_no_env_prod_file_in_project(self, project_backend: Path):
-        """Generated project must not contain .env.prod file.
-
-        .env.prod was always an empty placeholder. With compose.prod.yml no longer
-        referencing it, the file itself should not be generated.
-        """
+        """Generated project must not contain .env.prod."""
         assert not (project_backend / "infra" / ".env.prod").exists(), (
             "infra/.env.prod should not exist — all prod env comes from .env"
         )
@@ -1486,12 +1475,7 @@ class TestWorkflowGeneration:
         )
 
     def test_deploy_no_touch_env_prod(self, project_backend: Path):
-        """deploy.yml must not touch .env.prod.
-
-        .env.prod was a workaround for compose.prod.yml referencing a second
-        env file. With that reference removed, the touch is dead code that
-        can mask failures if reintroduced.
-        """
+        """deploy.yml must not touch .env.prod."""
         deploy_yml = (project_backend / ".github" / "workflows" / "deploy.yml").read_text()
         assert ".env.prod" not in deploy_yml, (
             "deploy.yml still references .env.prod — remove the touch command"

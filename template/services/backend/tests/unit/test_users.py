@@ -125,12 +125,6 @@ async def test_update_user_requires_payload(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_db_isolation_after_all_tests(client: AsyncClient) -> None:
-    """Verify that previous tests' data was rolled back.
-
-    This test MUST be last in the file. Every test above creates users,
-    but the transactional fixture should roll them all back.
-    If this fails, test isolation is broken.
-    """
     response = await client.get("/users")
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == [], "Data leaked from previous tests — isolation is broken"
+    assert response.json() == []

@@ -13,7 +13,6 @@ _broker: RedisBroker | None = None
 
 
 def get_broker() -> RedisBroker:
-    """Get or create the Redis broker (lazy initialization)."""
     global _broker
     if _broker is None:
         redis_url = os.getenv("REDIS_URL")
@@ -27,7 +26,6 @@ _pub_{{ pub.name }}: Any = None
 
 
 async def publish_{{ pub.name }}(message: {{ pub.message_model }}) -> Any:
-    """Publish {{ pub.message_model }} to channel '{{ pub.name }}'."""
     global _pub_{{ pub.name }}
     if _pub_{{ pub.name }} is None:
         _pub_{{ pub.name }} = get_broker().publisher("{{ pub.name }}")

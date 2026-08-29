@@ -17,13 +17,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 class TzAwareDateTime(TypeDecorator):
-    """DateTime column that always yields timezone-aware values on read.
-
-    Postgres with ``timezone=True`` already returns aware datetimes, so this is a
-    no-op in production. SQLite (used in tests) drops tzinfo on round-trip; this
-    re-attaches UTC so loaded values stay aware and satisfy the AwareDatetime
-    schemas, without mutating ORM instances in request handlers.
-    """
+    """Restore UTC after SQLite drops tzinfo on round-trip."""
 
     impl = DateTime
     cache_ok = True

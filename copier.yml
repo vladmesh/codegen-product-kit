@@ -3,7 +3,6 @@ _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _subdirectory: template
 
-# Files to exclude from template (template development files)
 _exclude:
   - .git
   - .git/**
@@ -26,7 +25,6 @@ _exclude:
   - "**/*.egg-info"
   - .coverage
   - "**/.coverage"
-  # Exclude modules that were not selected before Copier starts copying files.
   - "{% if 'tg_bot' not in modules %}services/tg_bot{% endif %}"
   - "{% if 'tg_bot' not in modules %}services/tg_bot/**{% endif %}"
   - "{% if 'notifications' not in modules %}services/notifications_worker{% endif %}"
@@ -43,7 +41,6 @@ _exclude:
   - "{% if 'backend' not in modules %}services/*/spec{% endif %}"
   - "{% if 'backend' not in modules %}services/*/spec/**{% endif %}"
 
-# Files to skip if they already exist (preserve user modifications on update)
 _skip_if_exists:
   - .env
   - .env.example
@@ -51,10 +48,6 @@ _skip_if_exists:
   - shared/spec/events.yaml
   - "services/*/src/app/**"
   - "services/*/src/controllers/**"
-
-# ============================================================================
-# Project Metadata
-# ============================================================================
 
 project_name:
   type: str
@@ -86,10 +79,6 @@ author_email:
   help: "Author email"
   default: "dev@example.com"
 
-# ============================================================================
-# Module Selection
-# ============================================================================
-
 modules:
   type: str
   help: |
@@ -100,15 +89,10 @@ modules:
   default: "backend"
   validator: "{% if not modules or modules.strip() == '' %}At least one module must be selected{% endif %}"
 
-# Computed list for easier iteration
 modules_list:
   type: str
   default: "{{ modules.split(',') | map('trim') | list }}"
   when: false
-
-# ============================================================================
-# Technical Options
-# ============================================================================
 
 python_version:
   type: str
