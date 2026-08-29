@@ -49,6 +49,9 @@ Do not edit only the embedded copy. `make sync-framework-preview` shows the pend
 | Events | `shared/spec/events.yaml` | Regenerated publisher helpers |
 | Event adapters | subscribed operations | Regenerated FastStream adapters |
 
+`datamodel-code-generator` is a required framework dependency. Schema generation is always the
+first pipeline stage, so a missing dependency aborts generation before any artifact is written.
+
 OpenAPI and TypeScript exporters are separate framework entry points. The removed manifest client
 generator and service scaffold are not supported extension points.
 

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Removed `subscribe` metadata and operation `events.message_model` are rejected.
 - **Breaking:** Removed the unused service-manifest subsystem. The generator now
   ignores legacy `services/*/spec/manifest.yaml` files.
+- **Breaking:** `datamodel-code-generator` is required. Schema generation now fails before any
+  later artifacts are generated when that dependency is unavailable.
 
 ### Fixed
 - Generated architecture documentation no longer tells operators to create

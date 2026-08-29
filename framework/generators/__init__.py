@@ -6,11 +6,7 @@ from framework.generators.controllers import ControllersGenerator
 from framework.generators.event_adapter import EventAdapterGenerator
 from framework.generators.events import EventsGenerator
 from framework.generators.protocols import ProtocolsGenerator
-
-try:
-    from framework.generators.schemas import SchemasGenerator
-except ImportError:
-    SchemasGenerator = None  # type: ignore[assignment, misc]
+from framework.generators.schemas import SchemasGenerator
 
 __all__ = [
     "BaseGenerator",
