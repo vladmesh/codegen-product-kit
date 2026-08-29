@@ -271,6 +271,5 @@ class TestFoldTypeSpec:
     def test_unknown_spec_raises(self) -> None:
         """An object outside the TypeSpec union raises instead of silently passing."""
         # Every converter funnels through fold_type_spec, so the public entrypoint
-        # exercises the same raise path. TypeScript used to swallow this as "unknown".
         with pytest.raises(ValueError, match="Unknown type spec"):
             type_spec_to_typescript(object())

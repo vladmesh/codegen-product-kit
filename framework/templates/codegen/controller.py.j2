@@ -19,9 +19,6 @@ from shared.generated.schemas import (
 {% endif %}
 
 class {{ controller_class_name }}({{ protocol_name }}):
-    """
-    Implementation of {{ protocol_name }}.
-    """
 {% for handler in handlers %}
 
     async def {{ handler.name }}(
@@ -34,6 +31,5 @@ class {{ controller_class_name }}({{ protocol_name }}):
         payload: {{ handler.input_model }},
 {% endif %}
     ) -> {{ handler.computed_return_type }}:
-        """ """
         raise NotImplementedError("Method {{ handler.name }} not implemented")
 {% endfor %}

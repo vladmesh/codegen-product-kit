@@ -268,7 +268,7 @@ def parse_type_spec(data: dict[str, Any] | str) -> TypeSpec:
         if data in ("int", "string", "bool", "float", "datetime", "uuid"):
             return PrimitiveType(type=data)  # type: ignore[arg-type]
 
-        # Support list[type] shorthand for backward compatibility
+        # Parse list shorthand.
         if data.startswith("list[") and data.endswith("]"):
             inner = data[5:-1]
             return ListType(type="list", of=parse_type_spec(inner))

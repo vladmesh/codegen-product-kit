@@ -66,12 +66,6 @@ class Settings(BaseSettings):
             return self.async_database_url_override
         return self._build_postgres_url(self.sqlalchemy_async_driver)
 
-    @property
-    def database_url(self) -> str:
-        """Backward compatible accessor for synchronous SQLAlchemy URL."""
-
-        return self.sync_database_url
-
     def _build_postgres_url(self, driver: str) -> str:
         """Create a SQLAlchemy URL for the configured Postgres instance."""
 
