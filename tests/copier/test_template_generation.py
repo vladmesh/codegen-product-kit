@@ -49,15 +49,16 @@ def test_root_infra_readme_points_to_template_contract() -> None:
     assert "worker-mode\ncontract" in root_readme
 
 
-def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
-    """Template CI should validate compose and typecheck the exact candidate."""
+def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
+    """Template CI should typecheck one backend project from the exact revision."""
     workflow = Path(".github/workflows/test-template.yml").read_text()
 
     assert "fetch-depth: 0" in workflow
     assert "uses: astral-sh/setup-uv@v7" in workflow
     assert 'version: "0.11.29"' in workflow
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
-    assert "if: matrix.modules == 'backend'" in workflow
+    assert "--data modules=backend" in workflow
+    assert "matrix:" not in workflow
     assert "make setup && make typecheck" in workflow
     assert "Smoke generated pre-commit hook" in workflow
     assert "git init" in workflow
@@ -65,10 +66,6 @@ def test_template_ci_validates_compose_and_typechecks_candidate() -> None:
     assert '"$$svc/.venv/bin/mypy" "$$svc"' in makefile
     assert 'targets="$$svc/src"' not in makefile
     assert "generated/" not in Path("template/mypy.ini.jinja").read_text()
-    assert ("docker compose --env-file .env -f infra/compose.base.yml config") in workflow
-    assert (
-        "docker compose --env-file .env -f infra/compose.base.yml -f infra/compose.dev.yml config"
-    ) in workflow
 
 
 class TestBackendOnlyGeneration:
