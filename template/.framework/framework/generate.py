@@ -39,7 +39,6 @@ def generate_all(repo_root: Path | None = None) -> None:
     print(f"  Models: {len(specs.models.models)}")
     print(f"  Domains: {len(specs.domains)}")
     print(f"  Events: {len(specs.events.events)}")
-    print(f"  Manifests: {len(specs.manifests)}")
 
     # Run generators in order
     generators = []

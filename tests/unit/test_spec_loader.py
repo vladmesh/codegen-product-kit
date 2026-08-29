@@ -77,7 +77,17 @@ operations:
         assert specs.models.models == {}
         assert specs.events.events == []
         assert specs.domains == {}
-        assert specs.manifests == {}
+
+    def test_legacy_manifest_is_ignored(self, temp_repo: Path) -> None:
+        """Existing manifest.yaml files do not affect domain spec loading."""
+        (temp_repo / "shared" / "spec" / "models.yaml").write_text("models: {}\n")
+        (temp_repo / "services" / "backend" / "spec" / "manifest.yaml").write_text(
+            "this is not valid: [yaml"
+        )
+
+        specs = load_specs(temp_repo)
+
+        assert specs.domains == {}
 
     def test_invalid_yaml_syntax(self, temp_repo: Path) -> None:
         """Invalid YAML syntax should fail."""

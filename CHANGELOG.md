@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** Removed the unused service-manifest subsystem. The generator now
+  ignores legacy `services/*/spec/manifest.yaml` files.
+
 ### Fixed
 - Generated architecture documentation no longer tells operators to create
   `APP_SECRET_KEY` as a GitHub repository secret. The deployment environment
