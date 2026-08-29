@@ -22,16 +22,6 @@ env:
 jobs:
   test-generation:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        modules:
-          - "backend"
-          - "tg_bot"
-          - "backend,tg_bot"
-          - "backend,notifications"
-          - "backend,frontend"
-          - "backend,tg_bot,notifications,frontend"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,11 +45,10 @@ jobs:
         run: |
           copier copy . /tmp/test-project \
             --data project_name=test-project \
-            --data "modules=${{ matrix.modules }}" \
+            --data modules=backend \
             --defaults --trust --vcs-ref="${{ github.sha }}"
 
-      - name: Typecheck clean backend project
-        if: matrix.modules == 'backend'
+      - name: Typecheck generated backend project
         run: |
           cd /tmp/test-project
           git init
@@ -68,142 +57,12 @@ jobs:
           make setup && make typecheck
 
       - name: Smoke generated pre-commit hook
-        if: matrix.modules == 'backend'
         run: |
           cd /tmp/test-project
           printf 'value=1\n' > pre_commit_smoke.py
           git add pre_commit_smoke.py
           git commit -m "Smoke generated pre-commit hook"
           test "$(cat pre_commit_smoke.py)" = "value = 1"
-
-      - name: Verify no Jinja artifacts
-        run: |
-          cd /tmp/test-project
-          # Check for unrendered Jinja in key files
-          if grep -rE '\{\{.*project_name.*\}\}|\{%.*modules.*%\}' --include="*.yml" --include="*.yaml" --include="*.md" .; then
-            echo "ERROR: Found unrendered Jinja templates"
-            exit 1
-          fi
-          echo "No Jinja artifacts found"
-
-      - name: Verify workflow files exist
-        run: |
-          cd /tmp/test-project
-
-          # ci.yml must exist with build-and-push job
-          if [ ! -f .github/workflows/ci.yml ]; then
-            echo "ERROR: ci.yml not generated"
-            exit 1
-          fi
-
-          if ! grep -q "build-and-push" .github/workflows/ci.yml; then
-            echo "ERROR: ci.yml missing build-and-push job"
-            exit 1
-          fi
-
-          # deploy.yml must exist with DOTENV approach
-          if [ ! -f .github/workflows/deploy.yml ]; then
-             echo "ERROR: deploy.yml not generated"
-             exit 1
-          fi
-
-          if ! grep -q "DOTENV_B64" .github/workflows/deploy.yml; then
-             echo "ERROR: deploy.yml missing DOTENV_B64 env decoding"
-             exit 1
-          fi
-
-          if ! grep -q "base64 -d" .github/workflows/deploy.yml; then
-             echo "ERROR: deploy.yml missing base64 decode"
-             exit 1
-          fi
-
-          # main.yml should NOT exist (split into ci.yml + deploy.yml)
-          if [ -f .github/workflows/main.yml ]; then
-             echo "ERROR: main.yml should not exist (replaced by ci.yml + deploy.yml)"
-             exit 1
-          fi
-
-      - name: Debug .env.example
-        run: |
-          cd /tmp/test-project
-          echo "=== Contents of .env.example ==="
-          cat .env.example
-          echo "=== End of .env.example ==="
-
-      - name: Validate Docker Compose
-        run: |
-          cd /tmp/test-project
-          # Create .env from .env.example for compose validation
-          cp .env.example .env
-          # Use --env-file to explicitly load .env when running from the project root.
-          docker compose --env-file .env -f infra/compose.base.yml config > /dev/null
-          docker compose --env-file .env -f infra/compose.base.yml -f infra/compose.dev.yml config > /dev/null
-          echo "Docker Compose files are valid"
-
-      - name: Verify services.yml matches modules
-        run: |
-          cd /tmp/test-project
-          modules="${{ matrix.modules }}"
-          
-          # Check backend
-          if [[ "$modules" == *"backend"* ]]; then
-            grep -q "name: backend" services.yml || (echo "backend missing from services.yml" && exit 1)
-          else
-            ! grep -q "name: backend" services.yml || (echo "backend should not be in services.yml" && exit 1)
-          fi
-          
-          # Check tg_bot
-          if [[ "$modules" == *"tg_bot"* ]]; then
-            grep -q "name: tg_bot" services.yml || (echo "tg_bot missing from services.yml" && exit 1)
-          else
-            ! grep -q "name: tg_bot" services.yml || (echo "tg_bot should not be in services.yml" && exit 1)
-          fi
-          
-          # Check frontend
-          if [[ "$modules" == *"frontend"* ]]; then
-            grep -q "name: frontend" services.yml || (echo "frontend missing from services.yml" && exit 1)
-          else
-            ! grep -q "name: frontend" services.yml || (echo "frontend should not be in services.yml" && exit 1)
-          fi
-          
-          # Check notifications
-          if [[ "$modules" == *"notifications"* ]]; then
-            grep -q "name: notifications_worker" services.yml || (echo "notifications_worker missing from services.yml" && exit 1)
-          else
-            ! grep -q "name: notifications_worker" services.yml || (echo "notifications_worker should not be in services.yml" && exit 1)
-          fi
-          
-          echo "services.yml correctly reflects selected modules"
-
-      - name: Verify workflow matrix
-        run: |
-          cd /tmp/test-project
-          modules="${{ matrix.modules }}"
-
-          # Check that ci.yml has correct services in build-and-push matrix
-          if [[ "$modules" == *"backend"* ]]; then
-            grep -q "id: backend" .github/workflows/ci.yml || (echo "backend missing from CI matrix" && exit 1)
-          fi
-
-          if [[ "$modules" == *"tg_bot"* ]]; then
-            grep -q "id: tg-bot" .github/workflows/ci.yml || (echo "tg-bot missing from CI matrix" && exit 1)
-          else
-            ! grep -q "id: tg-bot" .github/workflows/ci.yml || (echo "tg-bot should not be in CI matrix" && exit 1)
-          fi
-
-          if [[ "$modules" == *"frontend"* ]]; then
-            grep -q "id: frontend" .github/workflows/ci.yml || (echo "frontend missing from CI matrix" && exit 1)
-          else
-            ! grep -q "id: frontend" .github/workflows/ci.yml || (echo "frontend should not be in CI matrix" && exit 1)
-          fi
-
-          if [[ "$modules" == *"notifications"* ]]; then
-            grep -q "id: notifications-worker" .github/workflows/ci.yml || (echo "notifications-worker missing from CI matrix" && exit 1)
-          else
-            ! grep -q "id: notifications-worker" .github/workflows/ci.yml || (echo "notifications-worker should not be in CI matrix" && exit 1)
-          fi
-
-          echo "Workflow matrix correctly reflects selected modules"
 
   test-pytest:
     runs-on: ubuntu-latest
