@@ -99,7 +99,7 @@ the host. Configure those ports in `.env`:
 - `BACKEND_PORT` maps to `backend:8000`.
 - `POSTGRES_HOST_PORT` maps to `db:5432`.
 - `REDIS_HOST_PORT` maps to `redis:6379`.
-- `FRONTEND_PORT` maps to `frontend:3000`.
+- `FRONTEND_PORT` maps to `frontend:4321`.
 
 Production mode uses:
 
@@ -189,8 +189,8 @@ Environment priority depends on where the value is consumed:
    variables override it. A shell-prefix value before `make` does not override a
    variable already assigned by `.env` unless you opt into GNU Make environment
    precedence with `make -e`.
-4. Local Python commands use process environment first, then application
-   defaults.
+4. Local Python commands use process environment for required application settings; missing
+   required values fail instead of falling back silently.
 
 For local `make` targets, `.env` is included and exported by the generated
 Makefile. Pass overrides as make variables:

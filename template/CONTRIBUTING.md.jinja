@@ -1,89 +1,69 @@
-# Contributing Guidelines
+# Contributing
 
-We adhere to a strict set of rules to maintain quality and consistency. These rules are enforced by CI and the `make` commands.
+Use the generated Makefile as the project command surface.
 
-## 1. The Golden Rule: Use the Makefile
-Never run tools directly. Always use the `make` target.
-- `make lint`: Runs ruff format/check, xenon, spec validation, spec compliance, controller sync, and service dependency checks.
-- `make format`: Runs auto-formatters.
-- `make tests`: Runs the test suite.
+```bash
+make setup
+make lint
+make typecheck
+make tests
+```
 {%- if 'backend' in modules %}
-- `make validate-specs`: Validates YAML specs before code generation.
-- `make generate-from-spec`: Generates code from YAML specs.
+
+For spec changes, run `make validate-specs` and `make generate-from-spec` before verification.
 {%- endif %}
 
-## 2. Code Style & Standards
-We use `ruff` for linting and formatting, and `mypy` for static typing.
+## Ownership
 
-- **Naming:**
-    - Use `snake_case` for variables, functions, and file names.
-    - Avoid `camelCase`.
-- **Typing:**
-    - All functions must have type hints.
-    - `mypy` is configured with `disallow_untyped_defs`.
-- **Imports:**
-    - Absolute imports are preferred.
-    - Sort imports (handled by `ruff`).
-- **Complexity:**
-    - `make lint` runs xenon with `--max-absolute B --max-modules A --max-average A`.
-    - Split branches or loops before a function reaches rank C.
-- **Dependency checks:**
-    - `make lint` ends with `make check-deps`.
-    - `check-deps` runs deptry for each service that has it installed in its service venv.
-
-## 3. Workflow for Agents & Humans
-
-### Adding a New Service
-1.  Add entry to `services.yml`.
-2.  Create the service directory structure under `services/<name>/`.
-3.  Implement the business logic.
+Never edit framework-generated paths:
 {%- if 'backend' in modules %}
 
-### Modifying the API
-1.  Edit `shared/spec/models.yaml` or service-level `services/<name>/spec/*.yaml`.
-2.  Run `make validate-specs` to catch errors early (also runs automatically as part of `make lint`).
-3.  Run `make generate-from-spec`.
-4.  Update service code to use the new generated models/routers.
+- `shared/shared/generated/`
+- `services/*/src/generated/`
 {%- endif %}
 
-### Testing
-- **Unit Tests:** Each service has its own `tests/` folder.
-- **Integration Tests:** Shared tests in the root `tests/` folder.
-- **Coverage:** We aim for high test coverage.
+Copier always preserves the paths listed in `_skip_if_exists`: local env files, shared model/event
+specs, service application code, and controllers. Other template files participate in Copier's
+update merge; review the update diff and resolve conflicts. A whole service directory is neither
+globally read-only nor globally protected.
 
-## 4. "Read-Only" Zones
-Do not manually edit files in these directories, as they are overwritten by scripts:
+## Adding a service
+
+There is no service-scaffolding command. For an arbitrary service, create its directory and update
+`services.yml`, Compose, environment contracts, dependencies, and tests manually. Adding a
+previously excluded predefined Copier module to an existing project is not currently automated.
 {%- if 'backend' in modules %}
-- `shared/generated/`
+
+## API changes
+
+1. Edit `shared/spec/models.yaml` or `services/<name>/spec/*.yaml`.
+2. Run `make validate-specs` and `make generate-from-spec`.
+3. Implement controller, persistence, and wiring changes in user-owned paths.
+4. Commit specs and regenerated artifacts together.
 {%- endif %}
-- `services/<name>/` (only specific files like `src/` should be edited; structural files like `Dockerfile` are templated, though currently managed manually after creation - *check templates if you need to change infrastructure*).
 
-## 5. Environment Variables
+## Quality rules
 
-**STRICT RULE: NO DEFAULT VALUES FOR ENVIRONMENT VARIABLES**
+- Use type hints and absolute imports across package boundaries.
+- Let Ruff format and sort imports.
+- Keep complexity below the Xenon thresholds enforced by `make lint`.
+- Keep service runtime dependencies in the service that imports them; `make check-deps` runs deptry
+  where installed.
+- Use timezone-aware datetimes such as `datetime.now(UTC)`.
 
-- **NEVER** use default values in `os.getenv("VAR", "default")` or similar patterns
-- If a required environment variable is missing, the application **MUST FAIL IMMEDIATELY** with a clear error
-- Use this pattern:
-  ```python
-  value = os.getenv("REQUIRED_VAR")
-  if not value:
-      raise RuntimeError("REQUIRED_VAR is not set; please add it to your environment variables")
-  ```
-- **Rationale:** Default values hide configuration errors and cause silent failures in production
-- All required environment variables must be documented in `.env.example`
+## Environment variables
 
-## 6. Common Pitfalls
+Required application runtime settings must not use fallback values. A missing required value must
+fail with a clear error and be documented in `.env.example`.
 
-Avoid these common mistakes:
+Defaults are allowed for local Compose interpolation and isolated test fixtures. They describe
+local infrastructure behavior and must not become silent production application defaults.
 {%- if 'backend' in modules %}
-- **Stale Shared Code:** In development, ensure `../shared:/app/shared:delegated` is mounted in `compose.dev.yml`. Without this mount, services use stale code from the Docker build, not live changes.
-- **Type Mismatches:** The code generator supports `list[type]` but verify complex types after generation.
-{%- endif %}
-- **Timezone Awareness:** Use `datetime.now(UTC)` for Pydantic `AwareDatetime` fields, not naive `datetime.now()`.
-{%- if 'backend' in modules %}
-- **Dockerfile Copies:** COPY sources in Dockerfiles should stay within the service directory or use `shared/`.
-{%- endif %}
-{%- if 'backend' in modules %}
-- **Missing Broker Connection:** Публикация событий до вызова `get_broker().connect()` приводит к `AssertionError`. Lifecycle управляется автоматически: в FastAPI — через `lifespan`, в tg_bot — через `post_init`/`post_shutdown`. Не вызывайте `connect()` вручную в обработчиках.
+
+## Backend runtime
+
+The backend lifespan owns the lazy event broker connection. Generated publishers use
+`get_broker()`; do not create or connect a broker inside request handlers.
+
+The database dependency owns commit and rollback. Controllers must not commit transactions.
 {%- endif %}

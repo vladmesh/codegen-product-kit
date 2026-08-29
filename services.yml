@@ -19,7 +19,7 @@ services:
   - name: frontend
     type: node
     description: >
-      Static frontend placeholder served separately via infra/compose.frontend.yml.
+      Astro and React frontend placeholder served by the standard Compose layers on port 4321.
   - name: notifications_worker
     type: python-faststream
     description: >

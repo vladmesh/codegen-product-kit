@@ -41,6 +41,7 @@ with another branch/ref when needed.
 
 ```bash
 cd my-project
+make setup
 cp .env.example .env
 make dev-start
 ```
@@ -83,17 +84,10 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed framework developmen
 - **[docs/MANIFESTO.md](docs/MANIFESTO.md)**: The core philosophy
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: How the framework works
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**: How to develop the framework
-- **[docs/backlog.md](docs/backlog.md)**: Framework roadmap
-
-## Roadmap
-
-1. **Current:** Copier-based updatable template with modular service selection.
-2. **Next:** CLI wrappers for simplified usage (`my-framework init`, `my-framework sync`).
-3. **Vision:** MCP server for AI agents to scaffold and manage services via API.
 
 ## Tech Stack
 
-- **Core:** Python 3.12, Docker Compose
+- **Core:** Python 3.11+, Docker Compose
 - **API:** FastAPI, Pydantic (Spec-First)
 - **Data:** PostgreSQL, SQLAlchemy, Alembic
 - **Messaging:** Redis, FastStream

@@ -1,7 +1,8 @@
 # Architecture & Design
 
 This document describes the technical architecture and design decisions for this project.
-The project follows a spec-first, rigid microservice philosophy: generated code is the source of truth, and services communicate only through defined interfaces.
+The project follows a spec-first microservice architecture: YAML specs own generated contracts,
+while services communicate through defined interfaces.
 {%- if 'backend' in modules %}
 
 ## The "Spec-First" Flow
@@ -10,7 +11,7 @@ The heart of the framework is the `shared/spec/` directory. This is the single s
 
 ```mermaid
 graph TD
-    Spec[shared/spec/*.yaml] -->|make generate-from-spec| GenCode[shared/generated/]
+    Spec[shared/spec/*.yaml] -->|make generate-from-spec| GenCode[shared/shared/generated/]
     GenCode -->|Imported by| Services[Services]
     Services -->|Implemented in| Docker[Docker Containers]
 ```
@@ -33,7 +34,7 @@ The project is a collection of modular services defined in `services.yml`.
 - `python-fastapi`: HTTP API service using FastAPI with uvicorn (exposes port 8000).
 {% endif -%}
 {% if 'tg_bot' in modules -%}
-- `python`: Generic Python service without a framework-specific runtime.
+- `python-faststream`: Telegram bot with Redis event integration.
 {% endif -%}
 {% if 'notifications' in modules -%}
 - `python-faststream`: Event-driven worker using FastStream (no HTTP, consumes from message broker).
@@ -50,7 +51,7 @@ Services can specify `depends_on` in `services.yml` to document runtime dependen
 ## Tooling Strategy
 
 - **Local tooling via `uv` + per-service `.venv/`:** Each service has its own virtual environment under `services/<name>/.venv/`. The root `.venv/` holds framework dev tools (`ruff`, `pytest`, `mypy`).
-- **`make setup`** bootstraps everything: installs `uv`, creates venvs, generates code, configures git hooks.
+- **`make setup`** bootstraps the project with the installed `uv`: it creates venvs, generates code, and configures git hooks.
 - **Service Containers:** Each service has its own `Dockerfile` for Docker-based development and deployment.
 
 ## Directory Structure
@@ -74,7 +75,7 @@ Services can specify `depends_on` in `services.yml` to document runtime dependen
     - `spec/`: YAML specifications (Source of Truth).
     - `generated/`: Auto-generated code (Do Not Edit).
 {%- endif %}
-- `.framework/`: Framework internals (templates, codegen, scaffolding).
+- `.framework/`: Framework internals (spec validation and code generation).
 
 ## Infrastructure Components
 
