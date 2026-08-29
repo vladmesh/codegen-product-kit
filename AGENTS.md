@@ -81,10 +81,14 @@ Agents should interact with the system primarily through `make`.
 - **Verify:** `make lint && make test` (framework unit + tooling); `make test-copier` for the
   generation matrix (slow, CI runs it).
 - **Broad check under Secretary (one canonical form):**
-  `python3 -m secretary check broad --reuse --module pytest --module-arg tests/unit --module-arg tests/tooling`
-  — the same suite as `make test`. Run it once, after the last edit, and quote
-  `check show` with the same arguments; do not wrap `make test` in `--command`, that receipt is never
-  reusable. `make test-copier` stays with GitHub CI.
+  `python3 -m secretary check broad --reuse --module pytest --module-arg tests/unit --module-arg tests/tooling --module-arg tests/copier --module-arg=-m --module-arg "not slow"`
+  — `make test` plus the non-slow copier generation tests (~3 min): a change under `template/` is
+  only exercised by the copier layer, so the framework suite alone proves nothing about it.
+  Order: focused tests while editing → this broad check once, after the last edit, on the dirty
+  tree → commit. The receipt is keyed by the content tree, so committing the same content keeps it:
+  after the commit quote `check show` with the same arguments, do not run the suite again. Do not
+  wrap make targets in `--command`, that receipt is never reusable. `slow` copier tests and the
+  generation typecheck matrix stay with GitHub CI.
 - **Generate Code:** `make generate-from-spec`
 - **Generate OpenAPI:** `make openapi` (Outputs to `services/<service>/docs/openapi.json`)
 
