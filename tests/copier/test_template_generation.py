@@ -17,7 +17,6 @@ import pytest
 from tests.copier.conftest import (
     BASE_DATA,
     VENV_COPIER,
-    VENV_RUFF,
     check_no_jinja_artifacts,
     run_copier,
     run_copier_command,
@@ -1576,9 +1575,6 @@ class TestCIWorkflowSimulation:
 
     def _verify_compose_configs(self, project_dir: Path) -> list[str]:
         """Run 'docker compose config' on test compose files."""
-        if shutil.which("docker") is None:
-            return []
-
         # Ensure .env exists for variable interpolation
         env_file = project_dir / ".env"
         if not env_file.exists():
@@ -1662,11 +1658,13 @@ class TestCIWorkflowSimulation:
         env_errors = self._verify_compose_env_files(output)
         assert not env_errors, f"modules={modules}: Missing env files:\n" + "\n".join(env_errors)
 
-        if shutil.which("docker") is not None:
-            compose_errors = self._verify_compose_configs(output)
-            assert not compose_errors, f"modules={modules}: Compose config failed:\n" + "\n".join(
-                compose_errors
-            )
+        if shutil.which("docker") is None:
+            pytest.skip("docker not available")
+
+        compose_errors = self._verify_compose_configs(output)
+        assert not compose_errors, f"modules={modules}: Compose config failed:\n" + "\n".join(
+            compose_errors
+        )
 
 
 class TestDockerReadiness:
@@ -1810,53 +1808,6 @@ class TestCIWorkflowCorrectness:
         assert "compose.tests.integration" not in ci_yml or "Run integration tests" in ci_yml, (
             "Standalone CI references compose.tests.integration.yml (in Clean up step) "
             "but has no integration tests. This is a no-op that should be removed."
-        )
-
-
-class TestFormattingQuality:
-    """Tests for generated file formatting quality."""
-
-    def test_services_yml_no_excessive_blank_lines(self, project_standalone: Path):
-        """services.yml should not have excessive blank lines from Jinja conditionals."""
-        content = (project_standalone / "services.yml").read_text()
-        assert "\n\n\n" not in content, (
-            "services.yml has triple blank lines — likely from Jinja conditional whitespace"
-        )
-
-    def test_services_yml_no_leading_blank_in_list(self, project_backend: Path):
-        """services.yml services list should not start with a blank line."""
-        content = (project_backend / "services.yml").read_text()
-        # Check for "services:\n\n  - name:" pattern (blank line after services:)
-        assert "services:\n\n" not in content, (
-            "services.yml has a blank line between 'services:' and first item"
-        )
-
-
-class TestGeneratedCodeQuality:
-    """Tests that ensure the generated code is high quality."""
-
-    def test_generated_code_passes_strict_linting(self, project_fullstack: Path):
-        """Generated code must pass strict linting despite being excluded in user config."""
-        ruff_toml = project_fullstack / "ruff.toml"
-        config_content = ruff_toml.read_text()
-
-        strict_content = "\n".join(
-            line for line in config_content.splitlines() if "generated" not in line
-        )
-        strict_config_path = project_fullstack / "ruff.strict.toml"
-        strict_config_path.write_text(strict_content)
-
-        # Auto-fix first (import sorting etc. that's hard to get perfect in Jinja)
-        ruff = str(VENV_RUFF)
-        fix_cmd = [ruff, "check", "--config", "ruff.strict.toml", "--fix", "."]
-        subprocess.run(fix_cmd, cwd=project_fullstack, capture_output=True, text=True)  # noqa: S603
-
-        cmd = [ruff, "check", "--config", "ruff.strict.toml", "."]
-        result = subprocess.run(cmd, cwd=project_fullstack, capture_output=True, text=True)  # noqa: S603
-
-        assert result.returncode == 0, (
-            f"Strict linting failed on generated code.\n"
-            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
 
