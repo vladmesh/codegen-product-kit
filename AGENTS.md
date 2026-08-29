@@ -78,7 +78,13 @@ Detailed documentation for each service can be found in its respective directory
 
 Agents should interact with the system primarily through `make`.
 
-- **Verify:** `make lint && make tests`
+- **Verify:** `make lint && make test` (framework unit + tooling); `make test-copier` for the
+  generation matrix (slow, CI runs it).
+- **Broad check under Secretary (one canonical form):**
+  `python3 -m secretary check broad --reuse --module pytest --module-arg tests/unit --module-arg tests/tooling`
+  — the same suite as `make test`. Run it once, after the last edit, and quote
+  `check show` with the same arguments; do not wrap `make test` in `--command`, that receipt is never
+  reusable. `make test-copier` stays with GitHub CI.
 - **Generate Code:** `make generate-from-spec`
 - **Generate OpenAPI:** `make openapi` (Outputs to `services/<service>/docs/openapi.json`)
 
