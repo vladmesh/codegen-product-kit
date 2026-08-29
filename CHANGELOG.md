@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** Global `shared/spec/events.yaml` entries are now publisher-only.
+  Removed `subscribe` metadata and operation `events.message_model` are rejected.
 - **Breaking:** Removed the unused service-manifest subsystem. The generator now
   ignores legacy `services/*/spec/manifest.yaml` files.
 

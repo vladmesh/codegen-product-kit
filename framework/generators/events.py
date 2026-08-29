@@ -1,4 +1,4 @@
-"""Events generator for FastStream pub/sub."""
+"""Events generator for FastStream publishers."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from framework.generators.base import BaseGenerator
 
 
 class EventsGenerator(BaseGenerator):
-    """Generate event publishers and subscribers."""
+    """Generate event publishers."""
 
     def __init__(self, *args, **kwargs) -> None:
         """Initialize with output path."""
@@ -20,7 +20,6 @@ class EventsGenerator(BaseGenerator):
         never fails and coding agents have a clear place to add events.
         """
         publishers = []
-        subscribers = []
         imports: set[str] = set()
 
         for event in self.specs.events.events:
@@ -33,14 +32,11 @@ class EventsGenerator(BaseGenerator):
 
             if event.publish:
                 publishers.append(event_ctx)
-            if event.subscribe:
-                subscribers.append(event_ctx)
 
         self.render_to_file(
             "events.py.j2",
             self.output_file,
             publishers=publishers,
-            subscribers=subscribers,
             imports=imports,
         )
 

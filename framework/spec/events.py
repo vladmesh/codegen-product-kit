@@ -1,4 +1,4 @@
-"""Event specifications for async messaging validation.
+"""Event publisher specifications for async messaging validation.
 
 Defines the structure of events.yaml:
 - EventSpec: A single event definition
@@ -13,20 +13,19 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class EventSpec(BaseModel):
-    """Specification for a single event."""
+    """Specification for a single event publisher."""
 
     name: str = ""  # Set by parent
     message: str  # Model name for the event payload
     publish: bool = False
-    subscribe: bool = False
 
     model_config = {"extra": "forbid"}
 
     @model_validator(mode="after")
-    def validate_at_least_one_direction(self) -> EventSpec:
-        """Ensure event is either publishable or subscribable."""
-        if not self.publish and not self.subscribe:
-            msg = f"Event '{self.name}' must have publish=true or subscribe=true (or both)"
+    def validate_publish_enabled(self) -> EventSpec:
+        """Ensure every global event declaration generates a publisher."""
+        if not self.publish:
+            msg = f"Event '{self.name}' must have publish=true"
             raise ValueError(msg)
         return self
 
@@ -53,12 +52,7 @@ class EventsSpec(BaseModel):
                 raise ValueError(msg)
 
             events.append(
-                EventSpec(
-                    name=name,
-                    message=event_data.get("message", ""),
-                    publish=event_data.get("publish", False),
-                    subscribe=event_data.get("subscribe", False),
-                )
+                EventSpec.model_validate({"name": name, **event_data})
             )
 
         return cls(events=events)
@@ -70,7 +64,3 @@ class EventsSpec(BaseModel):
     def get_publishers(self) -> list[EventSpec]:
         """Get events that can be published."""
         return [e for e in self.events if e.publish]
-
-    def get_subscribers(self) -> list[EventSpec]:
-        """Get events that can be subscribed to."""
-        return [e for e in self.events if e.subscribe]
