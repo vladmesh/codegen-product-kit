@@ -200,7 +200,7 @@ await publish_command_received(event)
      profiles:
        - workers
    ```
-3. **Создать:** Создайте каталог сервиса `services/<name>/` по шаблону из `.framework/framework/templates/scaffold/services/<type>/`
+3. **Создать:** Создайте и настройте каталог сервиса `services/<name>/` вручную.
 4. **Dev Setup:** Volume mounts настраиваются в `infra/compose.dev.yml`
 
 ### Common Pitfalls

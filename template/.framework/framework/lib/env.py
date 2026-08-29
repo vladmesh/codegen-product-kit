@@ -24,18 +24,3 @@ def get_repo_root() -> Path:
         return candidate
 
     return current.parents[2]
-
-
-def get_framework_dir() -> Path:
-    """Return the ``framework/`` directory containing templates and lib.
-
-    In the framework repo this is ``ROOT/framework/``.
-    In a generated project this is ``ROOT/.framework/framework/``.
-    Uses ``__file__`` so the result is always correct regardless of ROOT.
-    Honors SERVICE_TEMPLATE_ROOT for test overrides.
-    """
-
-    override = os.environ.get("SERVICE_TEMPLATE_ROOT")
-    if override:
-        return Path(override).resolve() / "framework"
-    return Path(__file__).resolve().parent.parent

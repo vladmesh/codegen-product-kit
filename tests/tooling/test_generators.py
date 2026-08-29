@@ -10,7 +10,7 @@ from framework.lib.fs import GENERATED_FILE_MODE
 
 def test_generate_all_creates_files(fake_repo) -> None:
     """Test that generate_all creates all expected files."""
-    root, _ = fake_repo
+    root = fake_repo
 
     # Copy templates to fake repo
     real_templates = Path("framework/templates").absolute()

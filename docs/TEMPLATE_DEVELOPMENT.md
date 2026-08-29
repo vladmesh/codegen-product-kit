@@ -109,7 +109,6 @@ Defined in `_exclude`:
 - `.git`, `__pycache__`, `.venv`, `node_modules`
 - Template development files: `copier.yml`, `docs/COPIER_MIGRATION_PLAN.md`
 - Jinja source files (rendered versions are copied)
-- `test_service` (template development only)
 
 ## Adding a New Module
 

@@ -1,1 +1,1 @@
-"""Root namespace for cross-service integration tests."""
+"""Root namespace for framework tests."""
