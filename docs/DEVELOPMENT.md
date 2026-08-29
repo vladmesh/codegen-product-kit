@@ -104,7 +104,7 @@ This copies `framework/` contents to `template/.framework/`.
 
 ## Language Agnosticism
 
-When developing generators and templates, keep language-agnostic design in mind. The long-term vision includes supporting multiple target languages from the same YAML specs. See `docs/rust-migration-analysis.md` for details and `docs/backlog.md` (section "Rust Migration Preparation") for actionable tasks.
+When developing generators and templates, keep language-agnostic design in mind. The framework may eventually support multiple target languages from the same YAML specs, but no migration is currently planned.
 
 **Practical tips:**
 - Separate type mapping logic from generation logic (avoid hardcoded Python types in generators)

@@ -30,7 +30,7 @@ Uniqueness is a bug.
 The spec-first architecture is designed to be **language-agnostic in principle**. YAML specs define the *what* (models, operations, transports), not the *how* (Python classes, Rust structs).
 
 - **Specs over code:** When modifying specs or the codegen pipeline, prefer language-neutral abstractions (JSON Schema types, transport-agnostic operation definitions)
-- **Long-term vision:** The framework may evolve to support multiple target languages (see `docs/rust-migration-analysis.md`)
+- **Long-term vision:** The framework may evolve to support multiple target languages.
 - **Practical guideline:** When writing new specs or generators, avoid embedding Python-specific assumptions where a generic approach works equally well
 
 ### 6. The Human Role: Product Owner
@@ -38,4 +38,3 @@ In this framework, the human moves up the abstraction ladder.
 - **Humans define the "What":** Writing specs, defining business logic in specific slots, and setting the direction.
 - **Agents handle the "How":** Generating boilerplate, writing tests, and connecting the dots.
 - **Transparency:** The human can always inspect the code, but they shouldn't need to touch the plumbing.
-

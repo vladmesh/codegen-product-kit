@@ -83,7 +83,6 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed framework developmen
 - **[docs/MANIFESTO.md](docs/MANIFESTO.md)**: The core philosophy
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: How the framework works
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**: How to develop the framework
-- **[docs/backlog.md](docs/backlog.md)**: Framework roadmap
 
 ## Roadmap
 
