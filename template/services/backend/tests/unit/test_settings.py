@@ -6,11 +6,13 @@ import importlib
 from pathlib import Path
 import shutil
 
+import pytest
+
 from services.backend.src.core.settings import get_settings
 
 
 def test_documented_local_environment_constructs_the_application(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Copying .env.example provides the settings needed at ASGI import time."""
     project_root = Path(__file__).parents[4]
