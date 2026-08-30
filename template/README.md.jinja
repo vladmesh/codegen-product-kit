@@ -42,7 +42,7 @@ service container inside the Compose network:
 
 ```bash
 make worker-start
-make worker-call url=http://backend:8000/users method=POST body='{"telegram_id":123}'
+make worker-call url=http://backend:8000/users/grant method=POST body='{"channel":"telegram","external_id":"123"}'
 make worker-stop
 ```
 

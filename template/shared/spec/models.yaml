@@ -4,12 +4,11 @@ models:
       id:
         type: int
         readonly: true
-      telegram_id:
-        type: int
-        ge: 0
-      is_admin:
-        type: bool
-        default: false
+      status:
+        type:
+          type: enum
+          values: [active, inactive]
+        default: inactive
       created_at:
         type: datetime
         readonly: true
@@ -17,15 +16,59 @@ models:
         type: datetime
         readonly: true
     variants:
-      # is_admin is never accepted from the API: the backend is reachable from
-      # outside the stack, so an input variant carrying it would let anyone grant
-      # themselves the flag. It stays readable and is set out of band.
-      Create:
-        exclude: [is_admin]
-      Update:
-        exclude: [is_admin]
-        optional: [telegram_id]
       Read: {}
+
+  UserChannel:
+    fields:
+      id:
+        type: int
+        readonly: true
+      user_id:
+        type: int
+        readonly: true
+      channel:
+        type: string
+        min_length: 1
+      external_id:
+        type: string
+        min_length: 1
+      created_at:
+        type: datetime
+        readonly: true
+      updated_at:
+        type: datetime
+        readonly: true
+    variants:
+      Read: {}
+
+  UserGrant:
+    fields:
+      channel:
+        type: string
+        min_length: 1
+      external_id:
+        type: string
+        min_length: 1
+
+  UserStatusUpdate:
+    fields:
+      status:
+        type:
+          type: enum
+          values: [active, inactive]
+
+  UserAccess:
+    fields:
+      user_id:
+        type: int
+      status:
+        type:
+          type: enum
+          values: [active, inactive]
+      channel:
+        type: string
+      external_id:
+        type: string
 
   CommandReceived:
     fields:

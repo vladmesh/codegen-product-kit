@@ -100,9 +100,9 @@ await publish_command_received(event)  # broker должен быть подкл
 
 ## Standalone Telegram Bot
 
-При выборе только `tg_bot` Copier не генерирует event/schema-модули. Бот
-работает локально: регистрируйте handlers в `services/tg_bot/src/main.py` и
-используйте `services/tg_bot/AGENTS.md` как сервисную инструкцию.
+При выборе только `tg_bot` Copier не генерирует backend/schema-модули. Такой бот
+остаётся fail-closed: интерактивный доступ требует backend с `users.grant`, поэтому
+выберите `backend,tg_bot` для обрабатывающего Telegram-обновления продукта.
 {%- endif %}
 
 ## Документация сервисов

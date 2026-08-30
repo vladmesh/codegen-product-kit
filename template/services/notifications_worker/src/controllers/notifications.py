@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from shared.generated.schemas import UserRead
+from shared.generated.schemas import UserAccess
 
 logger = structlog.stdlib.get_logger()
 
@@ -11,14 +11,14 @@ logger = structlog.stdlib.get_logger()
 class NotificationsController:
     """Controller for notifications logic."""
 
-    async def on_user_registered(
+    async def on_user_granted(
         self,
         session: AsyncSession,
-        payload: UserRead,
+        payload: UserAccess,
     ) -> None:
         """Handle user registration."""
         logger.info(
-            "Controller handled user registered",
-            user_id=payload.id,
-            telegram_id=payload.telegram_id,
+            "Controller handled user granted",
+            user_id=payload.user_id,
+            status=payload.status,
         )

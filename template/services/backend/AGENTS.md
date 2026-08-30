@@ -37,16 +37,17 @@ Use absolute imports across package boundaries:
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
 from services.backend.src.generated.protocols import UsersControllerProtocol
-from shared.generated.schemas import UserCreate, UserRead
+from shared.generated.schemas import UserAccess, UserGrant
 ```
 
 Relative imports are acceptable within one package. Do not import from a top-level `src` package.
 
 ## Security invariant
 
-Client input variants must not expose privilege-granting fields. For example, `User.is_admin` is
-excluded from Create and Update variants and is assigned only by trusted application logic. Apply
-the same rule to new privilege fields.
+`User.status` is the sole persisted admission decision. The internal `users.grant(channel,
+external_id)` capability creates or reactivates an external identity; the bot resolves that identity
+and admits only `active` users. Do not introduce environment, owner, or channel-specific fallback
+admission paths.
 
 ## Database and migrations
 

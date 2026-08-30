@@ -313,6 +313,23 @@ class TestBackendWithTgBotGeneration:
         assert depends_on["redis"]["condition"] == "service_healthy"
         assert depends_on["backend"]["condition"] == "service_started"
 
+    def test_tg_bot_access_uses_backend_status_without_env_fallback(
+        self, project_backend_tg_bot: Path
+    ) -> None:
+        """Rendered bots resolve access through the generated user capability only."""
+        bot = project_backend_tg_bot / "services" / "tg_bot"
+        rendered = "\n".join(
+            (bot / relative).read_text()
+            for relative in ("src/access.py", "src/main.py", "env.contract.yaml", "AGENTS.md")
+        )
+
+        assert "TG_BOT_ALLOWED_TELEGRAM_IDS" not in rendered
+        assert "TG_BOT_OWNER_TELEGRAM_ID" not in rendered
+        assert "TG_BOT_TEST_TELEGRAM_ID" not in rendered
+        assert '"/users/access"' in rendered
+        assert "await _has_active_access" in rendered
+        assert "status == ACTIVE_STATUS" in rendered
+
 
 class TestFullStackGeneration:
     """Test generation with all modules."""

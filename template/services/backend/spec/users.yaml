@@ -11,16 +11,28 @@ operations:
       method: GET
       path: ""
 
-  # Dual-transport: REST endpoint that also publishes an event
-  create_user:
-    input: UserCreate
-    output: UserRead
+  grant:
+    input: UserGrant
+    output: UserAccess
     rest:
       method: POST
-      path: ""
-      status: 201
+      path: "/grant"
+      status: 200
     events:
-      publish_on_success: user_registered  # Published after successful creation
+      publish_on_success: user_granted
+
+  resolve:
+    output: UserAccess
+    params:
+      - name: channel
+        type: str
+        source: query
+      - name: external_id
+        type: str
+        source: query
+    rest:
+      method: GET
+      path: "/access"
 
   get_user:
     output: UserRead
@@ -31,15 +43,15 @@ operations:
       method: GET
       path: "/{user_id}"
 
-  update_user:
-    input: UserUpdate
+  set_user_status:
+    input: UserStatusUpdate
     output: UserRead
     params:
       - name: user_id
         type: int
     rest:
-      method: PUT
-      path: "/{user_id}"
+      method: PATCH
+      path: "/{user_id}/status"
 
   delete_user:
     params:

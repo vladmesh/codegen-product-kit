@@ -1,7 +1,7 @@
 domain: notifications
 
 operations:
-  on_user_registered:
-    input: UserRead
+  on_user_granted:
+    input: UserAccess
     events:
-      subscribe: user_registered
+      subscribe: user_granted

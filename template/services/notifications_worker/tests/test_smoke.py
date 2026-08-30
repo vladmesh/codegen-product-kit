@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,21 +20,20 @@ def test_imports() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_user_registered_logs_event() -> None:
-    """Test that handle_user_registered logs the event correctly."""
+async def test_handle_user_granted_logs_event() -> None:
+    """Test that handle_user_granted logs the safe user status."""
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from services.notifications_worker.src.controllers.notifications import (
         NotificationsController,
     )
-    from shared.generated.schemas import UserRead
+    from shared.generated.schemas import UserAccess
 
-    event = UserRead(
-        id=123,
-        telegram_id=456,
-        is_admin=False,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
+    event = UserAccess(
+        user_id=123,
+        status="active",
+        channel="telegram",
+        external_id="456",
     )
 
     controller = NotificationsController()
@@ -43,12 +41,12 @@ async def test_handle_user_registered_logs_event() -> None:
     session = AsyncMock(spec=AsyncSession)
 
     with capture_logs() as logs:
-        await controller.on_user_registered(session, event)
+        await controller.on_user_granted(session, event)
 
     assert len(logs) == 1
-    assert logs[0]["event"] == "Controller handled user registered"
-    assert logs[0]["user_id"] == event.id
-    assert logs[0]["telegram_id"] == event.telegram_id
+    assert logs[0]["event"] == "Controller handled user granted"
+    assert logs[0]["user_id"] == event.user_id
+    assert logs[0]["status"] == event.status
 
 
 @pytest.mark.asyncio

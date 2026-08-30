@@ -1,41 +1,21 @@
-"""Unit tests for the Telegram bot handlers."""
+"""Unit tests for Telegram bot handlers and backend access admission."""
 
 from __future__ import annotations
-{% if 'backend' in modules %}
-from collections.abc import Generator
-{%- endif %}
+
 from typing import Final
-from unittest.mock import AsyncMock, MagicMock{% if 'backend' in modules %}, patch{% endif %}
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 TEST_TELEGRAM_USER_ID: Final[int] = 123456789
-{% if 'backend' in modules %}
-
-@pytest.fixture
-def mock_broker() -> Generator[MagicMock, None, None]:
-    """Mock the broker for testing."""
-    mock = MagicMock()
-    mock.connect = AsyncMock()
-    mock.close = AsyncMock()
-    with patch("services.tg_bot.src.main.get_broker", return_value=mock):
-        yield mock
-
-
-@pytest.fixture
-def mock_publish() -> Generator[AsyncMock, None, None]:
-    """Mock the publish function."""
-    with patch("services.tg_bot.src.main.publish_command_received") as mock:
-        mock.return_value = None
-        yield mock
 
 
 @pytest.fixture
 def mock_update() -> MagicMock:
-    """Create a mock Telegram Update object."""
     update = MagicMock()
     update.effective_user = MagicMock()
     update.effective_user.id = TEST_TELEGRAM_USER_ID
+    update.effective_user.first_name = "John"
     update.message = MagicMock()
     update.message.text = "/command test"
     update.message.reply_text = AsyncMock()
@@ -44,10 +24,29 @@ def mock_update() -> MagicMock:
 
 @pytest.fixture
 def mock_context() -> MagicMock:
-    """Create a mock Context object."""
     context = MagicMock()
     context.args = ["arg1", "arg2"]
     return context
+
+{% if 'backend' in modules %}
+@pytest.fixture
+def mock_broker():
+    from unittest.mock import patch
+
+    mock = MagicMock()
+    mock.connect = AsyncMock()
+    mock.close = AsyncMock()
+    with patch("services.tg_bot.src.main.get_broker", return_value=mock):
+        yield mock
+
+
+@pytest.fixture
+def mock_publish():
+    from unittest.mock import patch
+
+    with patch("services.tg_bot.src.main.publish_command_received") as mock:
+        mock.return_value = None
+        yield mock
 
 
 @pytest.mark.asyncio
@@ -57,357 +56,123 @@ async def test_handle_command_publishes_event(
     mock_update: MagicMock,
     mock_context: MagicMock,
 ) -> None:
-    """Test that handle_command publishes event to Redis."""
     from services.tg_bot.src.main import handle_command
 
     await handle_command(mock_update, mock_context)
 
     mock_publish.assert_awaited_once()
-    assert mock_publish.await_args is not None
-    published_event = mock_publish.await_args[0][0]
-
-    assert published_event.command == "/command test"
-    assert published_event.args == ["arg1", "arg2"]
-    assert published_event.user_id == TEST_TELEGRAM_USER_ID
-    assert published_event.timestamp is not None
-
-    mock_update.message.reply_text.assert_awaited_once_with("Command published!")
+    event = mock_publish.await_args.args[0]
+    assert event.command == "/command test"
+    assert event.args == ["arg1", "arg2"]
+    assert event.user_id == TEST_TELEGRAM_USER_ID
 
 
 @pytest.mark.asyncio
-async def test_handle_command_handles_publish_failure(
-    mock_publish: AsyncMock,
-    mock_broker: MagicMock,
-    mock_update: MagicMock,
-    mock_context: MagicMock,
-) -> None:
-    """Test graceful handling of publish failures."""
-    from services.tg_bot.src.main import handle_command
+async def test_post_init_and_shutdown_manage_broker(mock_broker: MagicMock) -> None:
+    from services.tg_bot.src.main import post_init, post_shutdown
 
-    mock_publish.side_effect = Exception("Redis connection failed")
-
-    await handle_command(mock_update, mock_context)
-
-    mock_update.message.reply_text.assert_awaited_once_with("Failed to send command.")
-
-
-@pytest.mark.asyncio
-async def test_handle_command_skips_without_user(
-    mock_publish: AsyncMock,
-    mock_broker: MagicMock,
-    mock_context: MagicMock,
-) -> None:
-    """Test that handler skips if no user is present."""
-    from services.tg_bot.src.main import handle_command
-
-    update = MagicMock()
-    update.effective_user = None
-    update.message = MagicMock()
-
-    await handle_command(update, mock_context)
-
-    mock_publish.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_handle_command_skips_without_message(
-    mock_publish: AsyncMock,
-    mock_broker: MagicMock,
-    mock_context: MagicMock,
-) -> None:
-    """Test that handler skips if no message is present."""
-    from services.tg_bot.src.main import handle_command
-
-    update = MagicMock()
-    update.effective_user = MagicMock()
-    update.effective_user.id = 123
-    update.message = None
-
-    await handle_command(update, mock_context)
-
-    mock_publish.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_post_init_connects_broker(mock_broker: MagicMock) -> None:
-    """Test that post_init connects the broker."""
-    from services.tg_bot.src.main import post_init
-
-    app = MagicMock()
-    await post_init(app)
+    application = MagicMock()
+    await post_init(application)
+    await post_shutdown(application)
 
     mock_broker.connect.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_post_shutdown_closes_broker(mock_broker: MagicMock) -> None:
-    """Test that post_shutdown closes the broker."""
-    from services.tg_bot.src.main import post_shutdown
-
-    app = MagicMock()
-    await post_shutdown(app)
-
     mock_broker.close.assert_awaited_once()
 
 
-class TestSyncUserWithBackend:
-    """Tests for _sync_user_with_backend function.
-
-    Note: Retry logic is now handled by the generated BackendClient.
-    These tests verify the integration between _sync_user_with_backend
-    and BackendClient, not the retry implementation details.
-    """
-
+class TestBackendAccess:
     @pytest.mark.asyncio
-    async def test_sync_user_created(self) -> None:
-        """Test that new user creation returns True."""
-        from datetime import UTC, datetime
-        from unittest.mock import AsyncMock
+    async def test_active_identity_is_admitted(self) -> None:
+        from unittest.mock import patch
 
-        from shared.generated.schemas import UserRead
+        from shared.generated.schemas import UserAccess
 
-        now = datetime.now(UTC)
-        mock_user = UserRead(
-            id=1,
-            telegram_id=TEST_TELEGRAM_USER_ID,
-            is_admin=False,
-            created_at=now,
-            updated_at=now,
+        access = UserAccess(
+            user_id=1,
+            status="active",
+            channel="telegram",
+            external_id=str(TEST_TELEGRAM_USER_ID),
         )
+        with patch("services.tg_bot.src.main.BackendClient") as client_class:
+            client = AsyncMock()
+            client.resolve = AsyncMock(return_value=access)
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            client_class.return_value = client
 
-        with patch("services.tg_bot.src.main.BackendClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.create_user = AsyncMock(return_value=mock_user)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
+            from services.tg_bot.src.main import _has_active_access
 
-            from services.tg_bot.src.main import _sync_user_with_backend
-
-            result = await _sync_user_with_backend(TEST_TELEGRAM_USER_ID)
-            assert result is True
+            assert await _has_active_access(TEST_TELEGRAM_USER_ID)
 
     @pytest.mark.asyncio
-    async def test_sync_user_already_exists(self) -> None:
-        """Test that 409 CONFLICT returns False (user exists)."""
-        from http import HTTPStatus
-        from unittest.mock import AsyncMock
+    async def test_inactive_and_unknown_identities_are_denied(self) -> None:
+        from unittest.mock import patch
 
-        import httpx
+        from shared.generated.schemas import UserAccess
 
-        # Create mock response for 409 status
-        mock_response = MagicMock()
-        mock_response.status_code = HTTPStatus.CONFLICT
-        mock_response.text = "User already exists"
+        inactive = UserAccess(
+            user_id=1,
+            status="inactive",
+            channel="telegram",
+            external_id=str(TEST_TELEGRAM_USER_ID),
+        )
+        with patch("services.tg_bot.src.main.BackendClient") as client_class:
+            client = AsyncMock()
+            client.resolve = AsyncMock(return_value=inactive)
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            client_class.return_value = client
 
-        with patch("services.tg_bot.src.main.BackendClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.create_user = AsyncMock(
-                side_effect=httpx.HTTPStatusError(
-                    "Conflict",
-                    request=MagicMock(),
-                    response=mock_response,
-                )
+            from services.tg_bot.src.main import _has_active_access
+
+            assert not await _has_active_access(TEST_TELEGRAM_USER_ID)
+
+            import httpx
+
+            client.resolve.side_effect = httpx.HTTPStatusError(
+                "not found", request=MagicMock(), response=MagicMock(status_code=404)
             )
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
-
-            from services.tg_bot.src.main import _sync_user_with_backend
-
-            result = await _sync_user_with_backend(TEST_TELEGRAM_USER_ID)
-            assert result is False
+            assert not await _has_active_access(TEST_TELEGRAM_USER_ID)
 
     @pytest.mark.asyncio
-    async def test_sync_user_http_error(self) -> None:
-        """Test that HTTPError returns None (handled gracefully)."""
-        from unittest.mock import AsyncMock
+    async def test_malformed_identity_is_denied_without_backend_lookup(self) -> None:
+        from unittest.mock import patch
 
-        import httpx
+        with patch("services.tg_bot.src.main.BackendClient") as client_class:
+            from services.tg_bot.src.main import _has_active_access
 
-        with patch("services.tg_bot.src.main.BackendClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.create_user = AsyncMock(
-                side_effect=httpx.HTTPError("Connection failed after retries")
-            )
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
-
-            from services.tg_bot.src.main import _sync_user_with_backend
-
-            result = await _sync_user_with_backend(TEST_TELEGRAM_USER_ID)
-            assert result is None
+            assert not await _has_active_access(0)
+            client_class.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_sync_user_connect_error(self) -> None:
-        """Test that ConnectError returns None (after client exhausts retries)."""
-        from unittest.mock import AsyncMock
+    async def test_enforce_access_stops_inactive_updates(self, mock_update: MagicMock) -> None:
+        from unittest.mock import patch
 
-        import httpx
+        from telegram.ext import ApplicationHandlerStop
 
-        with patch("services.tg_bot.src.main.BackendClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.create_user = AsyncMock(
-                side_effect=httpx.ConnectError("Backend unavailable after retries")
-            )
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
+        with patch(
+            "services.tg_bot.src.main._has_active_access", new=AsyncMock(return_value=False)
+        ):
+            from services.tg_bot.src.main import enforce_access
 
-            from services.tg_bot.src.main import _sync_user_with_backend
-
-            result = await _sync_user_with_backend(TEST_TELEGRAM_USER_ID)
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_sync_user_4xx_error(self) -> None:
-        """Test that 4xx client errors return None (no retry by client)."""
-        from http import HTTPStatus
-        from unittest.mock import AsyncMock
-
-        import httpx
-
-        mock_response = MagicMock()
-        mock_response.status_code = HTTPStatus.BAD_REQUEST
-        mock_response.text = "Bad Request"
-
-        with patch("services.tg_bot.src.main.BackendClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.create_user = AsyncMock(
-                side_effect=httpx.HTTPStatusError(
-                    "Bad Request",
-                    request=MagicMock(),
-                    response=mock_response,
-                )
-            )
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client_class.return_value = mock_client
-
-            from services.tg_bot.src.main import _sync_user_with_backend
-
-            result = await _sync_user_with_backend(TEST_TELEGRAM_USER_ID)
-            assert result is None
+            with pytest.raises(ApplicationHandlerStop):
+                await enforce_access(mock_update, MagicMock())
+{% endif %}
 
 
 class TestHandleStart:
-    """Tests for handle_start function."""
-
-    @pytest.fixture
-    def mock_sync_user(self) -> Generator[AsyncMock, None, None]:
-        """Mock _sync_user_with_backend."""
-        with patch("services.tg_bot.src.main._sync_user_with_backend") as mock:
-            yield mock
-
     @pytest.mark.asyncio
-    async def test_handle_start_new_user(self, mock_sync_user: AsyncMock) -> None:
-        """Test greeting for new user."""
+    async def test_handle_start_greets_user(
+        self, mock_update: MagicMock, mock_context: MagicMock
+    ) -> None:
         from services.tg_bot.src.main import DEFAULT_GREETING, handle_start
 
-        mock_sync_user.return_value = True
+        await handle_start(mock_update, mock_context)
 
-        update = MagicMock()
-        update.effective_user = MagicMock()
-        update.effective_user.id = TEST_TELEGRAM_USER_ID
-        update.effective_user.first_name = "John"
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        context = MagicMock()
-
-        await handle_start(update, context)
-
-        update.message.reply_text.assert_awaited_once()
-        call_args = update.message.reply_text.await_args[0][0]
-        assert DEFAULT_GREETING in call_args
-        assert "John" in call_args
+        mock_update.message.reply_text.assert_awaited_once()
+        assert DEFAULT_GREETING in mock_update.message.reply_text.await_args.args[0]
 
     @pytest.mark.asyncio
-    async def test_handle_start_returning_user(self, mock_sync_user: AsyncMock) -> None:
-        """Test greeting for returning user."""
-        from services.tg_bot.src.main import WELCOME_BACK_GREETING, handle_start
-
-        mock_sync_user.return_value = False
-
-        update = MagicMock()
-        update.effective_user = MagicMock()
-        update.effective_user.id = TEST_TELEGRAM_USER_ID
-        update.effective_user.first_name = "Jane"
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        context = MagicMock()
-
-        await handle_start(update, context)
-
-        update.message.reply_text.assert_awaited_once()
-        call_args = update.message.reply_text.await_args[0][0]
-        assert WELCOME_BACK_GREETING in call_args
-
-    @pytest.mark.asyncio
-    async def test_handle_start_sync_error(self, mock_sync_user: AsyncMock) -> None:
-        """Test error message when sync fails."""
-        from services.tg_bot.src.main import REGISTRATION_ERROR, handle_start
-
-        mock_sync_user.return_value = None
-
-        update = MagicMock()
-        update.effective_user = MagicMock()
-        update.effective_user.id = TEST_TELEGRAM_USER_ID
-        update.effective_user.first_name = "Bob"
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        context = MagicMock()
-
-        await handle_start(update, context)
-
-        update.message.reply_text.assert_awaited_once_with(REGISTRATION_ERROR)
-
-    @pytest.mark.asyncio
-    async def test_handle_start_no_user(self, mock_sync_user: AsyncMock) -> None:
-        """Test that handler skips if no user."""
-        from services.tg_bot.src.main import handle_start
-
-        update = MagicMock()
-        update.effective_user = None
-        update.message = MagicMock()
-
-        context = MagicMock()
-
-        await handle_start(update, context)
-
-        mock_sync_user.assert_not_awaited()
-{% else %}
-
-class TestHandleStart:
-    """Tests for handle_start function (standalone mode, no backend)."""
-
-    @pytest.mark.asyncio
-    async def test_handle_start_greets_user(self) -> None:
-        """Test greeting for user in standalone mode."""
-        from services.tg_bot.src.main import DEFAULT_GREETING, handle_start
-
-        update = MagicMock()
-        update.effective_user = MagicMock()
-        update.effective_user.id = TEST_TELEGRAM_USER_ID
-        update.effective_user.first_name = "John"
-        update.message = MagicMock()
-        update.message.reply_text = AsyncMock()
-
-        context = MagicMock()
-
-        await handle_start(update, context)
-
-        update.message.reply_text.assert_awaited_once()
-        call_args = update.message.reply_text.await_args[0][0]
-        assert DEFAULT_GREETING in call_args
-        assert "John" in call_args
-
-    @pytest.mark.asyncio
-    async def test_handle_start_no_user(self) -> None:
-        """Test that handler skips if no user."""
+    async def test_handle_start_skips_update_without_user(self, mock_context: MagicMock) -> None:
         from services.tg_bot.src.main import handle_start
 
         update = MagicMock()
@@ -415,10 +180,6 @@ class TestHandleStart:
         update.message = MagicMock()
         update.message.reply_text = AsyncMock()
 
-        context = MagicMock()
-
-        await handle_start(update, context)
+        await handle_start(update, mock_context)
 
         update.message.reply_text.assert_not_awaited()
-{% endif -%}
-

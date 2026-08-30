@@ -103,19 +103,20 @@ The framework supports **unified handlers** — operations that work over multip
 ```yaml
 # services/backend/spec/users.yaml
 operations:
-  create_user:
-    input: UserCreate
-    output: UserRead
+  grant:
+    input: UserGrant
+    output: UserAccess
     rest:
       method: POST
-      status: 201
+      path: /grant
+      status: 200
     events:
-      publish_on_success: user_registered  # Event published after success
+      publish_on_success: user_granted  # Event published after success
 ```
 
 This generates:
 - REST endpoint that calls controller and publishes event after success
-- Event adapter in subscriber services that handles `user_registered`
+- Event adapter in subscriber services that handles `user_granted`
 - Unified protocol with all controller methods
 {% endif %}
 ## Deployment

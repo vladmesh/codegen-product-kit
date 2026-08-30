@@ -53,7 +53,7 @@ For a backend plus notifications project, a full worker-mode smoke run is:
 ```bash
 make worker-start
 make smoke-probe
-make worker-call url=http://backend:8000/users method=POST body='{"telegram_id":123}'
+make worker-call url=http://backend:8000/users/grant method=POST body='{"channel":"telegram","external_id":"123"}'
 make worker-stop
 ```
 
@@ -68,7 +68,7 @@ make smoke-probe SMOKE_RUNNER=backend SMOKE_URL=http://backend:8000/health
 Use `make worker-call` for non-GET requests:
 
 ```bash
-make worker-call SMOKE_RUNNER=backend url=http://backend:8000/users method=POST body='{"telegram_id":123}'
+make worker-call SMOKE_RUNNER=backend url=http://backend:8000/users/grant method=POST body='{"channel":"telegram","external_id":"123"}'
 ```
 
 Worker mode must not depend on published host ports. The dev layer keeps

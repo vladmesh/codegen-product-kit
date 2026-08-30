@@ -8,7 +8,6 @@ from __future__ import annotations
 
 {% if 'backend' in modules -%}
 from datetime import UTC, datetime
-from http import HTTPStatus
 {% endif -%}
 import os
 import time
@@ -18,7 +17,6 @@ from typing import Final
 import httpx
 {% endif -%}
 import structlog
-from shared.logging import configure_logging
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -28,15 +26,15 @@ from telegram.ext import (
     ContextTypes,
     TypeHandler,
 )
-{%- if 'backend' in modules %}
-
+{% if 'backend' in modules %}
+from services.tg_bot.src.access import TELEGRAM_CHANNEL, is_active, telegram_external_id
+{% else -%}{{ '\n' }}{% endif -%}
+{% if 'backend' in modules -%}
 from shared.generated.events import get_broker, publish_command_received
-from shared.generated.schemas import CommandReceived, UserCreate, UserRead
+from shared.generated.schemas import CommandReceived, UserAccess
 from shared.http_client import ServiceClient
-{%- endif %}
-
-from services.tg_bot.src.access import in_test_mode, is_allowed
-from services.tg_bot.src.middleware import install_update_logging
+{% endif -%}
+from shared.logging import configure_logging
 
 configure_logging(service_name="tg_bot")
 LOGGER = structlog.stdlib.get_logger()
@@ -47,25 +45,17 @@ DEFAULT_GREETING: Final[str] = (
 PLACEHOLDER_TELEGRAM_BOT_TOKEN: Final[str] = "your-telegram-bot-token"  # noqa: S105
 ALLOW_PLACEHOLDER_TOKEN_ENV: Final[str] = "TG_BOT_ALLOW_PLACEHOLDER_TOKEN"  # noqa: S105
 {% if 'backend' in modules %}
-WELCOME_BACK_GREETING: Final[str] = "Хай, добро пожаловать назад!"
-REGISTRATION_ERROR: Final[str] = (
-    "Не получилось зарегистрировать вас в сервисе, попробуйте ещё раз позже."
-)
-
-
 class BackendClient(ServiceClient):
     """Typed HTTP client for the backend service."""
 
     def __init__(self) -> None:
         super().__init__(base_url_env="BACKEND_API_URL")
 
-    async def create_user(self, payload: UserCreate) -> UserRead:
-        resp = await self._request("post", "/users", json=payload.model_dump(mode="json"))
-        return UserRead.model_validate(resp.json())
-
-    async def get_user(self, user_id: int) -> UserRead:
-        resp = await self._request("get", f"/users/{user_id}")
-        return UserRead.model_validate(resp.json())
+    async def resolve(self, channel: str, external_id: str) -> UserAccess:
+        resp = await self._request(
+            "get", "/users/access", params={"channel": channel, "external_id": external_id}
+        )
+        return UserAccess.model_validate(resp.json())
 {% endif %}
 
 def _get_token() -> str:
@@ -86,43 +76,21 @@ def _allows_placeholder_token() -> bool:
     return os.getenv(ALLOW_PLACEHOLDER_TOKEN_ENV) == "true"
 {% if 'backend' in modules %}
 
-async def _sync_user_with_backend(telegram_id: int) -> bool | None:
-    """Ensure the user exists in the backend or create it if missing.
+async def _has_active_access(telegram_id: int | None) -> bool:
+    """Resolve the Telegram identity and accept only an active backend user."""
 
-    Uses generated BackendClient with built-in retry logic:
-    - Retries on httpx.ConnectError (backend unavailable)
-    - Retries on 5xx status codes (server errors)
-    - No retry on 4xx client errors (fails immediately)
-
-    Args:
-        telegram_id: Telegram user ID to sync
-
-    Returns:
-        True if user was created, False if already exists, None on permanent failure
-    """
-    payload = UserCreate(telegram_id=telegram_id)
+    external_id = telegram_external_id(telegram_id)
+    if external_id is None:
+        return False
 
     try:
         async with BackendClient() as client:
-            user = await client.create_user(payload)
-            LOGGER.info("Created user: %s", user.id)
-            return True
+            access = await client.resolve(TELEGRAM_CHANNEL, external_id)
+    except httpx.HTTPError:
+        # Unknown users and unavailable backend access both fail closed.
+        return False
 
-    except httpx.HTTPStatusError as e:
-        # 409 CONFLICT = user already exists (success case)
-        if e.response.status_code == HTTPStatus.CONFLICT:
-            return False
-
-        LOGGER.error(
-            "Backend error: status=%s body=%s",
-            e.response.status_code,
-            e.response.text,
-        )
-        return None
-
-    except (httpx.ConnectError, httpx.HTTPError):
-        LOGGER.exception("Failed to sync Telegram user after retries")
-        return None
+    return is_active(access.status)
 {% endif %}
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -132,19 +100,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if telegram_user is None or telegram_user.id is None:
         LOGGER.warning("/start received without a valid Telegram user")
         return
-{% if 'backend' in modules %}
-    sync_result = await _sync_user_with_backend(telegram_user.id)
-    if sync_result is None:
-        reply_text = REGISTRATION_ERROR
-    elif sync_result:
-        reply_text = (
-            f"{DEFAULT_GREETING}\nРады познакомиться, {telegram_user.first_name or 'друг'}!"
-        )
-    else:
-        reply_text = f"{WELCOME_BACK_GREETING} {telegram_user.first_name or ''}".strip()
-{% else %}
     reply_text = f"{DEFAULT_GREETING}\nДобро пожаловать, {telegram_user.first_name or 'друг'}!"
-{% endif %}
     if update.message:
         await update.message.reply_text(reply_text)
     LOGGER.info("Handled /start for user_id=%s", telegram_user.id)
@@ -188,28 +144,25 @@ async def post_shutdown(application: Application) -> None:
 
 {% endif %}
 async def enforce_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Drop updates from senders the deployment did not admit.
+    """Drop updates whose Telegram identity lacks active backend access.
 
     Runs before every handler. Raising ``ApplicationHandlerStop`` keeps the update
     from reaching any of them, so access does not depend on each handler
     remembering to check.
     """
 
-    user = update.effective_user
-    telegram_id = user.id if user else None
-    if is_allowed(telegram_id):
+{% if 'backend' in modules %}
+    if await _has_active_access(update.effective_user.id if update.effective_user else None):
         return
-
-    LOGGER.info(
-        "access_denied",
-        telegram_id=telegram_id,
-        test_mode=in_test_mode(),
-    )
+{% endif %}
+    LOGGER.info("access_denied")
     raise ApplicationHandlerStop
 
 
 def build_application() -> Application:
     """Create the telegram bot application with all handlers wired in."""
+    from services.tg_bot.src.middleware import install_update_logging
+
 {% if 'backend' in modules %}
     application = (
         ApplicationBuilder()
