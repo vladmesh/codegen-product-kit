@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import BigInteger, Boolean, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ...core import ORMBase
+from services.backend.src.core.orm import ORMBase
 
 
 class User(ORMBase):

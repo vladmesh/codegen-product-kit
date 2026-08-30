@@ -1,5 +1,1 @@
-"""Version 1 API routers."""
-
-from . import health
-
-__all__ = ["health"]
+"""Version 1 API modules."""

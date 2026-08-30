@@ -26,6 +26,9 @@ manual router for an operation already owned by a domain spec.
 
 ## Database migrations
 
+When adding a handwritten ORM model, register it explicitly in `src/app/models/registry.py` so
+Alembic includes it in `Base.metadata`.
+
 ```bash
 make makemigrations name="describe_change"
 make migrate

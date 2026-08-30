@@ -10,9 +10,9 @@ from alembic import context
 from alembic.autogenerate.api import AutogenContext
 from sqlalchemy import engine_from_config, pool
 
-from services.backend.src.app import models  # noqa: F401  # ensure models are imported
-from services.backend.src.core import Base, get_settings
-from services.backend.src.core.db import TzAwareDateTime
+from services.backend.src.app.models import registry  # noqa: F401  # register user-owned models
+from services.backend.src.core.orm import Base, TzAwareDateTime
+from services.backend.src.core.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None:

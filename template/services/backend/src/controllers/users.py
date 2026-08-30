@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.backend.src.app.models import User
-from services.backend.src.app.repositories import UserRepository
+from services.backend.src.app.models.user import User
+from services.backend.src.app.repositories.user import UserRepository
 from services.backend.src.generated.protocols import UsersControllerProtocol
 from shared.generated.schemas import (
     UserCreate,

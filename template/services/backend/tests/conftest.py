@@ -47,8 +47,10 @@ from services.backend.src.core.settings import get_settings  # noqa: E402
 get_settings.cache_clear()
 TEST_DB_PATH.unlink(missing_ok=True)
 
-from services.backend.src.core.db import Base, get_async_db  # noqa: E402  (after env setup)
-from services.backend.src.main import create_app  # noqa: E402
+from services.backend.src.app.factory import create_app  # noqa: E402
+import services.backend.src.app.models.registry  # noqa: E402, F401  (register models for metadata)
+from services.backend.src.core.db import get_async_db  # noqa: E402  (after env setup)
+from services.backend.src.core.orm import Base  # noqa: E402
 
 
 @pytest_asyncio.fixture(scope="session")
