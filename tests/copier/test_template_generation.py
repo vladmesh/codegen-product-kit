@@ -334,10 +334,10 @@ class TestBackendWithTgBotGeneration:
         assert "await _has_active_access" in rendered
         assert "status == ACTIVE_STATUS" in rendered
 
-    def test_generated_user_authority_seeds_are_current_and_secret_free(
+    def test_generated_user_authority_seeds_are_current_with_local_capability_fixture(
         self, project_backend_tg_bot: Path
     ) -> None:
-        """Copied projects ship grant/access contracts without a credential value."""
+        """Copied projects ship grant/access contracts and a local-only fixture."""
         import json
 
         backend = project_backend_tg_bot / "services" / "backend"
@@ -351,7 +351,7 @@ class TestBackendWithTgBotGeneration:
         assert "X-Grant-Capability" not in json.dumps(openapi)
         assert "class UserChannel" in schemas
         assert "class UserGrant" in schemas
-        assert "USERS_GRANT_CAPABILITY" not in env_example
+        assert "USERS_GRANT_CAPABILITY=local-grant-capability-not-for-production" in env_example
         assert (backend / "src" / "generated" / "registry.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "users.py").is_file()
 

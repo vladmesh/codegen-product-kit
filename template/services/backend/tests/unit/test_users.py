@@ -47,10 +47,16 @@ async def test_grant_rejects_missing_or_wrong_capability_before_writing(
         headers=[(GRANT_HEADER, GRANT_CAPABILITY), (GRANT_HEADER, GRANT_CAPABILITY)],
         json=payload,
     )
+    non_ascii = await client.post(
+        "/users/grant",
+        headers=[(GRANT_HEADER.encode(), b"\xff")],
+        json=payload,
+    )
 
     assert missing.status_code == status.HTTP_403_FORBIDDEN
     assert wrong.status_code == status.HTTP_403_FORBIDDEN
     assert malformed.status_code == status.HTTP_403_FORBIDDEN
+    assert non_ascii.status_code == status.HTTP_403_FORBIDDEN
 
     unresolved = await client.get(
         "/users/access", params={"channel": "telegram", "external_id": "111"}

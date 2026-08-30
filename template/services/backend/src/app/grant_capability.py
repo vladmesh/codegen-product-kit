@@ -33,6 +33,7 @@ class GrantCapabilityMiddleware(BaseHTTPMiddleware):
         if (
             len(presented) != 1
             or not presented[0]
+            or not presented[0].isascii()
             or not compare_digest(presented[0], self._capability)
         ):
             return JSONResponse(status_code=403, content={"detail": "Grant capability required"})

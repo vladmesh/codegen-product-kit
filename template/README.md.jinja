@@ -47,8 +47,9 @@ make worker-stop
 ```
 
 `POST /users/grant` is a deployment capability, not a worker-call command. It requires the
-single `X-Grant-Capability` request header, whose per-project value is resolved as the backend's
-`USERS_GRANT_CAPABILITY` generated secret and is never committed to this project.
+single `X-Grant-Capability` request header. The local `.env` fixture only makes the generated
+development stack start; deployment receives its distinct per-project value as the backend's
+`USERS_GRANT_CAPABILITY` generated secret, which is never committed to this project.
 
 {% endif -%}
 
