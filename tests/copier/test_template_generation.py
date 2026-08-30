@@ -122,7 +122,7 @@ class TestBackendOnlyGeneration:
         assert "Use `make ps` to see the current project's Compose stack status." in content
         assert "`REDIS_HOST_PORT` maps Redis to container port `6379`" in content
         assert "use `users` as the reference entity" in content
-        assert "make worker-call url=http://backend:8000/users method=POST" in content
+        assert "make worker-call url=http://backend:8000/users/grant method=POST" in content
 
     def test_infra_contract_documented(self, project_backend: Path):
         """Generated project should document the compose infra contract."""
