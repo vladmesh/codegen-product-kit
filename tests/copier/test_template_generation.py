@@ -121,8 +121,9 @@ class TestBackendOnlyGeneration:
         assert "backend" in content.lower()
         assert "Use `make ps` to see the current project's Compose stack status." in content
         assert "`REDIS_HOST_PORT` maps Redis to container port `6379`" in content
-        assert "use `users` as the reference entity" in content
-        assert "make worker-call url=http://backend:8000/users method=POST" in content
+        assert "Add domain operations" in content
+        assert "make worker-call url=http://backend:8000/health method=GET" in content
+        assert "X-Grant-Capability" in content
 
     def test_infra_contract_documented(self, project_backend: Path):
         """Generated project should document the compose infra contract."""
@@ -139,7 +140,10 @@ class TestBackendOnlyGeneration:
         assert "consumers load `REDIS_URL` from generated `.env`" in infra_readme
         assert "## Parallel run isolation" in infra_readme
         assert "COMPOSE_PROJECT_NAME=my-project-dev make dev-start" in infra_readme
-        assert "make worker-call SMOKE_RUNNER=backend url=http://backend:8000/users" in infra_readme
+        assert (
+            "make worker-call SMOKE_RUNNER=backend url=http://backend:8000/health"
+            in infra_readme
+        )
         assert "docker compose --env-file .env" in infra_readme
         assert "`--project-name` option explicitly" in infra_readme
         assert "`infra/README.md`" in agents
@@ -312,6 +316,44 @@ class TestBackendWithTgBotGeneration:
         depends_on = compose["services"]["tg_bot"]["depends_on"]
         assert depends_on["redis"]["condition"] == "service_healthy"
         assert depends_on["backend"]["condition"] == "service_started"
+
+    def test_tg_bot_access_uses_backend_status_without_env_fallback(
+        self, project_backend_tg_bot: Path
+    ) -> None:
+        """Rendered bots resolve access through the generated user capability only."""
+        bot = project_backend_tg_bot / "services" / "tg_bot"
+        rendered = "\n".join(
+            (bot / relative).read_text()
+            for relative in ("src/access.py", "src/main.py", "env.contract.yaml", "AGENTS.md")
+        )
+
+        assert "TG_BOT_ALLOWED_TELEGRAM_IDS" not in rendered
+        assert "TG_BOT_OWNER_TELEGRAM_ID" not in rendered
+        assert "TG_BOT_TEST_TELEGRAM_ID" not in rendered
+        assert '"/users/access"' in rendered
+        assert "await _has_active_access" in rendered
+        assert "status == ACTIVE_STATUS" in rendered
+
+    def test_generated_user_authority_seeds_are_current_with_local_capability_fixture(
+        self, project_backend_tg_bot: Path
+    ) -> None:
+        """Copied projects ship grant/access contracts and a local-only fixture."""
+        import json
+
+        backend = project_backend_tg_bot / "services" / "backend"
+        openapi = json.loads((backend / "docs" / "openapi.json").read_text())
+        schemas = (
+            project_backend_tg_bot / "shared" / "shared" / "generated" / "schemas.py"
+        ).read_text()
+        env_example = (project_backend_tg_bot / ".env.example").read_text()
+
+        assert set(openapi["paths"]) == {"/users/grant", "/users/access"}
+        assert "X-Grant-Capability" not in json.dumps(openapi)
+        assert "class UserChannel" in schemas
+        assert "class UserGrant" in schemas
+        assert "USERS_GRANT_CAPABILITY=local-grant-capability-not-for-production" in env_example
+        assert (backend / "src" / "generated" / "registry.py").is_file()
+        assert (backend / "src" / "generated" / "routers" / "users.py").is_file()
 
 
 class TestFullStackGeneration:
@@ -905,7 +947,25 @@ class TestIntegration:
             assert chown.returncode == 0, chown.stderr
 
             registry = output / "services" / "backend" / "src" / "generated" / "registry.py"
-            registry.unlink(missing_ok=True)
+            remove_registry = subprocess.run(  # noqa: S603, S607
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--user",
+                    owner,
+                    "-v",
+                    f"{output}:/workspace",
+                    "alpine:3.20",
+                    "rm",
+                    "-f",
+                    "/workspace/services/backend/src/generated/registry.py",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert remove_registry.returncode == 0, remove_registry.stderr
+            assert not registry.exists()
             result = subprocess.run(  # noqa: S603, S607
                 [
                     *compose,

@@ -130,7 +130,7 @@ class OpenAPIGenerator:
             openapi_op["parameters"] = [
                 {
                     "name": p.name,
-                    "in": "path",
+                    "in": p.param_source,
                     "required": True,
                     "schema": type_to_openapi_schema(p.type),
                 }

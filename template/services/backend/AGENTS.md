@@ -37,16 +37,20 @@ Use absolute imports across package boundaries:
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
 from services.backend.src.generated.protocols import UsersControllerProtocol
-from shared.generated.schemas import UserCreate, UserRead
+from shared.generated.schemas import UserAccess, UserGrant
 ```
 
 Relative imports are acceptable within one package. Do not import from a top-level `src` package.
 
 ## Security invariant
 
-Client input variants must not expose privilege-granting fields. For example, `User.is_admin` is
-excluded from Create and Update variants and is assigned only by trusted application logic. Apply
-the same rule to new privilege fields.
+`User.status` is the sole persisted admission decision. `users.grant(channel, external_id)` is the
+only operation that creates or activates an external identity; the bot resolves that identity and
+admits only `active` users. `POST /users/grant` requires exactly one
+`X-Grant-Capability` header whose value matches the generated-secret
+`USERS_GRANT_CAPABILITY` using a constant-time comparison. This header is deliberately absent from
+OpenAPI and from user-facing helper commands. Do not introduce environment, owner, or channel-
+specific fallback admission paths.
 
 ## Database and migrations
 

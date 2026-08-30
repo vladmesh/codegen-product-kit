@@ -50,7 +50,7 @@ spec/notifications.yaml -> src/generated/ (protocols.py, event_adapter.py)
 
 | Event | Handler |
 |-------|---------|
-| `user_registered` | `NotificationsController.on_user_registered` |
+| `user_granted` | `NotificationsController.on_user_granted` |
 
 Подписки регистрируются автоматически через `create_event_adapter()` в `main.py`. Не регистрируйте `@broker.subscriber` вручную.
 

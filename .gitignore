@@ -19,5 +19,12 @@ apps/backend/tests/.tmp/
 # Auto-generated files (created by make generate-from-spec, make openapi)
 **/generated/
 **/docs/openapi.json
+
+# The template ships these generated seeds so a new backend project imports before setup.
+!template/shared/shared/generated/
+!template/shared/shared/generated/**
+!template/services/backend/src/generated/
+!template/services/backend/src/generated/**
+!template/services/backend/docs/openapi.json
 test-sync-markers/
 state/checks/

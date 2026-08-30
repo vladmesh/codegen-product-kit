@@ -27,6 +27,16 @@ def env_keys(path: Path) -> set[str]:
     }
 
 
+def env_values(path: Path) -> dict[str, str]:
+    """Return non-commented environment values keyed by variable name."""
+    return {
+        key: value
+        for line in path.read_text().splitlines()
+        if line and not line.startswith("#")
+        for key, _, value in [line.partition("=")]
+    }
+
+
 def fragments(project: Path) -> list[tuple[Path, dict[str, object]]]:
     """Load every generated environment contract fragment."""
     return [
@@ -103,7 +113,7 @@ def test_backend_contract_classifies_infrastructure_values(project_backend: Path
         "required": True,
         "value": 6379,
     }
-    for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD"):
+    for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD", "USERS_GRANT_CAPABILITY"):
         assert entries[key]["source"] == "generated_secret"
     assert entries["REDIS_URL"] == {
         "source": "literal",
@@ -114,6 +124,27 @@ def test_backend_contract_classifies_infrastructure_values(project_backend: Path
     }
     assert entries["APP_ENV"]["source"] == "derived"
     assert entries["BACKEND_IMAGE"]["source"] == "derived"
+
+
+def test_required_local_contract_values_are_present_for_documented_backend_startup(
+    project_backend_tg_bot: Path,
+) -> None:
+    """A copied .env.example supplies every required local contract value."""
+    entries = {
+        key: entry
+        for _, fragment in fragments(project_backend_tg_bot)
+        for key, entry in fragment["entries"].items()
+    }
+    local_required = {
+        key
+        for key, entry in entries.items()
+        if entry["required"] and "local" in entry["environments"]
+    }
+    documented = env_values(project_backend_tg_bot / ".env.example")
+
+    assert local_required <= set(documented)
+    assert all(documented[key] for key in local_required)
+    assert documented["USERS_GRANT_CAPABILITY"] == "local-grant-capability-not-for-production"
 
 
 @pytest.mark.parametrize(

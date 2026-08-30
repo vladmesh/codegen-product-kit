@@ -1,4 +1,4 @@
-"""Integration tests for user CRUD endpoints."""
+"""Integration tests for the generated, capability-protected user authority."""
 
 from __future__ import annotations
 
@@ -8,123 +8,151 @@ from unittest.mock import AsyncMock
 from fastapi import status
 from httpx import AsyncClient
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.backend.src.app.models.user import User, UserChannel, UserStatus
+from services.backend.src.app.repositories.user import UserRepository
+from services.backend.src.core.settings import get_settings
 import shared.generated.events as events_module
 
+GRANT_HEADER = "X-Grant-Capability"
 
-async def _create_user(client: AsyncClient, telegram_id: int = 111) -> dict[str, Any]:
+
+def _headers(capability: str | None = None) -> dict[str, str]:
+    """Return a valid grant header for the active test configuration."""
+    capability = capability or get_settings().users_grant_capability
+    return {GRANT_HEADER: capability}
+
+
+async def _grant(
+    client: AsyncClient, channel: str = "telegram", external_id: str = "111"
+) -> dict[str, Any]:
     response = await client.post(
-        "/users",
-        json={"telegram_id": telegram_id},
+        "/users/grant",
+        headers=_headers(),
+        json={"channel": channel, "external_id": external_id},
     )
-    assert response.status_code == status.HTTP_201_CREATED
+    assert response.status_code == status.HTTP_200_OK
     return cast(dict[str, Any], response.json())
 
 
 @pytest.mark.asyncio
-async def test_list_users(client: AsyncClient) -> None:
-    empty = await client.get("/users")
-    assert empty.status_code == status.HTTP_200_OK
-    assert empty.json() == []
+async def test_grant_rejects_missing_or_wrong_capability_before_writing(
+    client: AsyncClient,
+) -> None:
+    payload = {"channel": "telegram", "external_id": "111"}
 
-    await _create_user(client, telegram_id=100)
-    await _create_user(client, telegram_id=200)
+    missing = await client.post("/users/grant", json=payload)
+    wrong = await client.post("/users/grant", headers=_headers("wrong"), json=payload)
+    malformed = await client.post(
+        "/users/grant",
+        headers=[(GRANT_HEADER, _headers()[GRANT_HEADER])] * 2,
+        json=payload,
+    )
+    non_ascii = await client.post(
+        "/users/grant",
+        headers=[(GRANT_HEADER.encode(), b"\xff")],
+        json=payload,
+    )
 
-    response = await client.get("/users")
-    assert response.status_code == status.HTTP_200_OK
-    assert len(response.json()) == 2  # noqa: PLR2004
+    assert missing.status_code == status.HTTP_403_FORBIDDEN
+    assert wrong.status_code == status.HTTP_403_FORBIDDEN
+    assert malformed.status_code == status.HTTP_403_FORBIDDEN
+    assert non_ascii.status_code == status.HTTP_403_FORBIDDEN
+
+    unresolved = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "111"}
+    )
+    assert unresolved.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_create_and_get_user(client: AsyncClient) -> None:
-    created = await _create_user(client, telegram_id=123456789)
+async def test_grant_is_idempotent_and_activates_the_identity(client: AsyncClient) -> None:
+    first = await _grant(client)
+    second = await _grant(client)
 
-    fetched = await client.get(f"/users/{created['id']}")
-    assert fetched.status_code == status.HTTP_200_OK
-    assert fetched.json()["telegram_id"] == 123456789  # noqa: PLR2004
+    assert second == first
+    assert first["status"] == "active"
+
+    resolved = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "111"}
+    )
+    assert resolved.status_code == status.HTTP_200_OK
+    assert resolved.json() == first
 
 
 @pytest.mark.asyncio
-async def test_create_user_publishes_user_registered(client: AsyncClient) -> None:
-    await _create_user(client, telegram_id=123456789)
+async def test_resolve_reports_active_inactive_and_unknown_identities(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    active = await _grant(client, external_id="active")
+
+    inactive_user = User(status=UserStatus.INACTIVE)
+    inactive_identity = UserChannel(
+        user=inactive_user,
+        channel="telegram",
+        external_id="inactive",
+    )
+    db_session.add(inactive_identity)
+    await db_session.flush()
+
+    active_result = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "active"}
+    )
+    inactive_result = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "inactive"}
+    )
+    unknown_result = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "unknown"}
+    )
+
+    assert active_result.json() == active
+    assert inactive_result.status_code == status.HTTP_200_OK
+    assert inactive_result.json()["status"] == "inactive"
+    assert unknown_result.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_grant_validates_channel_identity(client: AsyncClient) -> None:
+    response = await client.post(
+        "/users/grant",
+        headers=_headers(),
+        json={"channel": "", "external_id": ""},
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+async def test_grant_publishes_user_granted(client: AsyncClient) -> None:
+    granted = await _grant(client, external_id="222")
 
     publish = cast(AsyncMock, events_module.get_broker().publish)
     publish.assert_awaited_once()
     await_args = publish.await_args
     assert await_args is not None
     event, channel = await_args.args
-    assert channel == "user_registered"
-    assert event.telegram_id == 123456789  # noqa: PLR2004
+    assert channel == "user_granted"
+    assert event.user_id == granted["user_id"]
+    assert event.status == "active"
 
 
 @pytest.mark.asyncio
-async def test_update_user(client: AsyncClient) -> None:
-    created = await _create_user(client, telegram_id=1111)
-    update_payload = {"telegram_id": 987654321}
-
-    updated = await client.put(f"/users/{created['id']}", json=update_payload)
-    assert updated.status_code == status.HTTP_200_OK
-    body = updated.json()
-    assert body["telegram_id"] == 987654321  # noqa: PLR2004
-    assert body["is_admin"] is False
+async def test_removed_crud_routes_are_not_exposed(client: AsyncClient) -> None:
+    assert (await client.get("/users")).status_code == status.HTTP_404_NOT_FOUND
+    assert (await client.post("/users", json={})).status_code == status.HTTP_404_NOT_FOUND
+    assert (await client.patch("/users/1/status", json={"status": "active"})).status_code == (
+        status.HTTP_404_NOT_FOUND
+    )
 
 
 @pytest.mark.asyncio
-async def test_create_user_rejects_is_admin(client: AsyncClient) -> None:
-    """The privilege flag is not an input: the backend is reachable from outside."""
-    response = await client.post("/users", json={"telegram_id": 3333, "is_admin": True})
+async def test_repository_grant_reactivates_an_inactive_identity(db_session: AsyncSession) -> None:
+    user = User(status=UserStatus.INACTIVE)
+    identity = UserChannel(user=user, channel="telegram", external_id="reactivate")
+    db_session.add(identity)
+    await db_session.flush()
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    granted = await UserRepository(db_session).grant("telegram", "reactivate")
 
-    listed = await client.get("/users")
-    assert listed.json() == []
-
-
-@pytest.mark.asyncio
-async def test_update_user_rejects_is_admin(client: AsyncClient) -> None:
-    created = await _create_user(client, telegram_id=4444)
-
-    updated = await client.put(f"/users/{created['id']}", json={"is_admin": True})
-
-    assert updated.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-    unchanged = await client.get(f"/users/{created['id']}")
-    assert unchanged.json()["is_admin"] is False
-
-
-@pytest.mark.asyncio
-async def test_delete_user(client: AsyncClient) -> None:
-    created = await _create_user(client, telegram_id=2222)
-
-    deleted = await client.delete(f"/users/{created['id']}")
-    assert deleted.status_code == status.HTTP_204_NO_CONTENT
-
-    missing = await client.get(f"/users/{created['id']}")
-    assert missing.status_code == status.HTTP_404_NOT_FOUND
-
-
-@pytest.mark.asyncio
-async def test_create_user_rejects_duplicate_telegram_id(client: AsyncClient) -> None:
-    await _create_user(client, telegram_id=42)
-
-    duplicate = await client.post("/users", json={"telegram_id": 42})
-
-    assert duplicate.status_code == status.HTTP_409_CONFLICT
-    assert duplicate.json()["detail"] == "Telegram user already exists"
-
-
-@pytest.mark.asyncio
-async def test_update_user_requires_payload(client: AsyncClient) -> None:
-    created = await _create_user(client, telegram_id=77)
-
-    response = await client.put(f"/users/{created['id']}", json={})
-
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json()["detail"] == "No changes supplied"
-
-
-@pytest.mark.asyncio
-async def test_db_isolation_after_all_tests(client: AsyncClient) -> None:
-    response = await client.get("/users")
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == []
+    assert granted.user.status == UserStatus.ACTIVE

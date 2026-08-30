@@ -42,9 +42,14 @@ service container inside the Compose network:
 
 ```bash
 make worker-start
-make worker-call url=http://backend:8000/users method=POST body='{"telegram_id":123}'
+make worker-call url=http://backend:8000/health method=GET
 make worker-stop
 ```
+
+`POST /users/grant` is a deployment capability, not a worker-call command. It requires the
+single `X-Grant-Capability` request header. The local `.env` fixture only makes the generated
+development stack start; deployment receives its distinct per-project value as the backend's
+`USERS_GRANT_CAPABILITY` generated secret, which is never committed to this project.
 
 {% endif -%}
 
@@ -85,7 +90,8 @@ This project includes the following modules:
 {% if 'backend' in modules -%}
 - **Add/modify models:** Edit `shared/spec/models.yaml` → `make generate-from-spec`
 - **Add endpoints:** Edit `services/backend/spec/*.yaml` → `make generate-from-spec`
-- **Add CRUD by analogy:** use `users` as the reference entity for spec, repository, controller and tests.
+- **Add domain operations:** declare them in the spec, then implement their generated controller
+  protocol and repository boundary.
 - **Create database migrations:** add or change ORM models, then run
   `make makemigrations name="describe_change"`. The target starts the PostgreSQL dev container
   through the worker compose layer and runs Alembic inside a one-off backend container. It upgrades the database to the current

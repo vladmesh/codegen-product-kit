@@ -1,6 +1,6 @@
 events:
-  user_registered:
-    message: UserRead
+  user_granted:
+    message: UserAccess
     publish: true
 
   command_received:

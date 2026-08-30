@@ -35,6 +35,7 @@ os.environ.setdefault("ASYNC_DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB_PATH}
 os.environ.setdefault("APP_NAME", "test-backend")
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key")
+os.environ.setdefault("USERS_GRANT_CAPABILITY", "test-grant-capability")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("POSTGRES_DB", "test_db")

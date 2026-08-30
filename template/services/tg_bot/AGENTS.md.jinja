@@ -81,18 +81,21 @@ import main                                     # bare import, не работа
 | `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
 {%- if 'backend' in modules %}
 | `REDIS_URL` | Yes | Redis connection string (e.g., `redis://redis:6379`) |
-| `BACKEND_API_URL` | Yes | Backend URL for user sync (e.g., `http://backend:8000`) |
+| `BACKEND_API_URL` | Yes | Backend URL for Telegram identity resolution (e.g., `http://backend:8000`) |
 {%- endif %}
 
 ## Communication Patterns
 
 {%- if 'backend' in modules %}
 
-1. **User Sync** — HTTP POST to backend `/users` endpoint (создание/проверка пользователя)
+1. **User Access** — HTTP GET to backend `/users/access` resolves the Telegram identity. Only a
+   response with `status=active` is admitted; grants happen through the separately held backend
+   capability and are never available to Telegram handlers.
 2. **Command Events** — Direct publish to Redis Streams (события команд)
 {%- else %}
 
-1. **Local Commands** — Handlers reply directly from the bot process.
+1. **Fail-closed Commands** — Without a backend the bot cannot resolve identities and denies all
+   incoming updates. Select `backend,tg_bot` for an interactive bot.
 {%- endif %}
 
 ## Dependencies
@@ -107,17 +110,7 @@ import main                                     # bare import, не работа
 
 ## Доступ к боту
 
-Кто может общаться с ботом — задаётся конфигурацией, а не кодом обработчиков. Контракт живёт в
-`services/tg_bot/src/access.py` и объявлен в `env.contract.yaml`:
-
-| Переменная | Смысл |
-|---|---|
-| `TG_BOT_ALLOWED_TELEGRAM_IDS` | Продуктовая аудитория, список id через запятую. Пусто означает публичный бот |
-| `TG_BOT_TEST_TELEGRAM_ID` | Одна временная тестовая личность для проверки приватного бота |
-
-Проверка стоит один раз, в `enforce_access`, и вешается обработчиком в группу `-1`, то есть до всех
-остальных. Обработчикам не нужно помнить про доступ.
-
-Тестовая личность намеренно отделена от аудитории: она не подмешивается в список, не даёт прав сверх
-возможности вести диалог и не открывает бота остальным. Отзыв — это снятие значения, остаточного
-состояния не остаётся. Публичный бот в тестовом режиме не бывает: впускать некуда.
+Доступ определяется только сохранённым `User.status`. `enforce_access` в группе `-1` до всех
+обработчиков преобразует Telegram id в channel identity, запрашивает backend и пропускает обновление
+только при `status=active`. Не добавляйте env allow-list, owner literal, temporary test identity или
+публичный режим: неизвестные, inactive и malformed identities всегда отклоняются.
