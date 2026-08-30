@@ -6,7 +6,7 @@ from faststream.redis import TestRedisBroker
 import pytest
 
 from shared.generated.events import get_broker, publish_user_granted
-from shared.generated.schemas import UserAccess
+from shared.generated.schemas import Status, UserAccess
 
 
 @pytest.mark.asyncio
@@ -14,7 +14,7 @@ async def test_publish_user_granted() -> None:
     async with TestRedisBroker(get_broker()):
         event = UserAccess(
             user_id=123,
-            status="active",
+            status=Status("active"),
             channel="telegram",
             external_id="456",
         )

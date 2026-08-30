@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.backend.src.app.models.user import User, UserChannel, UserStatus
 from services.backend.src.app.repositories.user import UserRepository
 from services.backend.src.generated.protocols import UsersControllerProtocol
-from shared.generated.schemas import UserAccess, UserGrant, UserRead, UserStatusUpdate
+from shared.generated.schemas import Status, UserAccess, UserGrant, UserRead, UserStatusUpdate
 
 
 def _get_repo(session: AsyncSession) -> UserRepository:
@@ -27,7 +27,7 @@ def _to_user_read(user: User) -> UserRead:
 def _to_access(identity: UserChannel) -> UserAccess:
     return UserAccess(
         user_id=identity.user_id,
-        status=identity.user.status,
+        status=Status(identity.user.status.value),
         channel=identity.channel,
         external_id=identity.external_id,
     )
