@@ -12,13 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.backend.src.app.models.user import User, UserChannel, UserStatus
 from services.backend.src.app.repositories.user import UserRepository
+from services.backend.src.core.settings import get_settings
 import shared.generated.events as events_module
 
 GRANT_HEADER = "X-Grant-Capability"
-GRANT_CAPABILITY = "test-grant-capability"
 
 
-def _headers(capability: str = GRANT_CAPABILITY) -> dict[str, str]:
+def _headers(capability: str | None = None) -> dict[str, str]:
+    """Return a valid grant header for the active test configuration."""
+    capability = capability or get_settings().users_grant_capability
     return {GRANT_HEADER: capability}
 
 
@@ -44,7 +46,7 @@ async def test_grant_rejects_missing_or_wrong_capability_before_writing(
     wrong = await client.post("/users/grant", headers=_headers("wrong"), json=payload)
     malformed = await client.post(
         "/users/grant",
-        headers=[(GRANT_HEADER, GRANT_CAPABILITY), (GRANT_HEADER, GRANT_CAPABILITY)],
+        headers=[(GRANT_HEADER, _headers()[GRANT_HEADER])] * 2,
         json=payload,
     )
     non_ascii = await client.post(
