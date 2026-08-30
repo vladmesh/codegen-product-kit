@@ -83,7 +83,7 @@ def test_asgi_entrypoint_builds_the_application() -> None:
     from services.backend.src.main import app
 
     assert isinstance(app, FastAPI)
-    assert any(route.path == "/health" for route in app.routes)
+    assert any(getattr(route, "path", None) == "/health" for route in app.routes)
 
 
 def test_alembic_environment_loads_registered_metadata() -> None:
