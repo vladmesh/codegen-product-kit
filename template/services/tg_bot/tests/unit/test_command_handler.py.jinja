@@ -156,6 +156,50 @@ class TestBackendAccess:
 
             with pytest.raises(ApplicationHandlerStop):
                 await enforce_access(mock_update, MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_non_http_resolver_failure_stops_before_group_zero_handler(self) -> None:
+        from datetime import UTC, datetime
+        from unittest.mock import patch
+
+        from telegram import Chat, Message, Update, User
+        from telegram.ext import ApplicationBuilder, TypeHandler
+
+        from services.tg_bot.src.main import enforce_access
+
+        group_zero_handler = AsyncMock()
+        user = User(id=TEST_TELEGRAM_USER_ID, is_bot=False, first_name="Test")
+        update = Update(
+            update_id=1,
+            message=Message(
+                message_id=1,
+                date=datetime.now(UTC),
+                chat=Chat(id=TEST_TELEGRAM_USER_ID, type="private"),
+                from_user=user,
+                text="/start",
+            ),
+        )
+        with (
+            patch("telegram.Bot.initialize", new=AsyncMock()),
+            patch("telegram.Bot.get_me", new=AsyncMock()),
+        ):
+            application = ApplicationBuilder().token("test:token").build()
+            application.add_handler(
+                TypeHandler(Update, enforce_access),
+                group=-1,
+            )
+            application.add_handler(TypeHandler(Update, group_zero_handler), group=0)
+            await application.initialize()
+
+            with patch(
+                "services.tg_bot.src.main._has_active_access",
+                new=AsyncMock(side_effect=ValueError("unexpected resolver failure")),
+            ):
+                await application.process_update(update)
+
+            await application.shutdown()
+
+        group_zero_handler.assert_not_awaited()
 {% endif %}
 
 

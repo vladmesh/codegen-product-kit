@@ -63,9 +63,7 @@ class BaseGenerator(ABC):
 
     def write_file(self, path: Path, content: str, *, add_header: bool = True) -> None:
         """Write generated content to file with optional header."""
-        final_content = GENERATED_HEADER + content if add_header else content
-        if not final_content.endswith("\n"):
-            final_content += "\n"
+        final_content = (GENERATED_HEADER + content if add_header else content).rstrip() + "\n"
         atomic_write_text(path, final_content)
 
     def format_file(self, path: Path) -> None:

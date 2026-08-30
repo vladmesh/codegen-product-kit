@@ -89,8 +89,8 @@ import main                                     # bare import, не работа
 {%- if 'backend' in modules %}
 
 1. **User Access** — HTTP GET to backend `/users/access` resolves the Telegram identity. Only a
-   response with `status=active` is admitted; grants happen through `POST /users/grant` on the
-   trusted internal write path.
+   response with `status=active` is admitted; grants happen through the separately held backend
+   capability and are never available to Telegram handlers.
 2. **Command Events** — Direct publish to Redis Streams (события команд)
 {%- else %}
 

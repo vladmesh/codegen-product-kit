@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Replaced the generated public user CRUD and Telegram environment audience with a
+  persisted `User`/`UserChannel` authority. Telegram now admits only identities resolved as
+  `active`; `POST /users/grant` is the sole activation operation and requires the generated backend
+  grant capability.
+
 ## [0.4.0] - 2026-08-30
 
 This release targets newly generated projects. Updating projects generated from earlier template

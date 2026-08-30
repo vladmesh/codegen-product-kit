@@ -163,6 +163,38 @@ operations:
     assert param["schema"] == {"type": "string", "format": "uuid"}
 
 
+def test_openapi_query_param_uses_query_location(fake_repo) -> None:
+    root = fake_repo
+    _write_models(root)
+
+    service_spec_dir = root / "services" / "backend" / "spec"
+    service_spec_dir.mkdir(parents=True)
+    (service_spec_dir / "users.yaml").write_text(
+        """
+domain: users
+config:
+  rest:
+    prefix: "/users"
+    tags: ["users"]
+
+operations:
+  resolve:
+    output: User
+    params:
+      - name: external_id
+        type: str
+        source: query
+    rest:
+      method: GET
+      path: "/access"
+""",
+        encoding="utf-8",
+    )
+
+    param = _generate(root)["paths"]["/users/access"]["get"]["parameters"][0]
+    assert param["in"] == "query"
+
+
 def test_openapi_required_excludes_optional_and_defaulted(fake_repo) -> None:
     """required must drop field-level optional, variant-level optional, and defaulted fields."""
     root = fake_repo

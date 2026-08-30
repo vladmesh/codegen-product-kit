@@ -103,7 +103,7 @@ def test_backend_contract_classifies_infrastructure_values(project_backend: Path
         "required": True,
         "value": 6379,
     }
-    for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD"):
+    for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD", "USERS_GRANT_CAPABILITY"):
         assert entries[key]["source"] == "generated_secret"
     assert entries["REDIS_URL"] == {
         "source": "literal",

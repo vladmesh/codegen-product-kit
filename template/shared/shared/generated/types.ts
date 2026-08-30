@@ -1,36 +1,36 @@
 // Auto-generated TypeScript types from models.yaml
 // DO NOT EDIT MANUALLY
 
+export type UserStatus = "active" | "inactive";
+
+export type UserAccessStatus = "active" | "inactive";
+
 export interface User {
   id: number;
-  telegram_id: number;
-  is_admin?: boolean;
+  status?: UserStatus;
   created_at: string;
   updated_at: string;
 }
 
-export interface UserCreate {
-  telegram_id: number;
-  is_admin?: boolean;
-}
-
-export interface UserUpdate {
-  telegram_id: number;
-  is_admin?: boolean;
-}
-
-export interface UserRead {
+export interface UserChannel {
   id: number;
-  telegram_id: number;
-  is_admin?: boolean;
+  user_id: number;
+  channel: string;
+  external_id: string;
   created_at: string;
   updated_at: string;
 }
 
-export interface UserRegisteredEvent {
+export interface UserGrant {
+  channel: string;
+  external_id: string;
+}
+
+export interface UserAccess {
   user_id: number;
-  email: string;
-  timestamp: string;
+  status: UserAccessStatus;
+  channel: string;
+  external_id: string;
 }
 
 export interface CommandReceived {

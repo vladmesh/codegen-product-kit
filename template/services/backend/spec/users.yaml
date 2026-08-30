@@ -5,12 +5,6 @@ config:
     tags: ["users"]
 
 operations:
-  list_users:
-    output: list[UserRead]
-    rest:
-      method: GET
-      path: ""
-
   grant:
     input: UserGrant
     output: UserAccess
@@ -33,31 +27,3 @@ operations:
     rest:
       method: GET
       path: "/access"
-
-  get_user:
-    output: UserRead
-    params:
-      - name: user_id
-        type: int
-    rest:
-      method: GET
-      path: "/{user_id}"
-
-  set_user_status:
-    input: UserStatusUpdate
-    output: UserRead
-    params:
-      - name: user_id
-        type: int
-    rest:
-      method: PATCH
-      path: "/{user_id}/status"
-
-  delete_user:
-    params:
-      - name: user_id
-        type: int
-    rest:
-      method: DELETE
-      path: "/{user_id}"
-      status: 204

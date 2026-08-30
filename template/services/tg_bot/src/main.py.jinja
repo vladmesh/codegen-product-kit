@@ -13,9 +13,6 @@ import os
 import time
 from typing import Final
 
-{% if 'backend' in modules -%}
-import httpx
-{% endif -%}
 import structlog
 from telegram import Update
 from telegram.ext import (
@@ -79,18 +76,16 @@ def _allows_placeholder_token() -> bool:
 async def _has_active_access(telegram_id: int | None) -> bool:
     """Resolve the Telegram identity and accept only an active backend user."""
 
-    external_id = telegram_external_id(telegram_id)
-    if external_id is None:
-        return False
-
     try:
+        external_id = telegram_external_id(telegram_id)
+        if external_id is None:
+            return False
         async with BackendClient() as client:
             access = await client.resolve(TELEGRAM_CHANNEL, external_id)
-    except httpx.HTTPError:
-        # Unknown users and unavailable backend access both fail closed.
+        return is_active(access.status)
+    except Exception:
+        # Resolution, parsing, and model failures must never bypass admission.
         return False
-
-    return is_active(access.status)
 {% endif %}
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -152,10 +147,18 @@ async def enforce_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """
 
 {% if 'backend' in modules %}
-    if await _has_active_access(update.effective_user.id if update.effective_user else None):
+    try:
+        user = update.effective_user
+        has_access = await _has_active_access(user.id if user else None)
+    except Exception:
+        has_access = False
+    if has_access:
         return
 {% endif %}
-    LOGGER.info("access_denied")
+    try:
+        LOGGER.info("access_denied")
+    except Exception:  # noqa: S110
+        pass
     raise ApplicationHandlerStop
 
 

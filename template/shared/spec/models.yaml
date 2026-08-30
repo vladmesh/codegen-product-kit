@@ -15,9 +15,6 @@ models:
       updated_at:
         type: datetime
         readonly: true
-    variants:
-      Read: {}
-
   UserChannel:
     fields:
       id:
@@ -38,9 +35,6 @@ models:
       updated_at:
         type: datetime
         readonly: true
-    variants:
-      Read: {}
-
   UserGrant:
     fields:
       channel:
@@ -49,13 +43,6 @@ models:
       external_id:
         type: string
         min_length: 1
-
-  UserStatusUpdate:
-    fields:
-      status:
-        type:
-          type: enum
-          values: [active, inactive]
 
   UserAccess:
     fields:

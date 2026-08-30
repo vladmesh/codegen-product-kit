@@ -16,13 +16,6 @@ class UserRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list(self) -> list[User]:
-        result = await self.session.execute(select(User))
-        return list(result.scalars().all())
-
-    async def get(self, user_id: int) -> User | None:
-        return await self.session.get(User, user_id)
-
     async def get_channel(self, channel: str, external_id: str) -> UserChannel | None:
         stmt = (
             select(UserChannel)
@@ -59,15 +52,6 @@ class UserRepository:
             identity.user.status = UserStatus.ACTIVE
             await self.session.flush()
         return identity
-
-    async def set_status(self, user: User, status: UserStatus) -> User:
-        user.status = status
-        await self.session.flush()
-        await self.session.refresh(user)
-        return user
-
-    async def delete(self, user: User) -> None:
-        await self.session.delete(user)
 
 
 __all__ = ["UserRepository"]

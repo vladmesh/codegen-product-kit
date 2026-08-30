@@ -15,42 +15,22 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.generated.schemas import (
-    UserCreate,
-    UserRead,
-    UserUpdate,
+    UserAccess,
+    UserGrant,
 )
 
 
 class UsersControllerProtocol(Protocol):
-    """Protocol for users controller."""
-
-    async def list_users(
-        self,
-        session: AsyncSession,
-    ) -> list[UserRead]: ...
-
     # Dual transport: REST + Events
-    async def create_user(
+    async def grant(
         self,
         session: AsyncSession,
-        payload: UserCreate,
-    ) -> UserRead: ...
+        payload: UserGrant,
+    ) -> UserAccess: ...
 
-    async def get_user(
+    async def resolve(
         self,
         session: AsyncSession,
-        user_id: int,
-    ) -> UserRead: ...
-
-    async def update_user(
-        self,
-        session: AsyncSession,
-        user_id: int,
-        payload: UserUpdate,
-    ) -> UserRead: ...
-
-    async def delete_user(
-        self,
-        session: AsyncSession,
-        user_id: int,
-    ) -> None: ...
+        channel: str,
+        external_id: str,
+    ) -> UserAccess: ...

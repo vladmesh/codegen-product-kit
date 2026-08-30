@@ -6,10 +6,10 @@
     "description": ""
   },
   "paths": {
-    "/users": {
-      "get": {
-        "operationId": "list_users",
-        "summary": "List Users",
+    "/users/grant": {
+      "post": {
+        "operationId": "grant",
+        "summary": "Grant",
         "tags": [
           "users"
         ],
@@ -19,29 +19,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserRead"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "operationId": "create_user",
-        "summary": "Create User",
-        "tags": [
-          "users"
-        ],
-        "responses": {
-          "201": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserRead"
+                  "$ref": "#/components/schemas/UserAccess"
                 }
               }
             }
@@ -52,17 +30,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UserCreate"
+                "$ref": "#/components/schemas/UserGrant"
               }
             }
           }
         }
       }
     },
-    "/users/{user_id}": {
+    "/users/access": {
       "get": {
-        "operationId": "get_user",
-        "summary": "Get User",
+        "operationId": "resolve",
+        "summary": "Resolve",
         "tags": [
           "users"
         ],
@@ -72,7 +50,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserRead"
+                  "$ref": "#/components/schemas/UserAccess"
                 }
               }
             }
@@ -80,72 +58,19 @@
         },
         "parameters": [
           {
-            "name": "user_id",
-            "in": "path",
+            "name": "channel",
+            "in": "query",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
-          }
-        ]
-      },
-      "put": {
-        "operationId": "update_user",
-        "summary": "Update User",
-        "tags": [
-          "users"
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserRead"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
+          },
           {
-            "name": "user_id",
-            "in": "path",
+            "name": "external_id",
+            "in": "query",
             "required": true,
             "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserUpdate"
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "delete_user",
-        "summary": "Delete User",
-        "tags": [
-          "users"
-        ],
-        "responses": {
-          "204": {
-            "description": "No content"
-          }
-        },
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer"
+              "type": "string"
             }
           }
         ]
@@ -162,13 +87,13 @@
             "type": "integer",
             "readOnly": true
           },
-          "telegram_id": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "is_admin": {
-            "type": "boolean",
-            "default": false
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "default": "inactive"
           },
           "created_at": {
             "type": "string",
@@ -183,60 +108,30 @@
         },
         "required": [
           "id",
-          "telegram_id",
           "created_at",
           "updated_at"
         ],
         "additionalProperties": false
       },
-      "UserCreate": {
+      "UserChannel": {
         "type": "object",
-        "title": "UserCreate",
-        "properties": {
-          "telegram_id": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "is_admin": {
-            "type": "boolean",
-            "default": false
-          }
-        },
-        "required": [
-          "telegram_id"
-        ],
-        "additionalProperties": false
-      },
-      "UserUpdate": {
-        "type": "object",
-        "title": "UserUpdate",
-        "properties": {
-          "telegram_id": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "is_admin": {
-            "type": "boolean"
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      },
-      "UserRead": {
-        "type": "object",
-        "title": "UserRead",
+        "title": "UserChannel",
         "properties": {
           "id": {
             "type": "integer",
             "readOnly": true
           },
-          "telegram_id": {
+          "user_id": {
             "type": "integer",
-            "minimum": 0
+            "readOnly": true
           },
-          "is_admin": {
-            "type": "boolean",
-            "default": false
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "external_id": {
+            "type": "string",
+            "minLength": 1
           },
           "created_at": {
             "type": "string",
@@ -251,31 +146,59 @@
         },
         "required": [
           "id",
-          "telegram_id",
+          "user_id",
+          "channel",
+          "external_id",
           "created_at",
           "updated_at"
         ],
         "additionalProperties": false
       },
-      "UserRegisteredEvent": {
+      "UserGrant": {
         "type": "object",
-        "title": "UserRegisteredEvent",
+        "title": "UserGrant",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "external_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "external_id"
+        ],
+        "additionalProperties": false
+      },
+      "UserAccess": {
+        "type": "object",
+        "title": "UserAccess",
         "properties": {
           "user_id": {
             "type": "integer"
           },
-          "email": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          },
+          "channel": {
             "type": "string"
           },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
+          "external_id": {
+            "type": "string"
           }
         },
         "required": [
           "user_id",
-          "email",
-          "timestamp"
+          "status",
+          "channel",
+          "external_id"
         ],
         "additionalProperties": false
       },

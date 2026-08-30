@@ -44,10 +44,13 @@ Relative imports are acceptable within one package. Do not import from a top-lev
 
 ## Security invariant
 
-`User.status` is the sole persisted admission decision. The internal `users.grant(channel,
-external_id)` capability creates or reactivates an external identity; the bot resolves that identity
-and admits only `active` users. Do not introduce environment, owner, or channel-specific fallback
-admission paths.
+`User.status` is the sole persisted admission decision. `users.grant(channel, external_id)` is the
+only operation that creates or activates an external identity; the bot resolves that identity and
+admits only `active` users. `POST /users/grant` requires exactly one
+`X-Grant-Capability` header whose value matches the generated-secret
+`USERS_GRANT_CAPABILITY` using a constant-time comparison. This header is deliberately absent from
+OpenAPI and from user-facing helper commands. Do not introduce environment, owner, or channel-
+specific fallback admission paths.
 
 ## Database and migrations
 

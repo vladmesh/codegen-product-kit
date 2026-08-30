@@ -8,9 +8,15 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, conint
+from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, constr
+
+
+class Status(StrEnum):
+    active = "active"
+    inactive = "inactive"
 
 
 class User(BaseModel):
@@ -18,35 +24,39 @@ class User(BaseModel):
         extra="forbid",
     )
     id: int
-    telegram_id: conint(ge=0)
-    is_admin: bool = False
+    status: Status = "inactive"
     created_at: AwareDatetime
     updated_at: AwareDatetime
 
 
-class UserCreate(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    telegram_id: conint(ge=0)
-
-
-class UserUpdate(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    telegram_id: conint(ge=0) | None = None
-
-
-class UserRead(BaseModel):
+class UserChannel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
     id: int
-    telegram_id: conint(ge=0)
-    is_admin: bool = False
+    user_id: int
+    channel: constr(min_length=1)
+    external_id: constr(min_length=1)
     created_at: AwareDatetime
     updated_at: AwareDatetime
+
+
+class UserGrant(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    channel: constr(min_length=1)
+    external_id: constr(min_length=1)
+
+
+class UserAccess(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    user_id: int
+    status: Status
+    channel: str
+    external_id: str
 
 
 class CommandReceived(BaseModel):

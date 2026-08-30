@@ -1,4 +1,4 @@
-"""Integration tests for the generated user access capability."""
+"""Integration tests for the generated, capability-protected user authority."""
 
 from __future__ import annotations
 
@@ -8,68 +8,110 @@ from unittest.mock import AsyncMock
 from fastapi import status
 from httpx import AsyncClient
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.backend.src.app.models.user import User, UserChannel, UserStatus
+from services.backend.src.app.repositories.user import UserRepository
 import shared.generated.events as events_module
+
+GRANT_HEADER = "X-Grant-Capability"
+GRANT_CAPABILITY = "test-grant-capability"
+
+
+def _headers(capability: str = GRANT_CAPABILITY) -> dict[str, str]:
+    return {GRANT_HEADER: capability}
 
 
 async def _grant(
     client: AsyncClient, channel: str = "telegram", external_id: str = "111"
 ) -> dict[str, Any]:
     response = await client.post(
-        "/users/grant", json={"channel": channel, "external_id": external_id}
+        "/users/grant",
+        headers=_headers(),
+        json={"channel": channel, "external_id": external_id},
     )
     assert response.status_code == status.HTTP_200_OK
     return cast(dict[str, Any], response.json())
 
 
 @pytest.mark.asyncio
-async def test_grant_is_idempotent_and_reactivates_the_identity(client: AsyncClient) -> None:
+async def test_grant_rejects_missing_or_wrong_capability_before_writing(
+    client: AsyncClient,
+) -> None:
+    payload = {"channel": "telegram", "external_id": "111"}
+
+    missing = await client.post("/users/grant", json=payload)
+    wrong = await client.post("/users/grant", headers=_headers("wrong"), json=payload)
+    malformed = await client.post(
+        "/users/grant",
+        headers=[(GRANT_HEADER, GRANT_CAPABILITY), (GRANT_HEADER, GRANT_CAPABILITY)],
+        json=payload,
+    )
+
+    assert missing.status_code == status.HTTP_403_FORBIDDEN
+    assert wrong.status_code == status.HTTP_403_FORBIDDEN
+    assert malformed.status_code == status.HTTP_403_FORBIDDEN
+
+    unresolved = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "111"}
+    )
+    assert unresolved.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_grant_is_idempotent_and_activates_the_identity(client: AsyncClient) -> None:
     first = await _grant(client)
-
-    inactive = await client.patch(f"/users/{first['user_id']}/status", json={"status": "inactive"})
-    assert inactive.status_code == status.HTTP_200_OK
-    assert inactive.json()["status"] == "inactive"
-
     second = await _grant(client)
-    assert second == first | {"status": "active"}
+
+    assert second == first
+    assert first["status"] == "active"
 
     resolved = await client.get(
         "/users/access", params={"channel": "telegram", "external_id": "111"}
     )
     assert resolved.status_code == status.HTTP_200_OK
-    assert resolved.json() == second
-
-    listed = await client.get("/users")
-    assert listed.status_code == status.HTTP_200_OK
-    assert len(listed.json()) == 1
+    assert resolved.json() == first
 
 
 @pytest.mark.asyncio
-async def test_resolve_reports_inactive_status_without_admitting_it(client: AsyncClient) -> None:
-    granted = await _grant(client)
-    response = await client.patch(
-        f"/users/{granted['user_id']}/status", json={"status": "inactive"}
+async def test_resolve_reports_active_inactive_and_unknown_identities(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    active = await _grant(client, external_id="active")
+
+    inactive_user = User(status=UserStatus.INACTIVE)
+    inactive_identity = UserChannel(
+        user=inactive_user,
+        channel="telegram",
+        external_id="inactive",
     )
-    assert response.status_code == status.HTTP_200_OK
+    db_session.add(inactive_identity)
+    await db_session.flush()
 
-    resolved = await client.get(
-        "/users/access", params={"channel": "telegram", "external_id": "111"}
+    active_result = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "active"}
     )
-    assert resolved.status_code == status.HTTP_200_OK
-    assert resolved.json()["status"] == "inactive"
-
-
-@pytest.mark.asyncio
-async def test_unknown_identity_is_not_resolved(client: AsyncClient) -> None:
-    response = await client.get(
+    inactive_result = await client.get(
+        "/users/access", params={"channel": "telegram", "external_id": "inactive"}
+    )
+    unknown_result = await client.get(
         "/users/access", params={"channel": "telegram", "external_id": "unknown"}
     )
-    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    assert active_result.json() == active
+    assert inactive_result.status_code == status.HTTP_200_OK
+    assert inactive_result.json()["status"] == "inactive"
+    assert unknown_result.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
 async def test_grant_validates_channel_identity(client: AsyncClient) -> None:
-    response = await client.post("/users/grant", json={"channel": "", "external_id": ""})
+    response = await client.post(
+        "/users/grant",
+        headers=_headers(),
+        json={"channel": "", "external_id": ""},
+    )
+
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
@@ -79,28 +121,28 @@ async def test_grant_publishes_user_granted(client: AsyncClient) -> None:
 
     publish = cast(AsyncMock, events_module.get_broker().publish)
     publish.assert_awaited_once()
-    await_args = publish.await_args
-    assert await_args is not None
-    event, channel = await_args.args
+    event, channel = publish.await_args.args
     assert channel == "user_granted"
     assert event.user_id == granted["user_id"]
     assert event.status == "active"
 
 
 @pytest.mark.asyncio
-async def test_delete_user_removes_its_channel_identity(client: AsyncClient) -> None:
-    granted = await _grant(client)
-    deleted = await client.delete(f"/users/{granted['user_id']}")
-    assert deleted.status_code == status.HTTP_204_NO_CONTENT
-
-    missing = await client.get(
-        "/users/access", params={"channel": "telegram", "external_id": "111"}
+async def test_removed_crud_routes_are_not_exposed(client: AsyncClient) -> None:
+    assert (await client.get("/users")).status_code == status.HTTP_404_NOT_FOUND
+    assert (await client.post("/users", json={})).status_code == status.HTTP_404_NOT_FOUND
+    assert (await client.patch("/users/1/status", json={"status": "active"})).status_code == (
+        status.HTTP_404_NOT_FOUND
     )
-    assert missing.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.asyncio
-async def test_db_isolation_after_all_tests(client: AsyncClient) -> None:
-    response = await client.get("/users")
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == []
+async def test_repository_grant_reactivates_an_inactive_identity(db_session: AsyncSession) -> None:
+    user = User(status=UserStatus.INACTIVE)
+    identity = UserChannel(user=user, channel="telegram", external_id="reactivate")
+    db_session.add(identity)
+    await db_session.flush()
+
+    granted = await UserRepository(db_session).grant("telegram", "reactivate")
+
+    assert granted.user.status == UserStatus.ACTIVE

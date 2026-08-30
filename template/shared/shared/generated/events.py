@@ -10,13 +10,12 @@ from typing import Any
 from faststream.redis import RedisBroker
 from faststream.redis.parser import BinaryMessageFormatV1
 
-from shared.generated.schemas import CommandReceived, UserRead
+from shared.generated.schemas import CommandReceived, UserAccess
 
 _broker: RedisBroker | None = None
 
 
 def get_broker() -> RedisBroker:
-    """Get or create the Redis broker (lazy initialization)."""
     global _broker
     if _broker is None:
         redis_url = os.getenv("REDIS_URL")
@@ -25,23 +24,18 @@ def get_broker() -> RedisBroker:
         _broker = RedisBroker(redis_url, message_format=BinaryMessageFormatV1)
     return _broker
 
-
-_pub_user_registered: Any = None
-
-
-async def publish_user_registered(message: UserRead) -> Any:
-    """Publish UserRead to channel 'user_registered'."""
-    global _pub_user_registered
-    if _pub_user_registered is None:
-        _pub_user_registered = get_broker().publisher("user_registered")
-    return await _pub_user_registered.publish(message)
+_pub_user_granted: Any = None
 
 
+async def publish_user_granted(message: UserAccess) -> Any:
+    global _pub_user_granted
+    if _pub_user_granted is None:
+        _pub_user_granted = get_broker().publisher("user_granted")
+    return await _pub_user_granted.publish(message)
 _pub_command_received: Any = None
 
 
 async def publish_command_received(message: CommandReceived) -> Any:
-    """Publish CommandReceived to channel 'command_received'."""
     global _pub_command_received
     if _pub_command_received is None:
         _pub_command_received = get_broker().publisher("command_received")
