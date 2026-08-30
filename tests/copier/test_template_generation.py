@@ -947,7 +947,25 @@ class TestIntegration:
             assert chown.returncode == 0, chown.stderr
 
             registry = output / "services" / "backend" / "src" / "generated" / "registry.py"
-            registry.unlink(missing_ok=True)
+            remove_registry = subprocess.run(  # noqa: S603, S607
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--user",
+                    owner,
+                    "-v",
+                    f"{output}:/workspace",
+                    "alpine:3.20",
+                    "rm",
+                    "-f",
+                    "/workspace/services/backend/src/generated/registry.py",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert remove_registry.returncode == 0, remove_registry.stderr
+            assert not registry.exists()
             result = subprocess.run(  # noqa: S603, S607
                 [
                     *compose,
