@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from fastapi import FastAPI
+
 from services.backend.src.core.orm import Base
 
 
@@ -80,7 +82,8 @@ def test_asgi_entrypoint_builds_the_application() -> None:
 
     from services.backend.src.main import app
 
-    assert app.title == "test-backend"
+    assert isinstance(app, FastAPI)
+    assert any(route.path == "/health" for route in app.routes)
 
 
 def test_alembic_environment_loads_registered_metadata() -> None:
