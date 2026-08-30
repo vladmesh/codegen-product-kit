@@ -3,7 +3,7 @@
 from alembic import op  # noqa: F401
 import sqlalchemy as sa  # noqa: F401
 
-from services.backend.src.core import Base
+from services.backend.src.core.orm import Base
 
 metadata = Base.metadata
 

@@ -1,5 +1,1 @@
-"""SQLAlchemy ORM models live in this package."""
-
-from .user import User
-
-__all__ = ["User"]
+"""User-owned SQLAlchemy ORM model modules."""

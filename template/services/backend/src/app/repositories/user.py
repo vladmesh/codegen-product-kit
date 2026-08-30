@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.generated.schemas import UserCreate, UserUpdate
 
-from ..models import User
+from ..models.user import User
 
 
 class UserRepository:

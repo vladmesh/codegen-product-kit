@@ -51,6 +51,8 @@ the same rule to new privilege fields.
 ## Database and migrations
 
 `get_async_db()` owns commit, rollback, and close. Controllers must not call `session.commit()`.
+Add every new handwritten ORM model to `src/app/models/registry.py`; Alembic imports that explicit
+user-owned registry before reading `Base.metadata`.
 
 ```bash
 make makemigrations name="describe_change"

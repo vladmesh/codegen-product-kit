@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** Backend package initializers no longer provide application, settings, ORM, model,
+  or repository re-exports. Runtime consumers must import explicit modules; declarative ORM types
+  now live in `core.orm`, and handwritten models are registered in `app.models.registry`.
 - **Breaking:** Removed the unused environment-contract JSON-schema export and
   `Settings.database_url`; consumers must use explicit sync or async URLs.
 - **Breaking:** Global `shared/spec/events.yaml` entries are now publisher-only.
