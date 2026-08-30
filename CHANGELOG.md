@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
+This release targets newly generated projects. Updating projects generated from earlier template
+versions is not supported; regenerate from the current template and port application-owned code.
+
+### Added
+
+- Generated backend import-boundary regression coverage, including inert package imports, explicit
+  ORM model registration, ASGI startup, Alembic offline generation, and generated-project typecheck.
+- A canonical broad-check workflow that snapshots dirty template worktrees so Copier tests exercise
+  the exact content under review.
+
 ### Changed
+
 - **Breaking:** Backend package initializers no longer provide application, settings, ORM, model,
   or repository re-exports. Runtime consumers must import explicit modules; declarative ORM types
-  now live in `core.orm`, and handwritten models are registered in `app.models.registry`.
+  now live in `core.orm`, and handwritten models must be registered in `app.models.registry`.
 - **Breaking:** Removed the unused environment-contract JSON-schema export and
   `Settings.database_url`; consumers must use explicit sync or async URLs.
 - **Breaking:** Global `shared/spec/events.yaml` entries are now publisher-only.
@@ -19,11 +32,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignores legacy `services/*/spec/manifest.yaml` files.
 - **Breaking:** `datamodel-code-generator` is required. Schema generation now fails before any
   later artifacts are generated when that dependency is unavailable.
+- Generated-project typechecking and pre-commit formatting now use the project toolchain directly.
+- Framework and template CI have distinct ownership: framework tests run once, Copier tests own the
+  module contracts, and one generated backend candidate exercises setup, typecheck, and pre-commit.
+- Living architecture, development, testing, contributor, and service documentation now describe
+  only current commands, paths, ports, ownership boundaries, and generation contracts.
+
+### Removed
+
+- The orphaned service-scaffolding subsystem, dead root Compose/integration assets, and stale Copier
+  exclusions.
+- Historical plans, brainstorms, backlog, and issue ledgers from product documentation after their
+  still-relevant technical work was extracted.
+- The unused service-manifest parser/model/template path and unused global subscriber metadata.
+- Compatibility shims, eager backend package imports, stale narration, generated boilerplate
+  docstrings, misleading quality tests, and duplicate workflow assertions.
 
 ### Fixed
+
 - Generated architecture documentation no longer tells operators to create
   `APP_SECRET_KEY` as a GitHub repository secret. The deployment environment
   contract correctly owns it as a generated secret.
+- Generated backend imports satisfy the project-neutral typecheck contract, including projects whose
+  slug is not `test_project`.
 
 ## [0.3.6] - 2026-07-27
 
