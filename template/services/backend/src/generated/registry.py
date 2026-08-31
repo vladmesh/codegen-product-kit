@@ -9,10 +9,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-
+from shared.generated.events import get_broker
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
-from shared.generated.events import get_broker
 
 from .protocols import UsersControllerProtocol
 from .routers import users

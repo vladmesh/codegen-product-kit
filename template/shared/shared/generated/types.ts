@@ -26,6 +26,11 @@ export interface UserGrant {
   external_id: string;
 }
 
+export interface UserRevoke {
+  channel: string;
+  external_id: string;
+}
+
 export interface UserAccess {
   user_id: number;
   status: UserAccessStatus;

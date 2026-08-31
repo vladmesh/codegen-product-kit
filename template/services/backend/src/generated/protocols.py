@@ -7,7 +7,6 @@
 """
 Protocols for service controllers.
 """
-
 from __future__ import annotations
 
 from typing import Protocol
@@ -17,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.generated.schemas import (
     UserAccess,
     UserGrant,
+    UserRevoke,
 )
-
 
 class UsersControllerProtocol(Protocol):
     # Dual transport: REST + Events
@@ -26,11 +25,20 @@ class UsersControllerProtocol(Protocol):
         self,
         session: AsyncSession,
         payload: UserGrant,
-    ) -> UserAccess: ...
+    ) -> UserAccess:
+        ...
+
+    async def revoke(
+        self,
+        session: AsyncSession,
+        payload: UserRevoke,
+    ) -> UserAccess:
+        ...
 
     async def resolve(
         self,
         session: AsyncSession,
         channel: str,
         external_id: str,
-    ) -> UserAccess: ...
+    ) -> UserAccess:
+        ...

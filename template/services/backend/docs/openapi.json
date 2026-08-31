@@ -37,6 +37,37 @@
         }
       }
     },
+    "/users/revoke": {
+      "post": {
+        "operationId": "revoke",
+        "summary": "Revoke",
+        "tags": [
+          "users"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccess"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserRevoke"
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/access": {
       "get": {
         "operationId": "resolve",
@@ -157,6 +188,25 @@
       "UserGrant": {
         "type": "object",
         "title": "UserGrant",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "external_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "channel",
+          "external_id"
+        ],
+        "additionalProperties": false
+      },
+      "UserRevoke": {
+        "type": "object",
+        "title": "UserRevoke",
         "properties": {
           "channel": {
             "type": "string",

@@ -49,6 +49,14 @@ class UserGrant(BaseModel):
     external_id: constr(min_length=1)
 
 
+class UserRevoke(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    channel: constr(min_length=1)
+    external_id: constr(min_length=1)
+
+
 class UserAccess(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

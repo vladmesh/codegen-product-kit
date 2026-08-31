@@ -45,8 +45,9 @@ Relative imports are acceptable within one package. Do not import from a top-lev
 ## Security invariant
 
 `User.status` is the sole persisted admission decision. `users.grant(channel, external_id)` is the
-only operation that creates or activates an external identity; the bot resolves that identity and
-admits only `active` users. `POST /users/grant` requires exactly one
+only operation that creates or activates an external identity; `users.revoke(channel, external_id)`
+only deactivates an existing identity. The bot resolves that identity and admits only `active` users.
+`POST /users/grant` and `POST /users/revoke` require exactly one
 `X-Grant-Capability` header whose value matches the generated-secret
 `USERS_GRANT_CAPABILITY` using a constant-time comparison. This header is deliberately absent from
 OpenAPI and from user-facing helper commands. Do not introduce environment, owner, or channel-
