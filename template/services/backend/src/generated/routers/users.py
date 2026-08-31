@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.generated.schemas import (
     UserAccess,
     UserGrant,
+    UserRevoke,
 )
 
 from ..protocols import UsersControllerProtocol
@@ -35,7 +36,7 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(
         prefix="/users",
-        tags=["users"],
+        tags=['users'],
     )
 
     @router.post(
@@ -54,6 +55,22 @@ def create_router(
             payload=payload,
         )
         await broker.publish(result, "user_granted")
+        return result
+
+    @router.post(
+        "/revoke",
+        response_model=UserAccess,
+        status_code=200,
+    )
+    async def revoke(
+        payload: UserRevoke = Body(...),  # noqa: B008
+        session: AsyncSession = Depends(get_session),  # noqa: B008
+        controller: UsersControllerProtocol = Depends(get_controller),  # noqa: B008
+    ) -> UserAccess:
+        result = await controller.revoke(
+            session=session,
+            payload=payload,
+        )
         return result
 
     @router.get(

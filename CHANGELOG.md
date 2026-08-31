@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persisted `User`/`UserChannel` authority. Telegram now admits only identities resolved as
   `active`; `POST /users/grant` is the sole activation operation and requires the generated backend
   grant capability.
+- Added the protected `POST /users/revoke` capability. It idempotently deactivates an existing
+  identity through the same `User.status` admission gate and does not create unknown identities.
 
 ## [0.4.0] - 2026-08-30
 

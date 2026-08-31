@@ -337,7 +337,7 @@ class TestBackendWithTgBotGeneration:
     def test_generated_user_authority_seeds_are_current_with_local_capability_fixture(
         self, project_backend_tg_bot: Path
     ) -> None:
-        """Copied projects ship grant/access contracts and a local-only fixture."""
+        """Copied projects ship grant/revoke/access contracts and a local-only fixture."""
         import json
 
         backend = project_backend_tg_bot / "services" / "backend"
@@ -347,10 +347,11 @@ class TestBackendWithTgBotGeneration:
         ).read_text()
         env_example = (project_backend_tg_bot / ".env.example").read_text()
 
-        assert set(openapi["paths"]) == {"/users/grant", "/users/access"}
+        assert set(openapi["paths"]) == {"/users/grant", "/users/revoke", "/users/access"}
         assert "X-Grant-Capability" not in json.dumps(openapi)
         assert "class UserChannel" in schemas
         assert "class UserGrant" in schemas
+        assert "class UserRevoke" in schemas
         assert "USERS_GRANT_CAPABILITY=local-grant-capability-not-for-production" in env_example
         assert (backend / "src" / "generated" / "registry.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "users.py").is_file()

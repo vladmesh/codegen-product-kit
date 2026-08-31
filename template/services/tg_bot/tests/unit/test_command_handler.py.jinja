@@ -104,12 +104,12 @@ class TestBackendAccess:
             assert await _has_active_access(TEST_TELEGRAM_USER_ID)
 
     @pytest.mark.asyncio
-    async def test_inactive_and_unknown_identities_are_denied(self) -> None:
+    async def test_revoked_and_unknown_identities_are_denied(self) -> None:
         from unittest.mock import patch
 
         from shared.generated.schemas import UserAccess
 
-        inactive = UserAccess(
+        revoked = UserAccess(
             user_id=1,
             status="inactive",
             channel="telegram",
@@ -117,7 +117,7 @@ class TestBackendAccess:
         )
         with patch("services.tg_bot.src.main.BackendClient") as client_class:
             client = AsyncMock()
-            client.resolve = AsyncMock(return_value=inactive)
+            client.resolve = AsyncMock(return_value=revoked)
             client.__aenter__ = AsyncMock(return_value=client)
             client.__aexit__ = AsyncMock(return_value=None)
             client_class.return_value = client
@@ -144,14 +144,25 @@ class TestBackendAccess:
             client_class.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_enforce_access_stops_inactive_updates(self, mock_update: MagicMock) -> None:
+    async def test_revoked_identity_stops_before_handlers(self, mock_update: MagicMock) -> None:
         from unittest.mock import patch
 
         from telegram.ext import ApplicationHandlerStop
+        from shared.generated.schemas import UserAccess
 
-        with patch(
-            "services.tg_bot.src.main._has_active_access", new=AsyncMock(return_value=False)
-        ):
+        revoked = UserAccess(
+            user_id=1,
+            status="inactive",
+            channel="telegram",
+            external_id=str(TEST_TELEGRAM_USER_ID),
+        )
+        with patch("services.tg_bot.src.main.BackendClient") as client_class:
+            client = AsyncMock()
+            client.resolve = AsyncMock(return_value=revoked)
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            client_class.return_value = client
+
             from services.tg_bot.src.main import enforce_access
 
             with pytest.raises(ApplicationHandlerStop):

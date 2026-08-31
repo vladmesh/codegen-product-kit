@@ -15,6 +15,14 @@ operations:
     events:
       publish_on_success: user_granted
 
+  revoke:
+    input: UserRevoke
+    output: UserAccess
+    rest:
+      method: POST
+      path: "/revoke"
+      status: 200
+
   resolve:
     output: UserAccess
     params:

@@ -53,5 +53,16 @@ class UserRepository:
             await self.session.flush()
         return identity
 
+    async def revoke(self, channel: str, external_id: str) -> UserChannel | None:
+        """Deactivate an existing identity without creating a replacement."""
+
+        identity = await self.get_channel(channel, external_id)
+        if identity is None:
+            return None
+
+        identity.user.status = UserStatus.INACTIVE
+        await self.session.flush()
+        return identity
+
 
 __all__ = ["UserRepository"]

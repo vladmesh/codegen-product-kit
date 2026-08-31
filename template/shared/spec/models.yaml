@@ -44,6 +44,15 @@ models:
         type: string
         min_length: 1
 
+  UserRevoke:
+    fields:
+      channel:
+        type: string
+        min_length: 1
+      external_id:
+        type: string
+        min_length: 1
+
   UserAccess:
     fields:
       user_id:

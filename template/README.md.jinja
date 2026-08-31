@@ -46,10 +46,11 @@ make worker-call url=http://backend:8000/health method=GET
 make worker-stop
 ```
 
-`POST /users/grant` is a deployment capability, not a worker-call command. It requires the
-single `X-Grant-Capability` request header. The local `.env` fixture only makes the generated
-development stack start; deployment receives its distinct per-project value as the backend's
-`USERS_GRANT_CAPABILITY` generated secret, which is never committed to this project.
+`POST /users/grant` and `POST /users/revoke` are deployment capabilities, not worker-call
+commands. They require the single `X-Grant-Capability` request header. The local `.env` fixture
+only makes the generated development stack start; deployment receives its distinct per-project
+value as the backend's `USERS_GRANT_CAPABILITY` generated secret, which is never committed to this
+project.
 
 {% endif -%}
 
