@@ -12,6 +12,7 @@ from framework.generators.events import EventsGenerator
 from framework.generators.protocols import ProtocolsGenerator
 from framework.generators.routers import RoutersGenerator
 from framework.generators.schemas import SchemasGenerator
+from framework.generators.settings_manifest import SettingsManifestGenerator
 from framework.lib.env import get_repo_root
 from framework.spec.loader import SpecValidationError, load_specs
 
@@ -39,6 +40,7 @@ def generate_all(repo_root: Path | None = None) -> None:
     # Run generators in order
     generators = [
         ("Schemas", SchemasGenerator(specs, repo_root)),
+        ("SettingsManifests", SettingsManifestGenerator(specs, repo_root)),
         ("Protocols", ProtocolsGenerator(specs, repo_root)),
         ("Controllers", ControllersGenerator(specs, repo_root)),
         ("Events", EventsGenerator(specs, repo_root)),

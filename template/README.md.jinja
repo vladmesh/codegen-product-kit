@@ -52,6 +52,11 @@ only makes the generated development stack start; deployment receives its distin
 value as the backend's `USERS_GRANT_CAPABILITY` generated secret, which is never committed to this
 project.
 
+`POST /settings/set` is the equivalent write capability for manifest-declared product settings.
+It requires one `X-Settings-Capability` header. Product values such as user-selected languages
+belong in `services/<service>/manifest.yaml`, are validated and persisted through
+`/settings/set`, and are never copied into environment variables.
+
 {% endif -%}
 
 3. **Start development**
@@ -93,6 +98,9 @@ This project includes the following modules:
 - **Add endpoints:** Edit `services/backend/spec/*.yaml` → `make generate-from-spec`
 - **Add domain operations:** declare them in the spec, then implement their generated controller
   protocol and repository boundary.
+- **Add product settings:** declare independent JSON Schema properties in
+  `services/<service>/manifest.yaml`, run `make generate-from-spec`, then use the typed
+  `/settings/get` and `/settings/set` core operations.
 - **Create database migrations:** add or change ORM models, then run
   `make makemigrations name="describe_change"`. The target starts the PostgreSQL dev container
   through the worker compose layer and runs Alembic inside a one-off backend container. It upgrades the database to the current

@@ -113,7 +113,12 @@ def test_backend_contract_classifies_infrastructure_values(project_backend: Path
         "required": True,
         "value": 6379,
     }
-    for key in ("APP_SECRET_KEY", "POSTGRES_PASSWORD", "USERS_GRANT_CAPABILITY"):
+    for key in (
+        "APP_SECRET_KEY",
+        "POSTGRES_PASSWORD",
+        "USERS_GRANT_CAPABILITY",
+        "SETTINGS_WRITE_CAPABILITY",
+    ):
         assert entries[key]["source"] == "generated_secret"
     assert entries["REDIS_URL"] == {
         "source": "literal",
@@ -145,6 +150,7 @@ def test_required_local_contract_values_are_present_for_documented_backend_start
     assert local_required <= set(documented)
     assert all(documented[key] for key in local_required)
     assert documented["USERS_GRANT_CAPABILITY"] == "local-grant-capability-not-for-production"
+    assert documented["SETTINGS_WRITE_CAPABILITY"] == "local-settings-capability-not-for-production"
 
 
 @pytest.mark.parametrize(

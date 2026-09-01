@@ -10,11 +10,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from shared.generated.events import get_broker
+from services.backend.src.controllers.settings import SettingsController
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
 
+from .protocols import SettingsControllerProtocol
 from .protocols import UsersControllerProtocol
+from .routers import settings
 from .routers import users
+
+
+def get_settings_controller() -> SettingsControllerProtocol:
+    return SettingsController()
 
 
 def get_users_controller() -> UsersControllerProtocol:
@@ -23,6 +30,12 @@ def get_users_controller() -> UsersControllerProtocol:
 
 def create_api_router() -> APIRouter:
     router = APIRouter()
+    router.include_router(
+        settings.create_router(
+            get_session=get_async_db,
+            get_controller=get_settings_controller,
+        )
+    )
     router.include_router(
         users.create_router(
             get_session=get_async_db,

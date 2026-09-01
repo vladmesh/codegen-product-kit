@@ -48,6 +48,7 @@ Do not edit only the embedded copy. `make sync-framework-preview` shows the pend
 | Routers | REST operations | Regenerated FastAPI routers and registry |
 | Events | `shared/spec/events.yaml` | Regenerated publisher helpers |
 | Event adapters | subscribed operations | Regenerated FastStream adapters |
+| Settings manifest registry | `services/<service>/manifest.yaml` | Regenerated backend settings-schema registry |
 
 `datamodel-code-generator` is a required framework dependency. Schema generation is always the
 first pipeline stage, so a missing dependency aborts generation before any artifact is written.

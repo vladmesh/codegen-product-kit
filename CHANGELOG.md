@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Generated backends now include the versioned, manifest-backed core settings v1
+  contract. `POST /settings/get` and capability-protected `POST /settings/set` store only
+  Draft 2020-12 schema-validated product or user-scoped values declared by explicit service
+  manifests. Existing `services/*/spec/manifest.yaml` files remain ignored; this forward-only
+  contract does not migrate earlier generated projects.
+
 - **Breaking:** Replaced the generated public user CRUD and Telegram environment audience with a
   persisted `User`/`UserChannel` authority. Telegram now admits only identities resolved as
   `active`; `POST /users/grant` is the sole activation operation and requires the generated backend

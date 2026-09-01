@@ -1,0 +1,10 @@
+# Versioned, service-owned declaration of user-controlled product settings.
+# Add named properties here; settings are stored independently, so do not use
+# top-level `required` or `$ref`. Deployment values and secrets belong in the
+# environment contract, never in this schema.
+version: 1
+settings_schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties: {}
+  additionalProperties: false

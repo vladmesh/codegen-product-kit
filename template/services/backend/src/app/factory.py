@@ -8,6 +8,7 @@ from .api.router import api_router
 from .grant_capability import GrantCapabilityMiddleware
 from .lifespan import lifespan
 from .middleware import RequestLoggingMiddleware
+from .settings_capability import SettingsCapabilityMiddleware
 
 
 def create_app() -> FastAPI:
@@ -18,6 +19,10 @@ def create_app() -> FastAPI:
     application.add_middleware(
         GrantCapabilityMiddleware,
         capability=settings.users_grant_capability,
+    )
+    application.add_middleware(
+        SettingsCapabilityMiddleware,
+        capability=settings.settings_write_capability,
     )
     application.add_middleware(RequestLoggingMiddleware)
     application.include_router(api_router)

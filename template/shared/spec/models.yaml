@@ -66,6 +66,67 @@ models:
       external_id:
         type: string
 
+  SettingGet:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      key:
+        type: string
+        min_length: 1
+      scope:
+        type:
+          type: enum
+          values: [product, user]
+        default: product
+      subject_id:
+        type: int
+        ge: 1
+        optional: true
+
+  SettingSet:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      key:
+        type: string
+        min_length: 1
+      scope:
+        type:
+          type: enum
+          values: [product, user]
+        default: product
+      subject_id:
+        type: int
+        ge: 1
+        optional: true
+      value:
+        type: json
+
+  SettingValue:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      key:
+        type: string
+      scope:
+        type:
+          type: enum
+          values: [product, user]
+      subject_id:
+        type: int
+        optional: true
+      value:
+        type: json
+
   CommandReceived:
     fields:
       command:

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     environment: str = Field(validation_alias="APP_ENV")
     app_secret_key: str = Field(validation_alias="APP_SECRET_KEY")
     users_grant_capability: str = Field(min_length=1, validation_alias="USERS_GRANT_CAPABILITY")
+    settings_write_capability: str = Field(
+        min_length=1, validation_alias="SETTINGS_WRITE_CAPABILITY"
+    )
     debug: bool = Field(default=False, validation_alias="DEBUG")
     enabled_modules_raw: str = Field(default="", validation_alias="ENABLED_MODULES")
 

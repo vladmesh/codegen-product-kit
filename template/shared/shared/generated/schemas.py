@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, constr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, conint, constr
 
 
 class Status(StrEnum):
@@ -65,6 +65,43 @@ class UserAccess(BaseModel):
     status: Status
     channel: str
     external_id: str
+
+
+class Scope(StrEnum):
+    product = "product"
+    user = "user"
+
+
+class SettingGet(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    key: constr(min_length=1)
+    scope: Scope = "product"
+    subject_id: conint(ge=1) | None = None
+
+
+class SettingSet(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    key: constr(min_length=1)
+    scope: Scope = "product"
+    subject_id: conint(ge=1) | None = None
+    value: Any
+
+
+class SettingValue(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    key: str
+    scope: Scope
+    subject_id: int | None = None
+    value: Any
 
 
 class CommandReceived(BaseModel):

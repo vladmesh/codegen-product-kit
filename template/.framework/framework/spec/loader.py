@@ -14,6 +14,7 @@ from pydantic import ValidationError
 import yaml
 
 from framework.spec.events import EventsSpec
+from framework.spec.manifests import ServiceManifest, parse_service_manifest
 from framework.spec.models import ModelsSpec
 from framework.spec.operations import DomainSpec, unwrap_list
 
@@ -39,6 +40,7 @@ class AllSpecs:
     models: ModelsSpec
     events: EventsSpec
     domains: dict[str, DomainSpec] = field(default_factory=dict)
+    manifests: dict[str, ServiceManifest] = field(default_factory=dict)
 
 
 def load_yaml_file(file_path: Path) -> dict[str, Any]:
@@ -105,6 +107,17 @@ def load_domain(domain_file: Path) -> DomainSpec:
         raise SpecValidationError(format_pydantic_error(e, "domain"), str(domain_file)) from e
     except ValueError as e:
         raise SpecValidationError(str(e), str(domain_file)) from e
+
+
+def load_manifest(manifest_file: Path) -> ServiceManifest:
+    """Load a service manifest without treating it as a domain spec."""
+    data = load_yaml_file(manifest_file)
+    try:
+        return parse_service_manifest(data)
+    except ValidationError as e:
+        raise SpecValidationError(format_pydantic_error(e, "manifest"), str(manifest_file)) from e
+    except ValueError as e:
+        raise SpecValidationError(str(e), str(manifest_file)) from e
 
 
 def extract_base_model(model_ref: str) -> str:
@@ -185,6 +198,36 @@ def _load_service_specs(services_dir: Path) -> dict[str, DomainSpec]:
     return domains
 
 
+def _load_service_manifests(services_dir: Path) -> dict[str, ServiceManifest]:
+    """Load explicit service manifests from their dedicated top-level path."""
+    manifests: dict[str, ServiceManifest] = {}
+    if not services_dir.exists():
+        return manifests
+
+    for service_dir in services_dir.iterdir():
+        if not service_dir.is_dir():
+            continue
+        manifest_file = service_dir / "manifest.yaml"
+        if manifest_file.exists():
+            manifests[service_dir.name] = load_manifest(manifest_file)
+    return manifests
+
+
+def validate_manifest_settings(manifests: dict[str, ServiceManifest]) -> list[str]:
+    """Reject settings keys declared by more than one service."""
+    owners: dict[str, str] = {}
+    errors: list[str] = []
+    for service_name, manifest in manifests.items():
+        for key in manifest.settings_schema["properties"]:
+            if key in owners:
+                errors.append(
+                    f"Setting '{key}' is declared by both '{owners[key]}' and '{service_name}'"
+                )
+            else:
+                owners[key] = service_name
+    return errors
+
+
 def load_specs(repo_root: Path) -> AllSpecs:
     """Load and validate all specs from the repository.
 
@@ -197,6 +240,17 @@ def load_specs(repo_root: Path) -> AllSpecs:
     Raises:
         SpecValidationError: If any spec is invalid
     """
+    services_dir = repo_root / "services"
+    manifests = _load_service_manifests(services_dir)
+    manifest_errors = validate_manifest_settings(manifests)
+    if manifest_errors:
+        message = "Manifest settings validation failed:\n" + "\n".join(
+            f"  - {error}" for error in manifest_errors
+        )
+        raise SpecValidationError(
+            message
+        )
+
     # 1. Load models (required)
     shared_spec_dir = repo_root / "shared" / "spec"
     models_file = shared_spec_dir / "models.yaml"
@@ -205,6 +259,7 @@ def load_specs(repo_root: Path) -> AllSpecs:
         return AllSpecs(
             models=ModelsSpec(models={}),
             events=EventsSpec(events=[]),
+            manifests=manifests,
         )
 
     models = load_models(models_file)
@@ -214,17 +269,18 @@ def load_specs(repo_root: Path) -> AllSpecs:
     events = load_events(events_file)
 
     # 3. Load service domains
-    services_dir = repo_root / "services"
     domains = _load_service_specs(services_dir)
 
-    # 4. Cross-validate model references
+    # 4. Explicit manifests are independent of ordinary domain generation.
+
+    # 5. Cross-validate model references
     reference_errors = validate_model_references(models, domains, events)
     if reference_errors:
         raise SpecValidationError(
             "Model reference validation failed:\n" + "\n".join(f"  - {e}" for e in reference_errors)
         )
 
-    return AllSpecs(models=models, events=events, domains=domains)
+    return AllSpecs(models=models, events=events, domains=domains, manifests=manifests)
 
 
 def validate_specs_cli(repo_root: Path) -> tuple[bool, str]:
@@ -240,11 +296,13 @@ def validate_specs_cli(repo_root: Path) -> tuple[bool, str]:
         model_count = len(specs.models.models)
         domain_count = len(specs.domains)
         event_count = len(specs.events.events)
+        manifest_count = len(specs.manifests)
         return True, (
             f"Spec validation PASSED.\n"
             f"  Models: {model_count}\n"
             f"  Domains: {domain_count}\n"
-            f"  Events: {event_count}"
+            f"  Events: {event_count}\n"
+            f"  Manifests: {manifest_count}"
         )
     except SpecValidationError as e:
         return False, f"Spec validation FAILED:\n  {e}"
