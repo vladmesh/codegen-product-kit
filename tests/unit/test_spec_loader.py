@@ -91,6 +91,84 @@ operations:
 
         assert specs.domains == {}
 
+    def test_explicit_service_manifest_is_loaded_outside_domain_specs(
+        self, temp_repo: Path
+    ) -> None:
+        (temp_repo / "shared" / "spec" / "models.yaml").write_text(
+            "models:\n  Example:\n    fields:\n      id: int\n"
+        )
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\n"
+            "settings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    languages:\n"
+            "      type: array\n"
+            "      items: {type: string}\n"
+            "  additionalProperties: false\n"
+        )
+
+        specs = load_specs(temp_repo)
+
+        assert specs.domains == {}
+        assert specs.manifests["backend"].settings_schema["properties"]["languages"] == {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+
+    @pytest.mark.parametrize(
+        ("manifest", "message"),
+        [
+            ("version: 2\nsettings_schema: {}\n", "version"),
+            (
+                "version: 1\nsettings_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n  properties: {}\n  additionalProperties: true\n",
+                "additionalProperties",
+            ),
+            (
+                "version: 1\nsettings_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n  properties: {}\n  additionalProperties: false\n"
+                "  required: [missing]\n",
+                "required",
+            ),
+            (
+                "version: 1\nsettings_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n  properties: {enabled: true}\n"
+                "  additionalProperties: false\n",
+                "object schemas",
+            ),
+        ],
+    )
+    def test_invalid_service_manifest_fails_closed(
+        self, temp_repo: Path, manifest: str, message: str
+    ) -> None:
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(manifest)
+
+        with pytest.raises(SpecValidationError, match=message):
+            load_specs(temp_repo)
+
+    def test_duplicate_manifest_setting_is_rejected(self, temp_repo: Path) -> None:
+        (temp_repo / "services" / "other" / "spec").mkdir(parents=True)
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {city: {type: string}}\n"
+            "  additionalProperties: false\n"
+        )
+        (temp_repo / "services" / "other" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {city: {type: string}}\n"
+            "  additionalProperties: false\n"
+        )
+
+        with pytest.raises(SpecValidationError, match="declared by both"):
+            load_specs(temp_repo)
+
     def test_invalid_yaml_syntax(self, temp_repo: Path) -> None:
         """Invalid YAML syntax should fail."""
         (temp_repo / "shared" / "spec" / "models.yaml").write_text("invalid: yaml: syntax:")

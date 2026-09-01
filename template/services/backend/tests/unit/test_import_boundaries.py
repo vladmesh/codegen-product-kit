@@ -76,6 +76,7 @@ def test_model_registry_populates_metadata() -> None:
 
     assert "users" in Base.metadata.tables
     assert "user_channels" in Base.metadata.tables
+    assert "settings" in Base.metadata.tables
 
 
 def test_asgi_entrypoint_builds_the_application() -> None:
@@ -112,3 +113,4 @@ def test_alembic_environment_loads_registered_metadata() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "CREATE TABLE users" in result.stdout
     assert "CREATE TABLE user_channels" in result.stdout
+    assert "CREATE TABLE settings" in result.stdout

@@ -19,6 +19,16 @@ graph TD
 1.  **Define:** You edit `shared/spec/models.yaml`, `shared/spec/events.yaml`, or `services/<service>/spec/*.yaml`.
 2.  **Generate:** Run `make generate-from-spec`. This produces Pydantic models, protocols, REST routers, and event adapters.
 3.  **Implement:** Services import these generated assets. You only write the business logic to satisfy the interfaces.
+
+### Core Settings
+
+`services/<service>/manifest.yaml` is an explicit, versioned service manifest, separate from
+`spec/*.yaml`. Its Draft 2020-12 `settings_schema` declares user-controlled settings and is
+validated before generation. The backend exposes typed `settings.get` and `settings.set` v1
+operations; values persist by product or user scope and writes validate against that schema. Use a
+setting for a value from the Product Brief or one a user may change. Keep startup, connectivity and
+secret values in the environment contract. `settings.set` requires the deployment-only
+`X-Settings-Capability` header, which is intentionally not documented in OpenAPI.
 {%- endif %}
 
 ## Service Modules

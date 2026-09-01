@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal, Protocol, TypeVar
 from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 
 # Primitive types supported by the generator
-PRIMITIVE_TYPES = Literal["int", "string", "bool", "float", "datetime", "uuid"]
+PRIMITIVE_TYPES = Literal["int", "string", "bool", "float", "datetime", "uuid", "json"]
 
 
 class PrimitiveType(BaseModel):
@@ -155,6 +155,7 @@ class _PythonRenderer:
         "float": "float",
         "datetime": "AwareDatetime",
         "uuid": "UUID",
+        "json": "Any",
     }
 
     def primitive(self, name: str) -> str:
@@ -185,6 +186,7 @@ class _JsonSchemaRenderer:
         "float": {"type": "number"},
         "datetime": {"type": "string", "format": "date-time"},
         "uuid": {"type": "string", "format": "uuid"},
+        "json": {},
     }
 
     def primitive(self, name: str) -> dict[str, Any]:
@@ -219,6 +221,7 @@ class _TypeScriptRenderer:
         "bool": "boolean",
         "datetime": "string",  # ISO datetime string
         "uuid": "string",
+        "json": "unknown",
     }
 
     def primitive(self, name: str) -> str:
@@ -265,7 +268,7 @@ def parse_type_spec(data: dict[str, Any] | str) -> TypeSpec:
     """
     # Shorthand: just a string like "int" or "string"
     if isinstance(data, str):
-        if data in ("int", "string", "bool", "float", "datetime", "uuid"):
+        if data in ("int", "string", "bool", "float", "datetime", "uuid", "json"):
             return PrimitiveType(type=data)  # type: ignore[arg-type]
 
         # Parse list shorthand.

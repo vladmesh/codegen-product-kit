@@ -347,14 +347,25 @@ class TestBackendWithTgBotGeneration:
         ).read_text()
         env_example = (project_backend_tg_bot / ".env.example").read_text()
 
-        assert set(openapi["paths"]) == {"/users/grant", "/users/revoke", "/users/access"}
+        assert set(openapi["paths"]) == {
+            "/settings/get",
+            "/settings/set",
+            "/users/grant",
+            "/users/revoke",
+            "/users/access",
+        }
         assert "X-Grant-Capability" not in json.dumps(openapi)
+        assert "X-Settings-Capability" not in json.dumps(openapi)
         assert "class UserChannel" in schemas
         assert "class UserGrant" in schemas
         assert "class UserRevoke" in schemas
         assert "USERS_GRANT_CAPABILITY=local-grant-capability-not-for-production" in env_example
+        assert (
+            "SETTINGS_WRITE_CAPABILITY=local-settings-capability-not-for-production" in env_example
+        )
         assert (backend / "src" / "generated" / "registry.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "users.py").is_file()
+        assert (backend / "src" / "generated" / "routers" / "settings.py").is_file()
 
 
 class TestFullStackGeneration:

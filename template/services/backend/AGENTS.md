@@ -17,10 +17,12 @@ and tests. Run commands from the project root through `make`.
 
 1. Edit `shared/spec/models.yaml` for shared data shapes.
 2. Edit `services/backend/spec/<domain>.yaml` for operations and transports.
-3. Run `make validate-specs` and `make generate-from-spec`.
-4. Implement or update the controller under `src/controllers/`.
-5. Update manual ORM models, repositories, application wiring, and migrations as needed.
-6. Run `make lint`, `make typecheck`, and `make tests backend`.
+3. Edit `services/<service>/manifest.yaml` for user-controlled settings schemas; it is separate from
+   domain generation and must use the documented fail-closed Draft 2020-12 form.
+4. Run `make validate-specs` and `make generate-from-spec`.
+5. Implement or update the controller under `src/controllers/`.
+6. Update manual ORM models, repositories, application wiring, and migrations as needed.
+7. Run `make lint`, `make typecheck`, and `make tests backend`.
 
 Generation owns Pydantic schemas, protocols, REST routers, the router registry, and event adapters.
 Controller stubs are created only when missing and are editable afterwards. Manual
@@ -52,6 +54,11 @@ only deactivates an existing identity. The bot resolves that identity and admits
 `USERS_GRANT_CAPABILITY` using a constant-time comparison. This header is deliberately absent from
 OpenAPI and from user-facing helper commands. Do not introduce environment, owner, or channel-
 specific fallback admission paths.
+
+`POST /settings/set` similarly requires exactly one `X-Settings-Capability` matching the generated
+`SETTINGS_WRITE_CAPABILITY`. It validates only manifest-declared values and is the sole product
+settings write path. Never place product setting values, schemas containing secrets, or this
+credential in environment variables, OpenAPI, logs, or LLM-facing data.
 
 ## Database and migrations
 

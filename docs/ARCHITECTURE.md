@@ -26,6 +26,11 @@ Backend-capable projects use three spec sources:
 | `shared/spec/events.yaml` | `shared/shared/generated/events.py` |
 | `services/<service>/spec/<domain>.yaml` | protocols, REST routers, router registry, event adapters, and initial controller stubs |
 
+Service manifests are a separate, explicitly loaded input. A
+`services/<service>/manifest.yaml` declares its versioned Draft 2020-12 `settings_schema`; it is
+validated fail-closed and produces the backend's generated settings-schema registry. It is not a
+domain spec, and the legacy `services/*/spec/manifest.yaml` path remains ignored.
+
 `framework/spec/loader.py` validates these inputs into typed models. `framework/generate.py` then
 runs the generators in a fixed order. Specs should use JSON Schema concepts where practical; there
 is no active migration to another implementation language.
@@ -39,6 +44,14 @@ Generated ownership is explicit:
 
 The service router registry is consumed by `services/backend/src/app/api/router.py`, which also
 wires manual infrastructure endpoints such as `/health`.
+
+## Core settings
+
+Generated backends provide `settings.get` and `settings.set` through typed v1 REST contracts. A
+setting value is persisted by declared key and explicit product or user scope. The controller
+validates each write against the corresponding service-manifest JSON Schema before the repository
+can store it. `settings.set` is protected by one generated write capability; credentials and values
+are neither environment-backed product settings nor part of generated OpenAPI.
 
 ## Operation transports
 

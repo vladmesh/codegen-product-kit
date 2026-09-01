@@ -14,10 +14,28 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.generated.schemas import (
+    SettingGet,
+    SettingSet,
+    SettingValue,
     UserAccess,
     UserGrant,
     UserRevoke,
 )
+
+class SettingsControllerProtocol(Protocol):
+    async def get(
+        self,
+        session: AsyncSession,
+        payload: SettingGet,
+    ) -> SettingValue:
+        ...
+
+    async def set(
+        self,
+        session: AsyncSession,
+        payload: SettingSet,
+    ) -> SettingValue:
+        ...
 
 class UsersControllerProtocol(Protocol):
     # Dual transport: REST + Events

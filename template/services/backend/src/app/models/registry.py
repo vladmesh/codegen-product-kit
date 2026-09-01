@@ -1,3 +1,4 @@
 """Explicit registration of user-owned ORM models for Alembic metadata."""
 
+from .setting import Setting  # noqa: F401
 from .user import User, UserChannel  # noqa: F401

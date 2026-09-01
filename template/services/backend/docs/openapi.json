@@ -6,6 +6,68 @@
     "description": ""
   },
   "paths": {
+    "/settings/get": {
+      "post": {
+        "operationId": "get",
+        "summary": "Get",
+        "tags": [
+          "settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingValue"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingGet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/set": {
+      "post": {
+        "operationId": "set",
+        "summary": "Set",
+        "tags": [
+          "settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingValue"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingSet"
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/grant": {
       "post": {
         "operationId": "grant",
@@ -249,6 +311,125 @@
           "status",
           "channel",
           "external_id"
+        ],
+        "additionalProperties": false
+      },
+      "SettingGet": {
+        "type": "object",
+        "title": "SettingGet",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "product",
+              "user"
+            ],
+            "default": "product"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "additionalProperties": false
+      },
+      "SettingSet": {
+        "type": "object",
+        "title": "SettingSet",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "product",
+              "user"
+            ],
+            "default": "product"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {}
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "SettingValue": {
+        "type": "object",
+        "title": "SettingValue",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "product",
+              "user"
+            ]
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {}
+        },
+        "required": [
+          "key",
+          "scope",
+          "value"
         ],
         "additionalProperties": false
       },
