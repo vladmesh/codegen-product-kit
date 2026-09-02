@@ -92,7 +92,15 @@ async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, Non
 
     connection = await db_engine.connect()
     transaction = await connection.begin()
-    session_maker = async_sessionmaker(bind=connection, class_=AsyncSession, expire_on_commit=False)
+    # ``create_savepoint`` lets application code call ``session.commit()`` — the jobs
+    # core commits a recorded command before it emits — while the outer transaction
+    # still rolls the test's writes back at teardown.
+    session_maker = async_sessionmaker(
+        bind=connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
     session = session_maker()
     try:
         yield session
@@ -117,8 +125,9 @@ async def app(db_session: AsyncSession) -> AsyncGenerator[FastAPI, None]:
     events_module._broker = mock_broker
 
     async def _get_test_db() -> AsyncGenerator[AsyncSession, None]:
-        async with db_session.begin_nested():
-            yield db_session
+        # No savepoint wrapper: a controller that commits inside the request owns its
+        # own transaction boundaries, exactly as it does behind ``get_async_db``.
+        yield db_session
 
     application.dependency_overrides[get_async_db] = _get_test_db
     try:

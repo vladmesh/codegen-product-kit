@@ -75,6 +75,28 @@ delivery without recording a second command. Evidence is what central QA asserts
 retry and is readable afterwards through `POST /jobs/evidence`, which returns a command only within
 the product that fired it. One product's command is neither visible nor fireable as another's.
 
+### Committed before emitted, emitted once
+
+A `job_fired` exists only for a command whose row is already committed. The core records the
+command, commits it, and only then emits: a failure between the two leaves a recorded command that a
+retry completes, never a behaviour that ran with nothing recording it.
+
+The emission itself happens in one place, behind the committed row's lock — `SELECT ... FOR UPDATE`
+on the product's PostgreSQL. A concurrent retry of the same identity waits there, then reads the row
+as the winner left it and returns that evidence instead of emitting beside it, so one identity emits
+at most once however many callers fire it and however they interleave. The lock is released by the
+commit that records the terminal evidence, which puts the remaining hazard on the safe side: a crash
+between a delivered event and that commit leaves the command `undelivered` and a later retry emits a
+second time, while the opposite direction is ruled out by the ordering — a command marked
+`dispatched` always had its `job_fired` published, because the emission precedes the transition and
+is never inverted.
+
+That is a statement about emission, and no more. `job_fired` is published on Redis pub/sub, where a
+publish with no subscriber attached still succeeds, so `dispatched` is evidence that the core
+emitted the event — not evidence that a provider consumed it, ran the behaviour or completed it.
+Whether the behaviour actually happened is asserted by central QA against the behaviour's own
+output, never inferred from dispatch evidence.
+
 ### The capability
 
 `POST /jobs/fire` requires exactly one `X-Jobs-Capability` value matching the generated
