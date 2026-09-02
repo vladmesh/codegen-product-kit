@@ -63,14 +63,17 @@ credential in environment variables, OpenAPI, logs, or LLM-facing data.
 
 `POST /jobs/fire` requires exactly one `X-Jobs-Capability` matching the generated
 `JOBS_FIRE_CAPABILITY`, and fires only a name declared under `jobs_schema`. The core records the
-command under its `(fired_by_product, command_id)` identity and emits `job_fired`; it never runs a
-timer or a loop, and it never resolves which module executes the behaviour. `POST /jobs/evidence`
+command under its `(fired_by_product, command_id)` identity, commits it, and only then emits
+`job_fired` from a single place holding that row's lock; it never runs a timer or a loop, and it
+never resolves which module executes the behaviour. `POST /jobs/evidence`
 reads that evidence back and carries no capability. Never put this credential, or any secret, in a
 URL, an event payload, an error body, or a log line.
 
 ## Database and migrations
 
-`get_async_db()` owns commit, rollback, and close. Controllers must not call `session.commit()`.
+`get_async_db()` owns commit, rollback, and close. Controllers must not call `session.commit()`,
+with one deliberate exception: the jobs core commits a recorded command before it emits `job_fired`,
+because an event must never exist for a command no committed row records.
 Add every new handwritten ORM model to `src/app/models/registry.py`; Alembic imports that explicit
 user-owned registry before reading `Base.metadata`.
 

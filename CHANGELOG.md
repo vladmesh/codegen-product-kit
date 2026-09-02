@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /jobs/evidence` reads the recorded evidence back. The core schedules nothing itself: a
   product with no declared behaviour and no provider gains no container or worker.
 
+- The generated core jobs contract now commits a fired command before it emits `job_fired`, and
+  emits it from a single place behind the committed row's lock (`SELECT ... FOR UPDATE` on
+  PostgreSQL). An event is therefore never published for an uncommitted command, and concurrent
+  retries of one identity produce at most one emission. No contract, schema, route or migration
+  changed.
+
 - **Breaking:** Generated backends now include the versioned, manifest-backed core settings v1
   contract. `POST /settings/get` and capability-protected `POST /settings/set` store only
   Draft 2020-12 schema-validated product or user-scoped values declared by explicit service

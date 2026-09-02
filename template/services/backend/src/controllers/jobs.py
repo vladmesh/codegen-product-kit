@@ -65,11 +65,11 @@ class JobsController(JobsControllerProtocol):
     """Fire only declared behaviours, exactly once per command identity."""
 
     async def fire(self, session: AsyncSession, payload: JobFire) -> JobCommandContract:
-        """Record a fire and emit ``job_fired`` at most once for this identity."""
+        """Record a fire durably, then emit ``job_fired`` at most once for this identity."""
 
         _validate_arguments(payload.name, payload.arguments)
         repository = JobCommandRepository(session)
-        command, _created = await repository.record(
+        await repository.record(
             command_id=payload.command_id,
             name=payload.name,
             arguments=payload.arguments,
@@ -77,13 +77,11 @@ class JobsController(JobsControllerProtocol):
             fired_by_run=payload.fired_by_run,
             accepted_at=datetime.now(UTC),
         )
-        if command.dispatch_status is DispatchStatus.DISPATCHED:
-            # Terminal evidence already exists: a replay never executes a second time.
-            return _to_contract(command)
-
-        if await _emit(command):
-            await repository.mark_dispatched(command, datetime.now(UTC))
-        return _to_contract(command)
+        # Ordering, not hope: the command is committed before anything can execute it.
+        # A failure here leaves a recorded command a later retry completes, never a
+        # behaviour that ran with nothing recording it.
+        await session.commit()
+        return await _emit_once(repository, payload.fired_by_product, payload.command_id)
 
     async def evidence(
         self, session: AsyncSession, payload: JobCommandRef
@@ -98,6 +96,36 @@ class JobsController(JobsControllerProtocol):
                 status_code=status.HTTP_404_NOT_FOUND, detail="Job command not found"
             )
         return _to_contract(command)
+
+
+async def _emit_once(
+    repository: JobCommandRepository, fired_by_product: str, command_id: str
+) -> JobCommandContract:
+    """The single place a ``job_fired`` is emitted and dispatch becomes terminal.
+
+    The command row is already committed, so nothing here can execute a behaviour that
+    no command records. The row lock taken by ``dispatch_lock_statement`` is what makes
+    the emission unique: a concurrent retry of the same identity waits on the row, then
+    re-reads it as terminal and returns the recorded evidence instead of emitting again.
+
+    The lock is held across the emission and released only by the commit that records
+    the terminal evidence, so the surviving hazard is on the safe side: a crash between
+    a delivered event and that commit leaves the command ``undelivered``, and a later
+    retry emits a second time. A command marked terminal that never emitted — a lost
+    execution wearing trustworthy evidence — is impossible, because the row is never
+    marked dispatched before delivery has been reported.
+    """
+    command = await repository.lock_for_dispatch(fired_by_product, command_id)
+    if command is None:  # pragma: no cover - the row was committed by the caller above
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Recorded job command is missing",
+        )
+    if command.dispatch_status is not DispatchStatus.DISPATCHED and await _emit(command):
+        await repository.mark_dispatched(command, datetime.now(UTC))
+    contract = _to_contract(command)
+    await repository.session.commit()
+    return contract
 
 
 async def _emit(command: JobCommand) -> bool:
