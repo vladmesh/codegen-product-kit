@@ -87,8 +87,15 @@ as the winner left it and returns that evidence instead of emitting beside it, s
 at most once however many callers fire it and however they interleave. The lock is released by the
 commit that records the terminal evidence, which puts the remaining hazard on the safe side: a crash
 between a delivered event and that commit leaves the command `undelivered` and a later retry emits a
-second time, while a command marked `dispatched` that never emitted — a lost execution wearing
-trustworthy evidence — cannot happen.
+second time, while the opposite direction is ruled out by the ordering — a command marked
+`dispatched` always had its `job_fired` published, because the emission precedes the transition and
+is never inverted.
+
+That is a statement about emission, and no more. `job_fired` is published on Redis pub/sub, where a
+publish with no subscriber attached still succeeds, so `dispatched` is evidence that the core
+emitted the event — not evidence that a provider consumed it, ran the behaviour or completed it.
+Whether the behaviour actually happened is asserted by central QA against the behaviour's own
+output, never inferred from dispatch evidence.
 
 ### The capability
 
