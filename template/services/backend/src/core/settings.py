@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     settings_write_capability: str = Field(
         min_length=1, validation_alias="SETTINGS_WRITE_CAPABILITY"
     )
+    jobs_fire_capability: str = Field(min_length=1, validation_alias="JOBS_FIRE_CAPABILITY")
     debug: bool = Field(default=False, validation_alias="DEBUG")
     enabled_modules_raw: str = Field(default="", validation_alias="ENABLED_MODULES")
 

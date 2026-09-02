@@ -29,6 +29,17 @@ operations; values persist by product or user scope and writes validate against 
 setting for a value from the Product Brief or one a user may change. Keep startup, connectivity and
 secret values in the environment contract. `settings.set` requires the deployment-only
 `X-Settings-Capability` header, which is intentionally not documented in OpenAPI.
+
+### Core Jobs
+
+`services/<service>/manifest.yaml` also declares, under `jobs_schema`, the named behaviours that may
+be fired, each with the JSON Schema its `arguments` must satisfy. The backend exposes typed
+`jobs.fire` and `jobs.evidence` v1 operations. The core schedules nothing: it records a fire under
+the caller-supplied `(fired_by_product, command_id)` identity and emits `job_fired`, so an optional
+module that declares `provides: ["jobs.fire"]` does the work. Replaying an identity returns the
+recorded evidence instead of firing again. `jobs.fire` requires the deployment-only
+`X-Jobs-Capability` header, which is intentionally not documented in OpenAPI; reading evidence back
+does not.
 {%- endif %}
 
 ## Service Modules

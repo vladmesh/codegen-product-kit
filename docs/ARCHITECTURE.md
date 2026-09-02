@@ -27,9 +27,11 @@ Backend-capable projects use three spec sources:
 | `services/<service>/spec/<domain>.yaml` | protocols, REST routers, router registry, event adapters, and initial controller stubs |
 
 Service manifests are a separate, explicitly loaded input. A
-`services/<service>/manifest.yaml` declares its versioned Draft 2020-12 `settings_schema`; it is
-validated fail-closed and produces the backend's generated settings-schema registry. It is not a
-domain spec, and the legacy `services/*/spec/manifest.yaml` path remains ignored.
+`services/<service>/manifest.yaml` declares its versioned Draft 2020-12 `settings_schema` and, in
+the same fail-closed form, its `jobs_schema` of fireable behaviours and the core capabilities it
+`provides`; all of it is validated fail-closed and produces the backend's generated settings-schema
+and job registries. It is not a domain spec, and the legacy `services/*/spec/manifest.yaml` path
+remains ignored.
 
 `framework/spec/loader.py` validates these inputs into typed models. `framework/generate.py` then
 runs the generators in a fixed order. Specs should use JSON Schema concepts where practical; there
@@ -52,6 +54,16 @@ setting value is persisted by declared key and explicit product or user scope. T
 validates each write against the corresponding service-manifest JSON Schema before the repository
 can store it. `settings.set` is protected by one generated write capability; credentials and values
 are neither environment-backed product settings nor part of generated OpenAPI.
+
+## Core jobs
+
+Generated backends provide `jobs.fire` and `jobs.evidence` through typed v1 REST contracts. The core
+schedules nothing: `jobs.fire` validates a manifest-declared name and its arguments, records the
+command under the caller-supplied `(fired_by_product, command_id)` identity, and emits `job_fired`
+for whichever optional module declared that it provides `jobs.fire`. Storage uniqueness on that
+identity makes a replay return the recorded evidence instead of executing again. `jobs.fire` is
+protected by one generated fire capability; `jobs.evidence` is not, and neither the capability nor
+any secret appears in generated OpenAPI, event payloads or error bodies.
 
 ## Operation transports
 

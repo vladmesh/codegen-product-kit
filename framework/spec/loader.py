@@ -213,19 +213,31 @@ def _load_service_manifests(services_dir: Path) -> dict[str, ServiceManifest]:
     return manifests
 
 
-def validate_manifest_settings(manifests: dict[str, ServiceManifest]) -> list[str]:
-    """Reject settings keys declared by more than one service."""
+def _validate_unique_declarations(
+    manifests: dict[str, ServiceManifest], field: str, label: str
+) -> list[str]:
+    """Reject a declared name claimed by more than one service manifest."""
     owners: dict[str, str] = {}
     errors: list[str] = []
     for service_name, manifest in manifests.items():
-        for key in manifest.settings_schema["properties"]:
+        for key in getattr(manifest, field)["properties"]:
             if key in owners:
                 errors.append(
-                    f"Setting '{key}' is declared by both '{owners[key]}' and '{service_name}'"
+                    f"{label} '{key}' is declared by both '{owners[key]}' and '{service_name}'"
                 )
             else:
                 owners[key] = service_name
     return errors
+
+
+def validate_manifest_settings(manifests: dict[str, ServiceManifest]) -> list[str]:
+    """Reject settings keys declared by more than one service."""
+    return _validate_unique_declarations(manifests, "settings_schema", "Setting")
+
+
+def validate_manifest_jobs(manifests: dict[str, ServiceManifest]) -> list[str]:
+    """Reject fireable job names declared by more than one service."""
+    return _validate_unique_declarations(manifests, "jobs_schema", "Job")
 
 
 def load_specs(repo_root: Path) -> AllSpecs:
@@ -242,7 +254,7 @@ def load_specs(repo_root: Path) -> AllSpecs:
     """
     services_dir = repo_root / "services"
     manifests = _load_service_manifests(services_dir)
-    manifest_errors = validate_manifest_settings(manifests)
+    manifest_errors = validate_manifest_settings(manifests) + validate_manifest_jobs(manifests)
     if manifest_errors:
         message = "Manifest settings validation failed:\n" + "\n".join(
             f"  - {error}" for error in manifest_errors

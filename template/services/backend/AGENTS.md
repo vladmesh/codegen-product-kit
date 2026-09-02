@@ -17,8 +17,9 @@ and tests. Run commands from the project root through `make`.
 
 1. Edit `shared/spec/models.yaml` for shared data shapes.
 2. Edit `services/backend/spec/<domain>.yaml` for operations and transports.
-3. Edit `services/<service>/manifest.yaml` for user-controlled settings schemas; it is separate from
-   domain generation and must use the documented fail-closed Draft 2020-12 form.
+3. Edit `services/<service>/manifest.yaml` for user-controlled settings schemas and for the
+   `jobs_schema` of fireable behaviours; it is separate from domain generation and must use the
+   documented fail-closed Draft 2020-12 form.
 4. Run `make validate-specs` and `make generate-from-spec`.
 5. Implement or update the controller under `src/controllers/`.
 6. Update manual ORM models, repositories, application wiring, and migrations as needed.
@@ -59,6 +60,13 @@ specific fallback admission paths.
 `SETTINGS_WRITE_CAPABILITY`. It validates only manifest-declared values and is the sole product
 settings write path. Never place product setting values, schemas containing secrets, or this
 credential in environment variables, OpenAPI, logs, or LLM-facing data.
+
+`POST /jobs/fire` requires exactly one `X-Jobs-Capability` matching the generated
+`JOBS_FIRE_CAPABILITY`, and fires only a name declared under `jobs_schema`. The core records the
+command under its `(fired_by_product, command_id)` identity and emits `job_fired`; it never runs a
+timer or a loop, and it never resolves which module executes the behaviour. `POST /jobs/evidence`
+reads that evidence back and carries no capability. Never put this credential, or any secret, in a
+URL, an event payload, an error body, or a log line.
 
 ## Database and migrations
 

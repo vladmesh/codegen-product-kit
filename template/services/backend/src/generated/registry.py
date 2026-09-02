@@ -10,14 +10,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from shared.generated.events import get_broker
+from services.backend.src.controllers.jobs import JobsController
 from services.backend.src.controllers.settings import SettingsController
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
 
+from .protocols import JobsControllerProtocol
 from .protocols import SettingsControllerProtocol
 from .protocols import UsersControllerProtocol
+from .routers import jobs
 from .routers import settings
 from .routers import users
+
+
+def get_jobs_controller() -> JobsControllerProtocol:
+    return JobsController()
 
 
 def get_settings_controller() -> SettingsControllerProtocol:
@@ -30,6 +37,12 @@ def get_users_controller() -> UsersControllerProtocol:
 
 def create_api_router() -> APIRouter:
     router = APIRouter()
+    router.include_router(
+        jobs.create_router(
+            get_session=get_async_db,
+            get_controller=get_jobs_controller,
+        )
+    )
     router.include_router(
         settings.create_router(
             get_session=get_async_db,

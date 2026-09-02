@@ -10,7 +10,7 @@ from typing import Any
 from faststream.redis import RedisBroker
 from faststream.redis.parser import BinaryMessageFormatV1
 
-from shared.generated.schemas import CommandReceived, UserAccess
+from shared.generated.schemas import CommandReceived, JobFired, UserAccess
 
 _broker: RedisBroker | None = None
 
@@ -40,3 +40,11 @@ async def publish_command_received(message: CommandReceived) -> Any:
     if _pub_command_received is None:
         _pub_command_received = get_broker().publisher("command_received")
     return await _pub_command_received.publish(message)
+_pub_job_fired: Any = None
+
+
+async def publish_job_fired(message: JobFired) -> Any:
+    global _pub_job_fired
+    if _pub_job_fired is None:
+        _pub_job_fired = get_broker().publisher("job_fired")
+    return await _pub_job_fired.publish(message)

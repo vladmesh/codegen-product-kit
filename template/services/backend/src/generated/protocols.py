@@ -14,6 +14,9 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.generated.schemas import (
+    JobCommand,
+    JobCommandRef,
+    JobFire,
     SettingGet,
     SettingSet,
     SettingValue,
@@ -21,6 +24,21 @@ from shared.generated.schemas import (
     UserGrant,
     UserRevoke,
 )
+
+class JobsControllerProtocol(Protocol):
+    async def fire(
+        self,
+        session: AsyncSession,
+        payload: JobFire,
+    ) -> JobCommand:
+        ...
+
+    async def evidence(
+        self,
+        session: AsyncSession,
+        payload: JobCommandRef,
+    ) -> JobCommand:
+        ...
 
 class SettingsControllerProtocol(Protocol):
     async def get(
