@@ -127,6 +127,89 @@ models:
       value:
         type: json
 
+  JobFire:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      command_id:
+        type: string
+        min_length: 1
+      name:
+        type: string
+        min_length: 1
+      arguments:
+        type: json
+      fired_by_product:
+        type: string
+        min_length: 1
+      fired_by_run:
+        type: string
+        min_length: 1
+
+  JobCommandRef:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      command_id:
+        type: string
+        min_length: 1
+      fired_by_product:
+        type: string
+        min_length: 1
+
+  JobCommand:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      command_id:
+        type: string
+      name:
+        type: string
+      arguments:
+        type: json
+      fired_by_product:
+        type: string
+      fired_by_run:
+        type: string
+      dispatch_status:
+        type:
+          type: enum
+          values: [dispatched, undelivered]
+      accepted_at:
+        type: datetime
+      dispatched_at:
+        type: datetime
+        optional: true
+
+  JobFired:
+    fields:
+      contract_version:
+        type: int
+        ge: 1
+        le: 1
+        default: 1
+      command_id:
+        type: string
+      name:
+        type: string
+      arguments:
+        type: json
+      fired_by_product:
+        type: string
+      fired_by_run:
+        type: string
+      accepted_at:
+        type: datetime
+
   CommandReceived:
     fields:
       command:

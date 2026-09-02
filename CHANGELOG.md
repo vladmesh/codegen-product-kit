@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Generated backends now include the versioned, manifest-backed core jobs v1
+  contract. Capability-protected `POST /jobs/fire` records a caller-supplied command identity for a
+  behaviour declared in `services/<service>/manifest.yaml` and emits `job_fired`; unprotected
+  `POST /jobs/evidence` reads the recorded evidence back. The core schedules nothing itself: a
+  product with no declared behaviour and no provider gains no container or worker.
+
 - **Breaking:** Generated backends now include the versioned, manifest-backed core settings v1
   contract. `POST /settings/get` and capability-protected `POST /settings/set` store only
   Draft 2020-12 schema-validated product or user-scoped values declared by explicit service

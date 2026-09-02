@@ -104,6 +104,60 @@ class SettingValue(BaseModel):
     value: Any
 
 
+class JobFire(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    command_id: constr(min_length=1)
+    name: constr(min_length=1)
+    arguments: Any
+    fired_by_product: constr(min_length=1)
+    fired_by_run: constr(min_length=1)
+
+
+class JobCommandRef(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    command_id: constr(min_length=1)
+    fired_by_product: constr(min_length=1)
+
+
+class DispatchStatus(StrEnum):
+    dispatched = "dispatched"
+    undelivered = "undelivered"
+
+
+class JobCommand(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    command_id: str
+    name: str
+    arguments: Any
+    fired_by_product: str
+    fired_by_run: str
+    dispatch_status: DispatchStatus
+    accepted_at: AwareDatetime
+    dispatched_at: AwareDatetime | None = None
+
+
+class JobFired(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    contract_version: conint(ge=1, le=1) = 1
+    command_id: str
+    name: str
+    arguments: Any
+    fired_by_product: str
+    fired_by_run: str
+    accepted_at: AwareDatetime
+
+
 class CommandReceived(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

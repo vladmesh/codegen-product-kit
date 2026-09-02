@@ -6,6 +6,7 @@ from services.backend.src.core.settings import get_settings
 
 from .api.router import api_router
 from .grant_capability import GrantCapabilityMiddleware
+from .jobs_capability import JobsCapabilityMiddleware
 from .lifespan import lifespan
 from .middleware import RequestLoggingMiddleware
 from .settings_capability import SettingsCapabilityMiddleware
@@ -19,6 +20,10 @@ def create_app() -> FastAPI:
     application.add_middleware(
         GrantCapabilityMiddleware,
         capability=settings.users_grant_capability,
+    )
+    application.add_middleware(
+        JobsCapabilityMiddleware,
+        capability=settings.jobs_fire_capability,
     )
     application.add_middleware(
         SettingsCapabilityMiddleware,

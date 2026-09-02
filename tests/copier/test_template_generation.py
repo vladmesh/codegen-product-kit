@@ -348,6 +348,8 @@ class TestBackendWithTgBotGeneration:
         env_example = (project_backend_tg_bot / ".env.example").read_text()
 
         assert set(openapi["paths"]) == {
+            "/jobs/fire",
+            "/jobs/evidence",
             "/settings/get",
             "/settings/set",
             "/users/grant",
@@ -356,6 +358,7 @@ class TestBackendWithTgBotGeneration:
         }
         assert "X-Grant-Capability" not in json.dumps(openapi)
         assert "X-Settings-Capability" not in json.dumps(openapi)
+        assert "X-Jobs-Capability" not in json.dumps(openapi)
         assert "class UserChannel" in schemas
         assert "class UserGrant" in schemas
         assert "class UserRevoke" in schemas
@@ -363,9 +366,38 @@ class TestBackendWithTgBotGeneration:
         assert (
             "SETTINGS_WRITE_CAPABILITY=local-settings-capability-not-for-production" in env_example
         )
+        assert "JOBS_FIRE_CAPABILITY=local-jobs-capability-not-for-production" in env_example
         assert (backend / "src" / "generated" / "registry.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "users.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "settings.py").is_file()
+        assert (backend / "src" / "generated" / "routers" / "jobs.py").is_file()
+        assert (backend / "src" / "generated" / "jobs_schemas.py").is_file()
+
+
+    def test_the_jobs_core_adds_no_scheduler_container_worker_or_timer(
+        self, project_backend: Path
+    ) -> None:
+        """Firing is a recorded, event-emitting contract; scheduling is a provider's job."""
+        import yaml
+
+        compose = yaml.safe_load((project_backend / "infra" / "compose.base.yml").read_text())
+        services = yaml.safe_load((project_backend / "services.yml").read_text())["services"]
+        backend_source = "\n".join(
+            path.read_text()
+            for path in sorted((project_backend / "services" / "backend" / "src").rglob("*.py"))
+        )
+        manifest = yaml.safe_load(
+            (project_backend / "services" / "backend" / "manifest.yaml").read_text()
+        )
+
+        assert set(compose["services"]) == {"backend", "db", "redis"}
+        assert [service["name"] for service in services] == ["backend"]
+        assert "scheduler" not in backend_source
+        assert "while True" not in backend_source
+        assert "asyncio.sleep" not in backend_source
+        assert "apscheduler" not in backend_source.lower()
+        assert manifest["jobs_schema"]["properties"] == {}
+        assert manifest["provides"] == []
 
 
 class TestFullStackGeneration:

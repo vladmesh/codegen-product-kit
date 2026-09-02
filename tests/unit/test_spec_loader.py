@@ -169,6 +169,111 @@ operations:
         with pytest.raises(SpecValidationError, match="declared by both"):
             load_specs(temp_repo)
 
+    def test_a_version_1_manifest_without_jobs_stays_valid(self, temp_repo: Path) -> None:
+        """The jobs declaration is additive: an existing settings-only manifest loads."""
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n"
+        )
+
+        specs = load_specs(temp_repo)
+
+        assert specs.manifests["backend"].jobs_schema["properties"] == {}
+        assert specs.manifests["backend"].provides == []
+
+    def test_declared_jobs_and_provided_capabilities_are_loaded(self, temp_repo: Path) -> None:
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n"
+            "jobs_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    friday_digest:\n"
+            "      type: object\n"
+            "      properties: {week: {type: integer}}\n"
+            "      additionalProperties: false\n"
+            "  additionalProperties: false\n"
+            'provides: ["jobs.fire"]\n'
+        )
+
+        specs = load_specs(temp_repo)
+
+        manifest = specs.manifests["backend"]
+        assert manifest.jobs_schema["properties"]["friday_digest"]["type"] == "object"
+        assert manifest.provides == ["jobs.fire"]
+
+    @pytest.mark.parametrize(
+        ("manifest", "message"),
+        [
+            (
+                "jobs_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n  properties: {}\n  additionalProperties: true\n",
+                "jobs_schema.additionalProperties",
+            ),
+            (
+                "jobs_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n  properties: {friday_digest: {type: string}}\n"
+                "  additionalProperties: false\n",
+                "friday_digest.type",
+            ),
+            (
+                "jobs_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n"
+                "  properties: {friday_digest: {type: object, properties: {}}}\n"
+                "  additionalProperties: false\n",
+                "friday_digest.additionalProperties",
+            ),
+            (
+                "jobs_schema:\n"
+                "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+                "  type: object\n"
+                "  properties:\n"
+                "    friday_digest:\n"
+                "      $ref: '#/nowhere'\n"
+                "  additionalProperties: false\n",
+                r"\$ref",
+            ),
+            ('provides: ["scheduler.timers"]\n', "unknown capability"),
+            ('provides: ["jobs.fire", "jobs.fire"]\n', "repeat a capability"),
+            ("jobs: {}\n", "Extra inputs"),
+        ],
+    )
+    def test_invalid_manifest_jobs_declaration_fails_closed(
+        self, temp_repo: Path, manifest: str, message: str
+    ) -> None:
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n" + manifest
+        )
+
+        with pytest.raises(SpecValidationError, match=message):
+            load_specs(temp_repo)
+
+    def test_duplicate_manifest_job_is_rejected(self, temp_repo: Path) -> None:
+        (temp_repo / "services" / "other" / "spec").mkdir(parents=True)
+        declaration = (
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n"
+            "jobs_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n"
+            "  properties: {friday_digest: {type: object, additionalProperties: false}}\n"
+            "  additionalProperties: false\n"
+        )
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(declaration)
+        (temp_repo / "services" / "other" / "manifest.yaml").write_text(declaration)
+
+        with pytest.raises(SpecValidationError, match="Job 'friday_digest' is declared by both"):
+            load_specs(temp_repo)
+
     def test_invalid_yaml_syntax(self, temp_repo: Path) -> None:
         """Invalid YAML syntax should fail."""
         (temp_repo / "shared" / "spec" / "models.yaml").write_text("invalid: yaml: syntax:")

@@ -168,6 +168,68 @@
           }
         ]
       }
+    },
+    "/jobs/fire": {
+      "post": {
+        "operationId": "fire",
+        "summary": "Fire",
+        "tags": [
+          "jobs"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCommand"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobFire"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/evidence": {
+      "post": {
+        "operationId": "evidence",
+        "summary": "Evidence",
+        "tags": [
+          "jobs"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCommand"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCommandRef"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -430,6 +492,163 @@
           "key",
           "scope",
           "value"
+        ],
+        "additionalProperties": false
+      },
+      "JobFire": {
+        "type": "object",
+        "title": "JobFire",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "command_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arguments": {},
+          "fired_by_product": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fired_by_run": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "command_id",
+          "name",
+          "arguments",
+          "fired_by_product",
+          "fired_by_run"
+        ],
+        "additionalProperties": false
+      },
+      "JobCommandRef": {
+        "type": "object",
+        "title": "JobCommandRef",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "command_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fired_by_product": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "command_id",
+          "fired_by_product"
+        ],
+        "additionalProperties": false
+      },
+      "JobCommand": {
+        "type": "object",
+        "title": "JobCommand",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "command_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {},
+          "fired_by_product": {
+            "type": "string"
+          },
+          "fired_by_run": {
+            "type": "string"
+          },
+          "dispatch_status": {
+            "type": "string",
+            "enum": [
+              "dispatched",
+              "undelivered"
+            ]
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dispatched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "command_id",
+          "name",
+          "arguments",
+          "fired_by_product",
+          "fired_by_run",
+          "dispatch_status",
+          "accepted_at"
+        ],
+        "additionalProperties": false
+      },
+      "JobFired": {
+        "type": "object",
+        "title": "JobFired",
+        "properties": {
+          "contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "command_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {},
+          "fired_by_product": {
+            "type": "string"
+          },
+          "fired_by_run": {
+            "type": "string"
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "command_id",
+          "name",
+          "arguments",
+          "fired_by_product",
+          "fired_by_run",
+          "accepted_at"
         ],
         "additionalProperties": false
       },

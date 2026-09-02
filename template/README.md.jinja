@@ -57,6 +57,10 @@ It requires one `X-Settings-Capability` header. Product values such as user-sele
 belong in `services/<service>/manifest.yaml`, are validated and persisted through
 `/settings/set`, and are never copied into environment variables.
 
+`POST /jobs/fire` is the equivalent capability for firing a manifest-declared behaviour by name. It
+requires one `X-Jobs-Capability` header; `POST /jobs/evidence` reads the recorded evidence back and
+requires none.
+
 {% endif -%}
 
 3. **Start development**
@@ -101,6 +105,10 @@ This project includes the following modules:
 - **Add product settings:** declare independent JSON Schema properties in
   `services/<service>/manifest.yaml`, run `make generate-from-spec`, then use the typed
   `/settings/get` and `/settings/set` core operations.
+- **Add a fireable behaviour:** declare its name and argument schema under `jobs_schema` in
+  `services/<service>/manifest.yaml`, run `make generate-from-spec`, then fire it by name through
+  `/jobs/fire`. A module that performs the work subscribes to `job_fired` and declares
+  `provides: ["jobs.fire"]`.
 - **Create database migrations:** add or change ORM models, then run
   `make makemigrations name="describe_change"`. The target starts the PostgreSQL dev container
   through the worker compose layer and runs Alembic inside a one-off backend container. It upgrades the database to the current
