@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from importlib import metadata
 from pathlib import Path
 
@@ -12,16 +13,28 @@ from framework.spec.packages import lint_package_imports, parse_package_manifest
 ENTRY_POINT_GROUP = "codegen_kit.packages"
 
 
-def lint_installed_packages(repo_root: Path) -> list[str]:
+def _package_entry_points(distribution_path: Path | None) -> dict[str, metadata.EntryPoint]:
+    """Read package entry points from the active or an explicit installation."""
+
+    if distribution_path is None:
+        entry_points = metadata.entry_points(group=ENTRY_POINT_GROUP)
+    else:
+        entry_points = (
+            entry_point
+            for distribution in metadata.distributions(path=[str(distribution_path)])
+            for entry_point in distribution.entry_points
+            if entry_point.group == ENTRY_POINT_GROUP
+        )
+    return {entry_point.name: entry_point for entry_point in entry_points}
+
+
+def lint_installed_packages(repo_root: Path, distribution_path: Path | None = None) -> list[str]:
     """Lint every package explicitly listed by the backend service manifest."""
 
     product = yaml.safe_load((repo_root / "services/backend/manifest.yaml").read_text())
     listed = set(product.get("packages", []))
     violations: list[str] = []
-    entry_points = {
-        entry_point.name: entry_point
-        for entry_point in metadata.entry_points(group=ENTRY_POINT_GROUP)
-    }
+    entry_points = _package_entry_points(distribution_path)
     for name in sorted(listed & set(entry_points)):
         entry_point = entry_points[name]
         distribution = entry_point.dist
@@ -44,7 +57,10 @@ def lint_installed_packages(repo_root: Path) -> list[str]:
 def main() -> int:
     """Run the package import check for the current generated product."""
 
-    violations = lint_installed_packages(Path.cwd())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--site-packages", type=Path)
+    arguments = parser.parse_args()
+    violations = lint_installed_packages(Path.cwd(), arguments.site_packages)
     if violations:
         print("Package import lint FAILED:")
         print("\n".join(f"  - {item}" for item in violations))

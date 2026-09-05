@@ -40,8 +40,8 @@ ignore_notebooks = true
 
 [tool.deptry.per_rule_ignores]
 # Runtime deps not visible in static analysis of src/
-DEP002 = ["uvicorn", "alembic", "psycopg", "asyncpg", "faststream"]
-# Internal packages (services.*) are not pip dependencies
-DEP001 = ["services"]
+DEP002 = ["uvicorn", "alembic", "psycopg", "asyncpg", "faststream", "packaging", "pyyaml"]
+# Product-owned imports (services.* and the root codegen_kit facade) are not pip dependencies
+DEP001 = ["services", "codegen_kit"]
 # Transitive deps used directly — starlette via fastapi, structlog via shared
 DEP003 = ["starlette", "structlog"]

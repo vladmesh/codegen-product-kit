@@ -90,9 +90,9 @@ def test_installed_package_import_lint_reads_real_distribution(
     source = installed_synthetic / "synthetic_package/__init__.py"
     original = source.read_text()
     try:
-        assert lint_installed_packages(project_backend) == []
+        assert lint_installed_packages(project_backend, installed_synthetic) == []
         source.write_text(original + "\nfrom services.backend.src.core import db\n")
-        violations = lint_installed_packages(project_backend)
+        violations = lint_installed_packages(project_backend, installed_synthetic)
         assert len(violations) == 1
         assert "forbidden import 'services.backend.src.core'" in violations[0]
     finally:
