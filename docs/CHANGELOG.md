@@ -2,6 +2,16 @@
 
 ## 2026-09-05
 
+- Added `codegen-kit-reminders` 0.1.0 as the first independently versioned package: one-time reminder
+  HTTP routes, package-owned migrations, an externally fireable `reminders.tick`, and durable
+  `reminders.due` outbox emission with a stable logical event identity across backend restarts.
+  Package manifests may now declare `deployment.modes`; in-process activation is implemented and
+  container deployability is declaration-only without a package-protocol bump. The façade is `1.2.0`
+  after adding optional stable metadata to `publish_event`.
+- Removed the dead service-only settings/jobs duplicate validators. The shared service/package
+  ownership registry is now the literal single refusal mechanism, so service-vs-service duplicates
+  are reported under `Package contract merge failed:`. Consumed-event schema binding now documents
+  its authoritative parsed JSON representation.
 - Package protocol v1 now runs package Alembic revisions in exclusive PostgreSQL schemas and version
   tables, merges prefixed settings and jobs plus event/message schemas from the installed active set,
   and pins runtime activation to the package identities used by generation. The façade is `1.1.0`

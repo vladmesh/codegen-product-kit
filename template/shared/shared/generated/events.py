@@ -113,8 +113,20 @@ async def publish_job_fired(
     return envelope
 
 
-async def publish_event(stream: str, payload: Any) -> EventEnvelope[Any]:
+async def publish_event(
+    stream: str,
+    payload: Any,
+    *,
+    event_id: UUID | None = None,
+    occurred_at: datetime | None = None,
+    schema_version: int = 1,
+) -> EventEnvelope[Any]:
     """Publish an operation-level event with the standard envelope."""
-    envelope = EventEnvelope[Any](payload=payload)
+    envelope = EventEnvelope[Any](
+        event_id=event_id or uuid4(),
+        occurred_at=occurred_at or datetime.now(UTC),
+        schema_version=schema_version,
+        payload=payload,
+    )
     await get_broker().publish(envelope, stream=stream)
     return envelope

@@ -2,7 +2,9 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from .packages import (
     CORE_VERSION,
@@ -29,12 +31,25 @@ async def package_session(schema: str) -> AsyncIterator[Any]:
         yield session
 
 
-async def publish_event(stream: str, payload: Any) -> Any:
+async def publish_event(
+    stream: str,
+    payload: Any,
+    *,
+    event_id: UUID | None = None,
+    occurred_at: datetime | None = None,
+    schema_version: int = 1,
+) -> Any:
     """Publish through the generated product transport without exposing its module."""
 
     from shared.generated.events import publish_event as generated_publish_event
 
-    return await generated_publish_event(stream, payload)
+    return await generated_publish_event(
+        stream,
+        payload,
+        event_id=event_id,
+        occurred_at=occurred_at,
+        schema_version=schema_version,
+    )
 
 
 __all__ = [

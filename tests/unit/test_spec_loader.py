@@ -166,7 +166,10 @@ operations:
             "  additionalProperties: false\n"
         )
 
-        with pytest.raises(SpecValidationError, match="declared by both"):
+        with pytest.raises(
+            SpecValidationError,
+            match=r"Package contract merge failed:\n  - Setting 'city' is declared by both",
+        ):
             load_specs(temp_repo)
 
     def test_a_version_1_manifest_without_jobs_stays_valid(self, temp_repo: Path) -> None:
@@ -295,7 +298,10 @@ operations:
         (temp_repo / "services" / "backend" / "manifest.yaml").write_text(declaration)
         (temp_repo / "services" / "other" / "manifest.yaml").write_text(declaration)
 
-        with pytest.raises(SpecValidationError, match="Job 'friday_digest' is declared by both"):
+        with pytest.raises(
+            SpecValidationError,
+            match=(r"Package contract merge failed:\n  - Job 'friday_digest' is declared by both"),
+        ):
             load_specs(temp_repo)
 
     def test_invalid_yaml_syntax(self, temp_repo: Path) -> None:

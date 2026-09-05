@@ -10,6 +10,8 @@ http:
 database:
   schema: synthetic
   migrations: synthetic_package:migrations
+deployment:
+  modes: [in_process]
 events:
   publishes: [synthetic.ready, synthetic.requested]
   consumes: [synthetic.requested]

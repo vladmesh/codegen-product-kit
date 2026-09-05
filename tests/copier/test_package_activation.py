@@ -23,6 +23,7 @@ from framework.lint.package_imports import lint_installed_packages
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
 KIT_ROOT = Path(__file__).parents[2]
+REMINDERS = KIT_ROOT / "packages/codegen-kit-reminders"
 LINT_LAYOUT_FIXTURES = (
     Path(__file__).parents[1] / "fixtures/synthetic_single_module",
     Path(__file__).parents[1] / "fixtures/synthetic_missing_module",
@@ -458,6 +459,22 @@ def test_named_activation_failures_use_real_entry_point(
         installed_manifest.write_text(original)
 
 
+def test_runtime_rejects_malformed_deployment_declaration(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data["deployment"] = {"modes": ["unknown"]}
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+        with pytest.raises(runtime.PackageManifestError, match="deployment"):
+            runtime.discover_packages(["synthetic"])
+    finally:
+        installed_manifest.write_text(original)
+
+
 @pytest.mark.slow
 def test_package_contract_and_migrations_against_real_postgres(
     project_backend: Path,
@@ -501,10 +518,34 @@ def test_package_contract_and_migrations_against_real_postgres(
         text=True,
     )  # noqa: S603
     assert add_result.returncode == 0, add_result.stdout + add_result.stderr
+    reminders_wheel_result = subprocess.run(
+        [uv, "build", "--wheel", str(REMINDERS), "--out-dir", str(packages)],
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert reminders_wheel_result.returncode == 0, (
+        reminders_wheel_result.stdout + reminders_wheel_result.stderr
+    )
+    reminders_wheel = next(packages.glob("codegen_kit_reminders-*.whl"))
+    reminders_add_result = subprocess.run(
+        [
+            uv,
+            "add",
+            "--project",
+            "services/backend",
+            str(reminders_wheel.relative_to(project)),
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert reminders_add_result.returncode == 0, (
+        reminders_add_result.stdout + reminders_add_result.stderr
+    )
 
     manifest_path = project / "services/backend/manifest.yaml"
     manifest = yaml.safe_load(manifest_path.read_text())
-    manifest["packages"] = ["synthetic"]
+    manifest["packages"] = ["synthetic", "reminders"]
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
     (project / "services/backend/spec/synthetic_consumer.yaml").write_text(
         "domain: synthetic_consumer\n"
@@ -545,15 +586,24 @@ def test_package_contract_and_migrations_against_real_postgres(
             import os
             from pathlib import Path
             import subprocess
+            import sys
+            import textwrap
+            from uuid import UUID
 
             import asyncpg
+            from faststream.redis import RedisBroker, StreamSub
             from httpx import AsyncClient
             import pytest
             from redis.asyncio import Redis
 
+            from codegen_kit_reminders.runtime import CONSUMER_GROUP, due_event_id
             from services.backend.src.core.db import async_engine
-            from shared.generated.events import get_broker, publish_synthetic_requested
-            from shared.generated.schemas import SyntheticReady, SyntheticRequested
+            from shared.generated.events import (
+                EventEnvelope,
+                get_broker,
+                publish_synthetic_requested,
+            )
+            from shared.generated.schemas import ReminderDue, SyntheticReady, SyntheticRequested
             from synthetic_package import announce_ready, orm_base, session
 
 
@@ -629,6 +679,175 @@ def test_package_contract_and_migrations_against_real_postgres(
                 adapter = Path("services/backend/src/generated/event_adapter.py").read_text()
                 assert '"synthetic.requested"' in adapter
                 assert "SyntheticRequested" in adapter
+
+
+            async def _due_reader(name: str):
+                broker = RedisBroker(os.environ["REDIS_URL"])
+                subscriber = broker.subscriber(
+                    stream=StreamSub(
+                        "reminders.due",
+                        group=f"events:reminders-proof:{name}",
+                        consumer=name,
+                    )
+                )
+                await broker.start()
+                return broker, subscriber
+
+
+            @pytest.mark.asyncio
+            async def test_reminder_http_tick_cancel_and_restart_outbox() -> None:
+                redis = Redis.from_url(os.environ["REDIS_URL"])
+                # test_durable_events.py deliberately flushes Redis after the backend
+                # starts, so restore this installed package's declared consumer group.
+                await redis.xgroup_create(
+                    "job_fired", CONSUMER_GROUP, id="$", mkstream=True
+                )
+                reader, subscriber = await _due_reader("main")
+                headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    created = await client.post(
+                        "/reminders",
+                        json={
+                            "user_ref": "opaque:user/42",
+                            "text": "one-time text",
+                            "remind_at": "2040-01-01T00:00:00Z",
+                        },
+                    )
+                    assert created.status_code == 201, created.text
+                    reminder = created.json()
+                    listed = await client.get(
+                        "/reminders", params={"user_ref": "opaque:user/42"}
+                    )
+                    assert [item["id"] for item in listed.json()] == [reminder["id"]]
+
+                    cancelled = await client.post(
+                        "/reminders",
+                        json={
+                            "user_ref": "opaque:cancelled",
+                            "text": "never publish",
+                            "remind_at": "2040-01-01T00:00:00Z",
+                        },
+                    )
+                    cancelled_id = cancelled.json()["id"]
+                    response = await client.delete(
+                        f"/reminders/{cancelled_id}",
+                        params={"user_ref": "opaque:cancelled"},
+                    )
+                    assert response.status_code == 200
+                    assert response.json()["state"] == "cancelled"
+
+                    fire = {
+                        "name": "reminders.tick",
+                        "arguments": {"at": "2040-01-01T00:00:00Z"},
+                        "fired_by_product": "reminders-proof",
+                        "fired_by_run": "run-1",
+                    }
+                    for command_id in ("tick-once", "tick-twice"):
+                        response = await client.post(
+                            "/jobs/fire",
+                            headers=headers,
+                            json={**fire, "command_id": command_id},
+                        )
+                        assert response.status_code == 200, response.text
+                    refused = await client.post(
+                        "/jobs/fire",
+                        headers=headers,
+                        json={
+                            **fire,
+                            "command_id": "bad-tick",
+                            "arguments": {
+                                "at": "2040-01-01T00:00:00Z",
+                                "undeclared": True,
+                            },
+                        },
+                    )
+                    assert refused.status_code == 422
+
+                delivery = await subscriber.get_one(timeout=10)
+                assert delivery is not None
+                envelope = EventEnvelope[ReminderDue].model_validate(await delivery.decode())
+                assert str(envelope.payload.reminder_id) == reminder["id"]
+                assert envelope.payload.user_ref == "opaque:user/42"
+                assert envelope.event_id == due_event_id(UUID(reminder["id"]))
+                assert await redis.xlen("reminders.due") == 1
+                await reader.stop()
+
+                # The first replacement backend process is killed after its durable
+                # transition commits but before publication. A new process handles
+                # the next tick against the same package schema and recovers the row.
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    restart = await client.post(
+                        "/reminders",
+                        json={
+                            "user_ref": "opaque:restart",
+                            "text": "survive restart",
+                            "remind_at": "2050-01-01T00:00:00Z",
+                        },
+                    )
+                    assert restart.status_code == 201
+                    restart_id = restart.json()["id"]
+
+                crashing = textwrap.dedent(
+                    '''
+                    import asyncio
+                    import os
+                    import codegen_kit_reminders.runtime as runtime
+                    from services.backend.src.app.factory import create_app
+
+                    async def crash(*args, **kwargs):
+                        os._exit(75)
+
+                    async def main():
+                        application = create_app()
+                        async with application.router.lifespan_context(application):
+                            runtime.publish_event = crash
+                            await runtime.handle_job_fired({
+                                "payload": {
+                                    "name": "reminders.tick",
+                                    "arguments": {"at": "2050-01-01T00:00:00Z"},
+                                }
+                            })
+
+                    asyncio.run(main())
+                    '''
+                )
+                crashed = subprocess.run([sys.executable, "-c", crashing], check=False)
+                assert crashed.returncode == 75
+                connection = await asyncpg.connect(
+                    os.environ["ASYNC_DATABASE_URL"].replace(
+                        "postgresql+asyncpg://", "postgresql://"
+                    )
+                )
+                try:
+                    pending = await connection.fetchrow(
+                        "SELECT r.state, e.emitted_at FROM reminders.reminders AS r "
+                        "JOIN reminders.due_emissions AS e ON e.reminder_id = r.id "
+                        "WHERE r.id = $1",
+                        UUID(restart_id),
+                    )
+                    assert tuple(pending.values()) == ("due", None)
+                finally:
+                    await connection.close()
+
+                restart_reader, restart_subscriber = await _due_reader("restart")
+                recovering = crashing.replace(
+                    "runtime.publish_event = crash",
+                    "# replacement process uses the real publisher",
+                )
+                recovered = subprocess.run(
+                    [sys.executable, "-c", recovering], capture_output=True, text=True
+                )
+                assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+                recovered_delivery = await restart_subscriber.get_one(timeout=10)
+                assert recovered_delivery is not None
+                recovered_envelope = EventEnvelope[ReminderDue].model_validate(
+                    await recovered_delivery.decode()
+                )
+                assert str(recovered_envelope.payload.reminder_id) == restart_id
+                assert recovered_envelope.event_id == due_event_id(UUID(restart_id))
+                assert await redis.xlen("reminders.due") == 2
+                await restart_reader.stop()
+                await redis.aclose()
             """
         )
     )

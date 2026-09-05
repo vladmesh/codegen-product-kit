@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added the separately versioned `codegen-kit-reminders` package with one-time reminder HTTP routes,
+  a package-owned PostgreSQL schema, externally fired ticks, and durable stable-ID due-event
+  emission. Package manifests can now declare in-process and container deployability, while only
+  in-process activation is currently implemented.
+
 - **Breaking:** Generated products now install `codegen-kit-tooling` from an exact Git commit
   recorded in the root `uv.lock`; the copied framework source and synchronization workflow are
   removed. The import name remains `framework`, and production service images exclude generators

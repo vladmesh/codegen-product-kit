@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'framework/**'
+      - 'packages/**'
       - 'pyproject.toml'
       - 'tests/**'
       - 'scripts/**'
@@ -44,6 +45,9 @@ jobs:
         run: |
           make lint
           make lint-template
+
+      - name: Build reminders package
+        run: uv build --wheel packages/codegen-kit-reminders
 
       - name: Run unit tests
         run: make test

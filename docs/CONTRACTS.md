@@ -35,7 +35,9 @@ package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_
 contracts, and application settings are not public API. `package_base(schema)` creates an independent
 SQLAlchemy metadata registry, `package_session(schema)` exposes a transaction with a schema-local
 search path through the core session factory, and
-`publish_event()` uses the generated product transport. The unchanged wheel can therefore be
+`publish_event()` uses the generated product transport. Version `1.2.0` adds optional stable
+`event_id`, `occurred_at`, and `schema_version` publication metadata for durable package outboxes.
+The unchanged wheel can therefore be
 installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
@@ -56,6 +58,7 @@ rejects unknown fields. Its fields are:
 | `package_dependencies` | Top-level Python imports allowed in addition to stdlib and `codegen_kit` | Enforced by the kit import lint |
 | `http.prefix` | Absolute non-root mount prefix with no trailing slash, `//`, or path parameters | Enforced; malformed values have `MalformedPackagePrefixError` |
 | `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and `module:path` Alembic revision resource | Enforced; migrated by the core |
+| `deployment.modes` | Optional non-empty set of `in_process` and `container` deployability declarations; defaults to `in_process` | Shape enforced; only `in_process` activation is implemented |
 | `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
@@ -128,6 +131,19 @@ consumed events with no publisher are refused with both relevant package or prod
 service domain may subscribe to the package event and refer to its model without editing
 `shared/spec/events.yaml` or `shared/spec/models.yaml`.
 
+"The same message schema" means structural equality of the JSON-compatible mappings obtained after
+YAML parsing. Source formatting and mapping-key order are immaterial; JSON types, constraints,
+required-field order, and array order are authoritative. For a product model, the generator's
+Draft 2020-12 definition is authoritative after removing only its generated top-level `title` when
+that title equals the declared model name. Package consumers must serialize their inline schema to
+that representation; no looser validation-equivalence or `$ref` resolution is inferred.
+
+The `deployment` declaration records package-author intent without changing activation. Generated
+products currently implement only `in_process`; declaring `container` makes the package eligible for
+a future delivery mechanism but does not create a service, image, Compose entry, or runtime today.
+Package protocol version `1` is unchanged because the declaration is optional and defaults to the
+already implemented in-process form.
+
 The generated product's `make lint` deliberately overrides Ruff's configured exclusions for its
 format check, so generated Python files are checked for canonical formatting as rendered while
 virtual environments and migration revisions remain excluded. Generated directories remain excluded
@@ -175,6 +191,34 @@ installation of dependencies.
 An editable install normally leaves sources outside site-packages, so if its distribution metadata
 cannot locate the protocol directory there, import lint reports "sources could not be located" and
 fails closed.
+
+### First package: `codegen-kit-reminders`
+
+`packages/codegen-kit-reminders` is an independently versioned wheel whose entry point is
+`reminders = "codegen_kit_reminders:package"`. It is not a dependency of `codegen-kit-tooling` and
+is not installed into generated products by default. A product opts in by installing the wheel in
+the backend environment, listing `reminders`, and regenerating its product contracts. That process
+adds the `/reminders` create/list/cancel API, the package-owned `reminders` PostgreSQL schema and
+Alembic head, the declared `reminders.tick` job, and the `reminders.due` message and publisher. No
+product-owned Python or schema file is authored for the installation.
+
+The package supports only one-time text reminders for an opaque `user_ref` and an explicit
+timezone-aware instant. It performs no recurrence, snooze, media, calendar, or natural-language
+parsing. The core still schedules nothing. An external caller fires `reminders.tick` through
+`POST /jobs/fire` and supplies the evaluation instant as the declared `at` argument.
+
+A tick locks scheduled reminders at or before that instant, changes them to due, creates one
+package-owned outbox row per reminder, and commits that transaction before publication begins.
+Cancelled rows are excluded from that transition. Pending rows are published as `reminders.due`
+and marked emitted only after the transport reports success; every later tick also retries all
+unconfirmed rows. The event UUID is derived deterministically from the reminder's one-time
+occurrence. Consequently a restart after the due transition cannot lose the notification, and a
+restart after Redis accepted it but before the emitted marker committed reuses the same UUID.
+
+This is exactly one logical notification per due reminder, not exactly-once transport delivery.
+Redis Streams may contain duplicate entries after a crash. A generated downstream consumer's
+transactional `(consumer_group, event_id)` guard collapses entries carrying the stable UUID to one
+logical effect. External effects outside that transaction still need their own idempotency boundary.
 
 ## Core settings v1
 

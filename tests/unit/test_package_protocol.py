@@ -1,8 +1,10 @@
 """Package protocol v1 manifest and import-boundary tests."""
 
 import ast
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 import yaml
@@ -19,6 +21,9 @@ from framework.spec.packages import (
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package/synthetic_package/package.yaml"
+REMINDERS = (
+    Path(__file__).parents[2] / "packages/codegen-kit-reminders/codegen_kit_reminders/package.yaml"
+)
 
 
 def test_build_time_and_runtime_core_versions_stay_equal() -> None:
@@ -46,6 +51,40 @@ def test_synthetic_package_manifest_is_valid() -> None:
     assert manifest.http.prefix == "/synthetic"
 
 
+def test_reminders_package_manifest_declares_both_deployment_modes() -> None:
+    manifest = load_package_manifest(REMINDERS)
+
+    assert manifest.name == "reminders"
+    assert manifest.version == "0.1.0"
+    assert manifest.deployment.modes == ["in_process", "container"]
+    assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
+    assert manifest.events.publishes == ["reminders.due"]
+
+
+@pytest.mark.parametrize(
+    "deployment",
+    [
+        {"modes": []},
+        {"modes": ["process"]},
+        {"modes": ["in_process", "in_process"]},
+        {"modes": ["in_process"], "unknown": True},
+    ],
+)
+def test_package_deployment_declaration_is_fail_closed(deployment: object) -> None:
+    data = yaml.safe_load(FIXTURE.read_text())
+    data["deployment"] = deployment
+
+    with pytest.raises(ValueError):
+        parse_package_manifest(data)
+
+
+def test_package_deployment_defaults_to_implemented_in_process_mode() -> None:
+    data = yaml.safe_load(FIXTURE.read_text())
+    data.pop("deployment")
+
+    assert parse_package_manifest(data).deployment.modes == ["in_process"]
+
+
 @pytest.mark.parametrize(
     ("change", "error"),
     [
@@ -66,6 +105,23 @@ def test_package_import_lint_accepts_declared_dependencies() -> None:
     manifest = load_package_manifest(FIXTURE)
     source_root = FIXTURE.parent
     assert lint_package_imports(source_root, manifest) == []
+
+
+def test_reminders_package_import_lint_uses_only_public_core_and_declared_dependencies() -> None:
+    manifest = load_package_manifest(REMINDERS)
+
+    assert lint_package_imports(REMINDERS.parent, manifest) == []
+
+
+def test_reminders_due_event_identity_is_stable() -> None:
+    identity_path = REMINDERS.parent / "identity.py"
+    spec = importlib.util.spec_from_file_location("reminders_identity", identity_path)
+    assert spec is not None and spec.loader is not None
+    identity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(identity)
+    reminder_id = UUID("d39a1a90-a914-4d8b-b8fe-7659270b6a4f")
+
+    assert identity.due_event_id(reminder_id) == identity.due_event_id(reminder_id)
 
 
 def test_package_import_lint_rejects_product_internal_import(tmp_path: Path) -> None:

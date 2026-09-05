@@ -1,0 +1,63 @@
+protocol_version: 1
+name: reminders
+version: 0.1.0
+requires_core: ">=1.2,<2"
+provides: []
+requires: []
+package_dependencies: [alembic, fastapi, faststream, pydantic, sqlalchemy]
+http:
+  prefix: /reminders
+database:
+  schema: reminders
+  migrations: codegen_kit_reminders:migrations
+deployment:
+  modes: [in_process, container]
+events:
+  publishes: [reminders.due]
+  consumes: [job_fired]
+  messages:
+    reminders.due:
+      model: ReminderDue
+      schema:
+        type: object
+        properties:
+          reminder_id: {type: string, format: uuid}
+          user_ref: {type: string}
+          text: {type: string}
+          remind_at: {type: string, format: date-time}
+        required: [reminder_id, user_ref, text, remind_at]
+        additionalProperties: false
+    job_fired:
+      model: JobFired
+      schema:
+        type: object
+        properties:
+          contract_version:
+            {type: integer, minimum: 1, maximum: 1, default: 1}
+          command_id: {type: string}
+          name: {type: string}
+          arguments: {}
+          fired_by_product: {type: string}
+          fired_by_run: {type: string}
+          accepted_at: {type: string, format: date-time}
+        required:
+          [command_id, name, arguments, fired_by_product, fired_by_run, accepted_at]
+        additionalProperties: false
+settings_schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties: {}
+  additionalProperties: false
+jobs_schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties:
+    tick:
+      type: object
+      properties:
+        at: {type: string, format: date-time}
+      required: [at]
+      additionalProperties: false
+  additionalProperties: false
+environment: []
+resources: []

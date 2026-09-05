@@ -16,7 +16,7 @@ from framework.spec.manifests import ServiceManifest
 from framework.spec.packages import PackageManifest, load_package_manifest
 
 ENTRY_POINT_GROUP = "codegen_kit.packages"
-CORE_VERSION = "1.1.0"
+CORE_VERSION = "1.2.0"
 
 
 class PackageResolutionError(ValueError):

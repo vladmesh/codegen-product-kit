@@ -167,6 +167,22 @@ class ResourceDeclaration(BaseModel):
         return path
 
 
+class DeploymentDeclaration(BaseModel):
+    """Delivery forms a package author declares the distribution can support."""
+
+    modes: list[Literal["in_process", "container"]] = Field(default_factory=lambda: ["in_process"])
+    model_config = {"extra": "forbid"}
+
+    @field_validator("modes")
+    @classmethod
+    def validate_modes(cls, modes: list[str]) -> list[str]:
+        if not modes:
+            raise ValueError("must declare at least one deployment mode")
+        if len(set(modes)) != len(modes):
+            raise ValueError("must not repeat a deployment mode")
+        return modes
+
+
 class PackageManifest(BaseModel):
     """Fail-closed declaration carried by a package distribution."""
 
@@ -182,6 +198,7 @@ class PackageManifest(BaseModel):
     events: EventsDeclaration = Field(default_factory=EventsDeclaration)
     settings_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
     jobs_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
+    deployment: DeploymentDeclaration = Field(default_factory=DeploymentDeclaration)
     environment: list[EnvironmentDeclaration] = Field(default_factory=list)
     resources: list[ResourceDeclaration] = Field(default_factory=list)
 
