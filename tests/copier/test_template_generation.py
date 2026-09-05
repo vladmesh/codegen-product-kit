@@ -507,6 +507,8 @@ class TestBackendWithTgBotGeneration:
         assert "apscheduler" not in backend_source.lower()
         assert manifest["jobs_schema"]["properties"] == {}
         assert manifest["provides"] == []
+        assert manifest["packages"] == []
+        assert (project_backend / "codegen_kit" / "packages.py").is_file()
 
 
 class TestFullStackGeneration:

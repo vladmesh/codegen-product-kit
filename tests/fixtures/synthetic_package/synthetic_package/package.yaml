@@ -1,0 +1,31 @@
+protocol_version: 1
+name: synthetic
+version: 1.2.3
+requires_core: ">=1,<2"
+provides: [synthetic.status]
+requires: []
+package_dependencies: [fastapi]
+http:
+  prefix: /synthetic
+database:
+  schema: synthetic
+  migrations: synthetic_package:migrations
+events:
+  publishes: [synthetic.ready]
+  consumes: []
+settings_schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties: {}
+  additionalProperties: false
+jobs_schema:
+  $schema: https://json-schema.org/draft/2020-12/schema
+  type: object
+  properties: {}
+  additionalProperties: false
+environment:
+  - name: SYNTHETIC_TOKEN
+    required: true
+resources:
+  - name: sample
+    path: synthetic_package/data/sample.txt

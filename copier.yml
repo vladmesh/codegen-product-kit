@@ -33,6 +33,8 @@ _exclude:
   - "{% if 'tg_bot' not in modules %}services/tg_bot/**{% endif %}"
   - "{% if 'backend' not in modules %}services/backend{% endif %}"
   - "{% if 'backend' not in modules %}services/backend/**{% endif %}"
+  - "{% if 'backend' not in modules %}codegen_kit{% endif %}"
+  - "{% if 'backend' not in modules %}codegen_kit/**{% endif %}"
   - "{% if 'backend' not in modules %}shared/spec{% endif %}"
   - "{% if 'backend' not in modules %}shared/spec/**{% endif %}"
   - "{% if 'backend' not in modules %}shared/shared/generated{% endif %}"

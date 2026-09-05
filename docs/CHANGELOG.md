@@ -2,6 +2,17 @@
 
 ## 2026-09-05
 
+- Package protocol v1 now provides the generated `codegen_kit` public façade, validated
+  `package.yaml` declarations, real entry-point discovery, product allowlisting, router and lifecycle
+  activation, named compatibility failures, and package import linting. Package database and merged
+  settings, jobs, and events machinery remains explicitly deferred.
+- The package boundary now defines `CORE_VERSION` as its own semantic façade version, rejects
+  duplicate HTTP prefixes, cleans up partial lifecycle startup, and fails import linting closed on
+  invalid installation metadata or site-packages paths.
+- Package protocol v1 now requires `package.yaml` inside the entry point's package directory and
+  refuses single-file or missing module roots during activation and import linting. The lint checks
+  manifest identity and documents its entry-point-scoped scan. Lifecycle cleanup defaults to an
+  empty started-package ledger and never suppresses cancellation.
 - Product events now use Redis Streams with per-service consumer groups, automatic pending-message
   reclamation, generated versioned envelopes, and a PostgreSQL-backed idempotent-consumer helper.
 - The kit's template workflow now builds the generated backend development image and runs the real

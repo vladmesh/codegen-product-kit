@@ -102,8 +102,11 @@ The planned component model distinguishes a shared platform **service**, a produ
 catalog component will declare its delivery form so a product-building agent does not choose a
 runtime boundary heuristically.
 
-That model is not implemented yet. There is no package registration protocol, component catalog,
-or deterministic installer in the current kit; `backend` and `tg_bot` remain Copier selections.
+Package protocol v1 implements the in-process package boundary through the generated `codegen_kit`
+façade, installed `codegen_kit.packages` entry points, and an explicit product-manifest allowlist.
+It activates HTTP routers and package lifecycle hooks. Package database ownership and contract merge
+remain future work, and there is still no component catalog or deterministic installer; `backend`
+and `tg_bot` remain Copier selections.
 
 ## Tooling and runtime
 

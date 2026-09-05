@@ -73,6 +73,9 @@ lint:
 	$(PYTHON) -c "from framework.spec.loader import validate_specs_cli; from framework.lib.env import get_repo_root; ok, msg = validate_specs_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
 	$(PYTHON) -m framework.enforce_spec_compliance
 	$(PYTHON) -c "from framework.lint.controller_sync import lint_controllers_cli; from framework.lib.env import get_repo_root; ok, msg = lint_controllers_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
+{% if 'backend' in modules %}
+	$(PYTHON) -m framework.lint.package_imports --site-packages "$$(services/backend/.venv/bin/python -c 'import site; print(site.getsitepackages()[0])')"
+{% endif %}
 	$(MAKE) check-deps
 
 lint-complexity:

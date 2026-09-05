@@ -14,6 +14,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "copier>=9.0",
+    "fastapi>=0.110.0,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
     "pytest>=8.0",
     "pytest-cov>=4.1",
     "ruff==0.16.6",

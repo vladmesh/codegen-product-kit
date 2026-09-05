@@ -19,6 +19,115 @@ Tooling is a development boundary, not an application runtime dependency. The ba
 copies only the service environment and application sources. An audit of `template/services/`,
 `template/shared/`, and generated Python sources found no runtime `framework` import.
 
+## Package protocol v1
+
+Package protocol version `1` is the stable boundary between an independently built Python wheel and
+any generated product that installs it. The boundary is a generated in-product `codegen_kit` façade,
+not a separately released runtime distribution. This avoids making the whole product core a public
+runtime dependency. `CORE_VERSION` is the kit-declared semantic version of this façade and its
+activation semantics; it is rendered into each product and is deliberately independent of the exact
+Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface is `1.0.0`. Backward-compatible
+public additions require a minor bump, breaking changes require a major bump, and fixes that preserve
+the promised surface require a patch bump. The package protocol version remains `1` across compatible
+next-card additions. A package imports only `Package`, `CORE_VERSION`, and
+`PACKAGE_PROTOCOL_VERSION` from `codegen_kit`; product-specific `services.*`, generated contracts,
+database objects, and application settings are not public API. The unchanged wheel can therefore be
+installed into another generated product with the same compatible core without rebuilding it.
+
+### Package manifest
+
+Each wheel's entry-point module must resolve to a package directory. It installs exactly one
+`package.yaml` as distribution data, at `<entry-point-module>/package.yaml` inside that directory.
+A single-file module, a missing module root, or a manifest installed anywhere else is not a protocol
+v1 package. This location is fixed in v1 so two independently installed package module trees cannot
+overwrite one shared site-packages-root manifest. Protocol v1 validates the manifest fail-closed and
+rejects unknown fields. Its fields are:
+
+| Field | Meaning in v1 | Activation enforcement |
+|---|---|---|
+| `protocol_version` | Integer package protocol version, exactly `1` | Enforced |
+| `name`, `version` | Entry-point identity and package release identity | Enforced; missing identity has `MissingPackageIdentityError` |
+| `requires_core` | PEP 440 specifier matched against `codegen_kit.CORE_VERSION` | Enforced |
+| `provides`, `requires` | Provided and required logical interfaces | Declared only; resolution is next-card work |
+| `package_dependencies` | Top-level Python imports allowed in addition to stdlib and `codegen_kit` | Enforced by the kit import lint |
+| `http.prefix` | Absolute non-root mount prefix with no trailing slash, `//`, or path parameters | Enforced; malformed values have `MalformedPackagePrefixError` |
+| `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and migration resource | Declared only; schema creation and migrations are next-card work |
+| `events.publishes`, `events.consumes` | Package event interface names | Declared only; event contract merge is next-card work |
+| `settings_schema`, `jobs_schema` | Draft 2020-12 schemas to merge under the package prefix | Declared and structurally validated; merge, prefixing, and duplicate refusal are next-card work |
+| `environment` | Named environment requirements and whether each is required | Declared only; generated environment merge is next-card work |
+| `resources` | Named distribution resource paths | Declared only; consumers resolve resources with distribution APIs |
+
+The tooling API is `framework.spec.packages.load_package_manifest(path)`. Unknown fields raise
+`UnknownPackageManifestFieldError`; invalid syntax and other schema errors raise
+`PackageManifestError`. The runtime repeats activation-critical validation so production images do
+not need the tooling distribution.
+
+### Installation, discovery, and activation
+
+The distribution declares one entry point whose name equals `package.yaml.name`:
+
+```toml
+[project.entry-points."codegen_kit.packages"]
+weather = "weather_package:package"
+```
+
+Protocol v1 intentionally excludes dotted entry-point names: product manifests accept a name only
+when replacing `-` with `_` produces a Python identifier, and the entry-point and package manifest
+names must still match exactly. The module named on the right side must resolve to an installed
+package directory; a top-level `.py` module and a target that resolves to nothing raise
+`InvalidPackageModuleRootError` during activation and produce the same named lint violation.
+
+The referenced object implements `codegen_kit.Package`: it exposes a FastAPI `router` and async
+`startup(application)` and `shutdown(application)` methods. Install the wheel as an explicit backend
+dependency, keep it in the backend lock, and add its entry-point name to
+`services/backend/manifest.yaml`:
+
+```bash
+uv add --project services/backend ./dist/weather_package-1.0.0-py3-none-any.whl
+```
+
+```yaml
+packages:
+  - weather
+```
+
+Discovery uses installed distribution metadata, never module scanning or a catalog. The core
+activates the package only when the entry point is installed and its name is listed. An installed but
+unlisted package raises `InstalledPackageNotListedError`; a listed but absent entry point raises
+`ListedPackageNotInstalledError`; an incompatible `protocol_version` raises
+`IncompatiblePackageProtocolError`; and a `requires_core` mismatch raises
+`IncompatibleCoreVersionError`. Two activated packages with the same `http.prefix` raise
+`DuplicatePackageHttpPrefixError` before any package router is mounted. All abort application
+startup. With `packages: []`, existing settings, jobs, events, and environment behavior is unchanged.
+
+The factory mounts each activated router under `http.prefix`. Once core connectivity is ready, the
+backend lifespan calls package `startup` in manifest order. It calls package `shutdown` in reverse
+order before closing core connectivity, but only for packages whose `startup` completed. Successfully
+started packages are recorded on one application-state ledger; partial startup failure unwinds that
+ledger, does not call `shutdown` on the failing or later packages, and does not let a shutdown failure
+mask the original startup error. A package author therefore does not need to make `shutdown` tolerate
+an incomplete `startup`. Core routers are registered first; if a package route has the same HTTP
+method and fully resolved path as a core route, the core route wins, while non-colliding routes under
+that package prefix remain available. Exact duplicate package prefixes are refused, while nested
+prefixes such as `/a` and `/a/b` are accepted; final route collisions follow registration order. A
+package connection check belongs in `startup` and must raise on failure. Package acceptance checks
+must install the real wheel, resolve its real entry point, start the generated application, exercise a
+prefixed route, observe lifecycle calls, run manifest validation, and run the import lint. The kit's
+synthetic package performs these checks.
+
+The generated product's `make lint` runs the installed-package import check. Package source imports
+may target stdlib, `codegen_kit`, the entry point's one top-level module and its submodules, and
+top-level modules named in `package_dependencies`. The scan is entry-point-scoped: it recursively
+checks only the package directory named by the entry point. A second top-level module shipped in the
+same distribution is not scanned; declaring it as a package dependency only permits imports of it
+from the scanned tree. Importing product internals or an undeclared third-party package fails the
+check. Each listed entry point must resolve to a recursively scanned package directory. A
+single-file module, missing or empty source root, misplaced, missing, or ambiguous installed
+`package.yaml`, manifest-to-entry-point name mismatch, missing distribution metadata, and an empty or
+nonexistent explicit site-packages path fail the lint rather than producing a vacuous pass. This is
+a source boundary, not a dependency resolver; normal Python packaging metadata still owns
+installation of dependencies.
+
 ## Core settings v1
 
 Every backend generated from this template provides the versioned core settings contract:
