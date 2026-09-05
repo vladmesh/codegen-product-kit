@@ -595,6 +595,7 @@ def test_package_contract_and_migrations_against_real_postgres(
             from httpx import AsyncClient
             import pytest
             from redis.asyncio import Redis
+            from redis.exceptions import ResponseError
 
             from codegen_kit_reminders.runtime import CONSUMER_GROUP, due_event_id
             from services.backend.src.core.db import async_engine
@@ -694,14 +695,35 @@ def test_package_contract_and_migrations_against_real_postgres(
                 return broker, subscriber
 
 
+            async def _reset_group(redis: Redis, stream: str, group: str) -> None:
+                try:
+                    await redis.xgroup_destroy(stream, group)
+                except ResponseError as error:
+                    if "no such key" not in str(error).lower():
+                        raise
+                await redis.xgroup_create(stream, group, id="$", mkstream=True)
+
+
+            async def _wait_group_idle(redis: Redis, stream: str, group: str) -> None:
+                async with __import__("asyncio").timeout(10):
+                    while True:
+                        groups = await redis.xinfo_groups(stream)
+                        state = next(
+                            item
+                            for item in groups
+                            if item["name"] in (group, group.encode())
+                        )
+                        if state["pending"] == 0 and state.get("lag") == 0:
+                            return
+                        await __import__("asyncio").sleep(0.01)
+
+
             @pytest.mark.asyncio
             async def test_reminder_http_tick_cancel_and_restart_outbox() -> None:
                 redis = Redis.from_url(os.environ["REDIS_URL"])
                 # test_durable_events.py deliberately flushes Redis after the backend
                 # starts, so restore this installed package's declared consumer group.
-                await redis.xgroup_create(
-                    "job_fired", CONSUMER_GROUP, id="$", mkstream=True
-                )
+                await _reset_group(redis, "job_fired", CONSUMER_GROUP)
                 reader, subscriber = await _due_reader("main")
                 headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
                 async with AsyncClient(base_url="http://backend:8000") as client:
@@ -749,6 +771,7 @@ def test_package_contract_and_migrations_against_real_postgres(
                             json={**fire, "command_id": command_id},
                         )
                         assert response.status_code == 200, response.text
+                    await _wait_group_idle(redis, "job_fired", CONSUMER_GROUP)
                     refused = await client.post(
                         "/jobs/fire",
                         headers=headers,

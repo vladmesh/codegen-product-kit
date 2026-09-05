@@ -59,5 +59,7 @@ jobs_schema:
       required: [at]
       additionalProperties: false
   additionalProperties: false
-environment: []
+environment:
+  - name: REDIS_URL
+    required: true
 resources: []

@@ -99,6 +99,18 @@ packages:
   - weather
 ```
 
+For the bundled reminders package, one tooling command performs every product mutation after the
+wheel has been built:
+
+```bash
+kit add reminders --wheel /path/to/codegen_kit_reminders-0.1.0-py3-none-any.whl
+```
+
+It copies that exact artifact under `services/backend/packages/`, adds the backend dependency and
+lock entry, adds `reminders` to the manifest allowlist, synchronizes the backend environment, and
+regenerates the active-package contract. The command deliberately accepts an artifact path rather
+than resolving a catalog; package publication and catalog resolution are outside protocol v1.
+
 Discovery uses installed distribution metadata, never module scanning or a catalog. The core
 activates the package only when the entry point is installed and its name is listed. An installed but
 unlisted package raises `InstalledPackageNotListedError`; a listed but absent entry point raises
@@ -214,6 +226,8 @@ and marked emitted only after the transport reports success; every later tick al
 unconfirmed rows. The event UUID is derived deterministically from the reminder's one-time
 occurrence. Consequently a restart after the due transition cannot lose the notification, and a
 restart after Redis accepted it but before the emitted marker committed reuses the same UUID.
+The envelope's `occurred_at` is the caller-supplied `reminders.tick` instant, not the later emission
+time. A retry therefore republishes byte-identical event identity and occurrence metadata.
 
 This is exactly one logical notification per due reminder, not exactly-once transport delivery.
 Redis Streams may contain duplicate entries after a crash. A generated downstream consumer's
