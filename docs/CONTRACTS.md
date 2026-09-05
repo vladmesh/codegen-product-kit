@@ -59,17 +59,29 @@ Publishers create this metadata, while consumers deserialize the whole typed env
 Generated subscriber groups are named `events:<service>`. Each consuming service gets its own stable
 group, preserving fan-out: replicas of one service compete within that service's group, while a
 different service receives the same stream entry through its own group. Consumer names include the
-role, hostname and process id. Every generated subscription has a live reader and a recovery reader
-in the same group; the recovery reader uses FastStream's Redis `XAUTOCLAIM` support after one second
-of idle time so a delivery abandoned by a failed process is processed again.
+role, hostname and process id. FastStream creates a group at `$` on its first start, so that first
+start establishes the current stream tail and consumes only later entries. A deployment must start
+and ready a new consuming service before allowing any event it must receive to be published; events
+published before the group's first creation are deliberately not replayed. Once the group exists,
+later downtime does not lose its backlog.
+
+Every generated subscription has a live reader and a recovery reader in the same group. The recovery
+reader uses FastStream's Redis `XAUTOCLAIM` support, with a configurable five-minute idle threshold
+and five-second polling interval by default. Reclaim is based only on idle time: Redis cannot
+distinguish a dead owner from a live handler that has run longer than the threshold. The transactional
+idempotency guard, not the reclaim window, therefore guarantees that live and reclaimed deliveries
+cannot both execute the effect.
 
 The backend core provides `consume_once(session, consumer_group, event_id, effect)`. It records the
 group and event UUID in the core-owned `event_consumptions` table before running the effect. The
 marker and effect share the caller's database transaction, so rollback makes a failed delivery
 eligible to run again, while a committed redelivery skips the effect. This exactly-once boundary
 therefore applies to effects made atomically through that session; external side effects require
-their own idempotency key. Services without database state may consume streams but cannot claim this
-helper's exactly-once guarantee.
+their own idempotency key. Generated adapters require the session factory and `consume_once` helper:
+both their live and recovery readers enter the same guard before calling the controller, commit the
+guard and effect together, and only then publish a success event. A duplicate that loses the guard
+claim is acknowledged without running the controller or publishing success. An unguarded consumer is
+not a generated default and requires a separate, explicit implementation outside this adapter.
 
 ## Core jobs v1
 

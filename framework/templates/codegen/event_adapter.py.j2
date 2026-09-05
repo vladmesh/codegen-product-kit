@@ -25,7 +25,8 @@ if TYPE_CHECKING:
     pass
 
 CONSUMER_GROUP = "events:{{ service_name }}"
-RECLAIM_IDLE_MS = 1_000
+DEFAULT_RECLAIM_IDLE_MS = 300_000
+DEFAULT_RECLAIM_POLLING_INTERVAL_MS = 5_000
 IdempotentConsumer = Callable[
     [AsyncSession, str, UUID, Callable[[], Awaitable[None]]], Awaitable[bool]
 ]
@@ -34,11 +35,13 @@ IdempotentConsumer = Callable[
 def create_event_adapter(
     broker: RedisBroker,
     *,
-    get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]] | None = None,
-    consume_once: IdempotentConsumer | None = None,
+    get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    consume_once: IdempotentConsumer,
 {% for domain in domains %}
     get_{{ domain.name }}_controller: Callable[[], {{ domain.protocol_name }}],
 {% endfor %}
+    reclaim_idle_ms: int = DEFAULT_RECLAIM_IDLE_MS,
+    reclaim_polling_interval_ms: int = DEFAULT_RECLAIM_POLLING_INTERVAL_MS,
 ) -> None:
 {% for domain in domains %}
 {% for handler in domain.handlers %}
@@ -46,28 +49,6 @@ def create_event_adapter(
 
     async def _process_{{ handler.name }}(event: EventEnvelope[{{ handler.input_model }}]) -> None:
         controller = get_{{ domain.name }}_controller()
-        if get_session is None:
-{% if handler.publish_on_error_channel %}
-            try:
-{% if handler.publish_channel %}
-                result = await controller.{{ handler.name }}(None, payload=event.payload)  # type: ignore[arg-type]
-                await publish_event("{{ handler.publish_channel }}", result)
-{% else %}
-                await controller.{{ handler.name }}(None, payload=event.payload)  # type: ignore[arg-type]
-{% endif %}
-            except Exception as e:
-                await publish_event(
-                    "{{ handler.publish_on_error_channel }}",
-                    {"error": str(e), "original_event": event.model_dump(mode="json")},
-                )
-                raise
-{% elif handler.publish_channel %}
-            result = await controller.{{ handler.name }}(None, payload=event.payload)  # type: ignore[arg-type]
-            await publish_event("{{ handler.publish_channel }}", result)
-{% else %}
-            await controller.{{ handler.name }}(None, payload=event.payload)  # type: ignore[arg-type]
-{% endif %}
-            return
         async with get_session() as session:
             try:
 {% if handler.publish_channel %}
@@ -80,13 +61,9 @@ def create_event_adapter(
 {% else %}
                     await controller.{{ handler.name }}(session, payload=event.payload)
 {% endif %}
-                processed = True
-                if consume_once is None:
-                    await effect()
-                else:
-                    processed = await consume_once(
-                        session, CONSUMER_GROUP, event.event_id, effect
-                    )
+                processed = await consume_once(
+                    session, CONSUMER_GROUP, event.event_id, effect
+                )
                 await session.commit()
 {% if handler.publish_channel %}
                 if processed:
@@ -118,7 +95,8 @@ def create_event_adapter(
             "{{ handler.subscribe_channel }}",
             group=CONSUMER_GROUP,
             consumer=consumer_name("{{ service_name }}.reclaim"),
-            min_idle_time=RECLAIM_IDLE_MS,
+            min_idle_time=reclaim_idle_ms,
+            polling_interval=reclaim_polling_interval_ms,
         )
     )
     async def reclaim_{{ handler.name }}(event: EventEnvelope[{{ handler.input_model }}]) -> None:

@@ -74,7 +74,8 @@ operations:
         assert "group=CONSUMER_GROUP" in content
         assert 'consumer=consumer_name("worker.live")' in content
         assert 'consumer=consumer_name("worker.reclaim")' in content
-        assert "min_idle_time=RECLAIM_IDLE_MS" in content
+        assert "min_idle_time=reclaim_idle_ms" in content
+        assert "polling_interval=reclaim_polling_interval_ms" in content
         assert "EventEnvelope[ImportBatch]" in content
         assert "handle_process_import" in content
         assert "get_session" in content
@@ -225,8 +226,8 @@ operations:
         assert '"error": str(e)' in content
         assert "raise" in content  # Re-raises after publishing error
 
-    def test_supports_stateless_handler_without_session(self, temp_repo: Path) -> None:
-        """A subscribe handler runs without a DB session when get_session is omitted."""
+    def test_requires_idempotency_guard_for_every_handler(self, temp_repo: Path) -> None:
+        """A subscribe handler cannot be created without the transactional guard."""
         models_yaml = """
 models:
   Ping:
@@ -253,14 +254,15 @@ operations:
         assert len(generated) == 1
         content = generated[0].read_text()
 
-        # get_session is optional with a None default
+        # Both dependencies are required, so generated adapters have no unguarded path.
         assert (
-            "get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]] | None = None"
+            "get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]]"
             in content
         )
-        # Stateless path: no session opened, handler invoked without one
-        assert "if get_session is None:" in content
-        assert "on_ping(None, payload=event.payload)" in content
+        assert "consume_once: IdempotentConsumer," in content
+        assert "if get_session is None:" not in content
+        assert "if consume_once is None:" not in content
+        assert "on_ping(None, payload=event.payload)" not in content
 
     def test_includes_session_commit_and_rollback(self, temp_repo: Path) -> None:
         """Generated handler includes explicit session.commit() and session.rollback()."""
