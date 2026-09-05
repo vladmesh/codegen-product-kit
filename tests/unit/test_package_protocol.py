@@ -59,6 +59,7 @@ def test_reminders_package_manifest_declares_both_deployment_modes() -> None:
     assert manifest.deployment.modes == ["in_process", "container"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
+    assert [(item.name, item.required) for item in manifest.environment] == [("REDIS_URL", True)]
 
 
 @pytest.mark.parametrize(

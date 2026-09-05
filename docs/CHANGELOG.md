@@ -2,6 +2,11 @@
 
 ## 2026-09-05
 
+- Added `kit add reminders --wheel <artifact>` and a two-product CI proof. The command installs the
+  artifact, updates dependency and manifest metadata, synchronizes the backend environment, and
+  regenerates the product contract. Two independently generated products use the same wheel; one
+  activates it without authored source changes and the other consumes `reminders.due` through a
+  generated protocol subscriber.
 - Added `codegen-kit-reminders` 0.1.0 as the first independently versioned package: one-time reminder
   HTTP routes, package-owned migrations, an externally fireable `reminders.tick`, and durable
   `reminders.due` outbox emission with a stable logical event identity across backend restarts.
