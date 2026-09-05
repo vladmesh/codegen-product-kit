@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from asyncio import CancelledError
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from importlib import metadata
@@ -35,6 +36,10 @@ class MissingPackageIdentityError(PackageManifestError):
 
 class MalformedPackagePrefixError(PackageManifestError):
     """The package HTTP prefix is malformed."""
+
+
+class InvalidPackageModuleRootError(PackageActivationError):
+    """The entry-point module does not resolve to a package directory."""
 
 
 class InstalledPackageNotListedError(PackageActivationError):
@@ -89,7 +94,26 @@ class ActivatedPackage:
     runtime: Package
 
 
-def _manifest_path(entry_point: metadata.EntryPoint) -> Path:
+def _package_root(entry_point: metadata.EntryPoint) -> tuple[Path, Path]:
+    """Resolve the entry-point module to its required package directory."""
+
+    distribution = entry_point.dist
+    if distribution is None:
+        raise PackageManifestError(f"entry point {entry_point.name!r} has no distribution")
+    module_name = entry_point.value.partition(":")[0]
+    module_path = Path(*module_name.split("."))
+    package_root = Path(distribution.locate_file(module_path))
+    if not module_name or not package_root.is_dir():
+        raise InvalidPackageModuleRootError(
+            f"entry point {entry_point.name!r} module {module_name!r} "
+            "must resolve to an installed package directory"
+        )
+    return package_root, module_path
+
+
+def _manifest_path(entry_point: metadata.EntryPoint, package_root: Path) -> Path:
+    """Resolve the sole manifest at its protocol-defined package location."""
+
     distribution = entry_point.dist
     if distribution is None:
         raise PackageManifestError(f"entry point {entry_point.name!r} has no distribution")
@@ -98,7 +122,13 @@ def _manifest_path(entry_point: metadata.EntryPoint) -> Path:
         raise PackageManifestError(
             f"package {entry_point.name!r} must install exactly one package.yaml"
         )
-    return Path(distribution.locate_file(candidates[0]))
+    manifest_path = Path(distribution.locate_file(candidates[0]))
+    expected_path = package_root / "package.yaml"
+    if manifest_path != expected_path:
+        raise PackageManifestError(
+            f"package {entry_point.name!r} must install package.yaml at {expected_path}"
+        )
+    return manifest_path
 
 
 def _load_manifest_data(path: Path) -> dict[str, Any]:
@@ -219,7 +249,8 @@ def _validate_compatibility(name: str, manifest: PackageManifest) -> None:
 def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> ActivatedPackage:
     """Validate and load one allowlisted entry point."""
 
-    manifest = _parse_manifest(_manifest_path(entry_point))
+    package_root, _ = _package_root(entry_point)
+    manifest = _parse_manifest(_manifest_path(entry_point, package_root))
     if manifest.name != name:
         raise PackageManifestError(
             f"entry point {name!r} does not match package manifest name {manifest.name!r}"
@@ -290,15 +321,21 @@ async def startup_packages(application: Any) -> None:
 async def shutdown_packages(application: Any, *, suppress_errors: bool = False) -> None:
     """Stop successfully started packages in reverse order, attempting every stop."""
 
-    first_error: BaseException | None = None
-    started = application.state.codegen_started_packages
+    first_error: Exception | None = None
+    cancellation: CancelledError | None = None
+    started = getattr(application.state, "codegen_started_packages", [])
     while started:
         package = started.pop()
         try:
             await package.runtime.shutdown(application)
-        except BaseException as error:
+        except CancelledError as error:
+            if cancellation is None:
+                cancellation = error
+        except Exception as error:
             if first_error is None:
                 first_error = error
+    if cancellation is not None:
+        raise cancellation
     if first_error is not None and not suppress_errors:
         raise first_error
 

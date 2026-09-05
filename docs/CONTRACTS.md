@@ -36,8 +36,12 @@ installed into another generated product with the same compatible core without r
 
 ### Package manifest
 
-Each wheel installs exactly one `package.yaml` as distribution data. Protocol v1 validates it
-fail-closed and rejects unknown fields. Its fields are:
+Each wheel's entry-point module must resolve to a package directory. It installs exactly one
+`package.yaml` as distribution data, at `<entry-point-module>/package.yaml` inside that directory.
+A single-file module, a missing module root, or a manifest installed anywhere else is not a protocol
+v1 package. This location is fixed in v1 so two independently installed package module trees cannot
+overwrite one shared site-packages-root manifest. Protocol v1 validates the manifest fail-closed and
+rejects unknown fields. Its fields are:
 
 | Field | Meaning in v1 | Activation enforcement |
 |---|---|---|
@@ -69,7 +73,9 @@ weather = "weather_package:package"
 
 Protocol v1 intentionally excludes dotted entry-point names: product manifests accept a name only
 when replacing `-` with `_` produces a Python identifier, and the entry-point and package manifest
-names must still match exactly.
+names must still match exactly. The module named on the right side must resolve to an installed
+package directory; a top-level `.py` module and a target that resolves to nothing raise
+`InvalidPackageModuleRootError` during activation and produce the same named lint violation.
 
 The referenced object implements `codegen_kit.Package`: it exposes a FastAPI `router` and async
 `startup(application)` and `shutdown(application)` methods. Install the wheel as an explicit backend
@@ -111,14 +117,16 @@ synthetic package performs these checks.
 
 The generated product's `make lint` runs the installed-package import check. Package source imports
 may target stdlib, `codegen_kit`, the entry point's one top-level module and its submodules, and
-top-level modules named in `package_dependencies`. A second top-level module shipped in the same
-distribution must be declared as a package dependency. Importing product internals or an undeclared
-third-party package fails the check. Each listed entry point resolves to either a recursively scanned
-package directory or one scanned top-level `.py` module. A missing or empty source root, missing or
-ambiguous installed `package.yaml`, missing distribution metadata, and an empty or nonexistent
-explicit site-packages path fail the lint rather than producing a vacuous pass. This is a source
-boundary, not a dependency resolver; normal Python packaging metadata still owns installation of
-dependencies.
+top-level modules named in `package_dependencies`. The scan is entry-point-scoped: it recursively
+checks only the package directory named by the entry point. A second top-level module shipped in the
+same distribution is not scanned; declaring it as a package dependency only permits imports of it
+from the scanned tree. Importing product internals or an undeclared third-party package fails the
+check. Each listed entry point must resolve to a recursively scanned package directory. A
+single-file module, missing or empty source root, misplaced, missing, or ambiguous installed
+`package.yaml`, manifest-to-entry-point name mismatch, missing distribution metadata, and an empty or
+nonexistent explicit site-packages path fail the lint rather than producing a vacuous pass. This is
+a source boundary, not a dependency resolver; normal Python packaging metadata still owns
+installation of dependencies.
 
 ## Core settings v1
 

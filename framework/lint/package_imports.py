@@ -11,6 +11,7 @@ import yaml
 from framework.spec.packages import lint_package_imports, parse_package_manifest
 
 ENTRY_POINT_GROUP = "codegen_kit.packages"
+INVALID_MODULE_ROOT = "InvalidPackageModuleRootError"
 
 
 def _package_entry_points(distribution_path: Path | None) -> dict[str, metadata.EntryPoint]:
@@ -28,6 +29,39 @@ def _package_entry_points(distribution_path: Path | None) -> dict[str, metadata.
     return {entry_point.name: entry_point for entry_point in entry_points}
 
 
+def _package_root(
+    entry_point: metadata.EntryPoint,
+    distribution: metadata.Distribution,
+) -> tuple[Path, Path] | str:
+    """Resolve the protocol-defined package directory and relative module path."""
+
+    module_name = entry_point.value.partition(":")[0]
+    module_path = Path(*module_name.split("."))
+    package_root = Path(distribution.locate_file(module_path))
+    if not module_name or not package_root.is_dir():
+        return (
+            f"{INVALID_MODULE_ROOT}: entry point module {module_name!r} "
+            "must resolve to an installed package directory"
+        )
+    return package_root, module_path
+
+
+def _manifest_path(
+    name: str,
+    distribution: metadata.Distribution,
+    package_root: Path,
+) -> Path | str:
+    """Resolve the sole manifest at its protocol-defined package location."""
+
+    manifest_files = [file for file in distribution.files or () if file.name == "package.yaml"]
+    if len(manifest_files) != 1:
+        return f"distribution must contain exactly one package.yaml; found {len(manifest_files)}"
+    manifest_path = Path(distribution.locate_file(manifest_files[0]))
+    if manifest_path != package_root / "package.yaml":
+        return f"package.yaml must be installed inside entry point module directory for {name!r}"
+    return manifest_path
+
+
 def lint_installed_packages(repo_root: Path, distribution_path: Path | None = None) -> list[str]:
     """Lint every package explicitly listed by the backend service manifest."""
 
@@ -43,18 +77,22 @@ def lint_installed_packages(repo_root: Path, distribution_path: Path | None = No
         if distribution is None:
             violations.append(f"{name}: entry point has no distribution metadata")
             continue
-        manifest_files = [file for file in distribution.files or () if file.name == "package.yaml"]
-        if len(manifest_files) != 1:
+        resolved_root = _package_root(entry_point, distribution)
+        if isinstance(resolved_root, str):
+            violations.append(f"{name}: {resolved_root}")
+            continue
+        package_root, _ = resolved_root
+        resolved_manifest = _manifest_path(name, distribution, package_root)
+        if isinstance(resolved_manifest, str):
+            violations.append(f"{name}: {resolved_manifest}")
+            continue
+        manifest = parse_package_manifest(yaml.safe_load(resolved_manifest.read_text()))
+        if manifest.name != name:
             violations.append(
-                f"{name}: distribution must contain exactly one package.yaml; "
-                f"found {len(manifest_files)}"
+                f"{name}: package manifest name {manifest.name!r} does not match entry point"
             )
             continue
-        manifest = parse_package_manifest(
-            yaml.safe_load(Path(distribution.locate_file(manifest_files[0])).read_text())
-        )
         module_root = entry_point.value.partition(":")[0].partition(".")[0]
-        package_root = Path(distribution.locate_file(module_root))
         violations.extend(
             f"{name}: {item}"
             for item in lint_package_imports(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import importlib
 from importlib import metadata
@@ -23,6 +24,7 @@ FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
 LINT_LAYOUT_FIXTURES = (
     Path(__file__).parents[1] / "fixtures/synthetic_single_module",
     Path(__file__).parents[1] / "fixtures/synthetic_missing_module",
+    Path(__file__).parents[1] / "fixtures/synthetic_misplaced_manifest",
 )
 
 
@@ -64,6 +66,15 @@ def _load_runtime(project_backend: Path, installed: Path, monkeypatch: pytest.Mo
         if name == "codegen_kit" or name.startswith("codegen_kit."):
             sys.modules.pop(name)
     return importlib.import_module("codegen_kit.packages")
+
+
+def _installed_entry_point(installed: Path, name: str) -> metadata.EntryPoint:
+    return next(
+        entry_point
+        for distribution in metadata.distributions(path=[str(installed)])
+        for entry_point in distribution.entry_points
+        if entry_point.group == "codegen_kit.packages" and entry_point.name == name
+    )
 
 
 @pytest.fixture(scope="module")
@@ -247,6 +258,28 @@ def test_generated_lifespan_cleans_up_partial_package_startup(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_shutdown_without_startup_is_safe(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    asyncio.run(runtime.shutdown_packages(FastAPI()))
+
+
+def test_shutdown_never_suppresses_cancellation(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+
+    class CancellingPackage:
+        async def shutdown(self, application: FastAPI) -> None:
+            raise asyncio.CancelledError
+
+    application = FastAPI()
+    application.state.codegen_started_packages = [SimpleNamespace(runtime=CancellingPackage())]
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(runtime.shutdown_packages(application, suppress_errors=True))
+
+
 def test_duplicate_package_prefix_has_named_activation_error(
     project_backend: Path,
     installed_synthetic: Path,
@@ -297,35 +330,39 @@ def test_installed_package_import_lint_reads_real_distribution(
     product["packages"] = ["synthetic"]
     product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
     source = installed_synthetic / "synthetic_package/__init__.py"
-    original = source.read_text()
+    package_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original_source = source.read_text()
+    original_manifest = package_manifest.read_text()
     try:
         assert lint_installed_packages(project_backend, installed_synthetic) == []
-        source.write_text(original + "\nfrom services.backend.src.core import db\n")
+        source.write_text(original_source + "\nfrom services.backend.src.core import db\n")
         violations = lint_installed_packages(project_backend, installed_synthetic)
         assert len(violations) == 1
         assert "forbidden import 'services.backend.src.core'" in violations[0]
+        source.write_text(original_source)
+        manifest_data = yaml.safe_load(original_manifest)
+        manifest_data["name"] = "other"
+        package_manifest.write_text(yaml.safe_dump(manifest_data, sort_keys=False))
+        assert lint_installed_packages(project_backend, installed_synthetic) == [
+            "synthetic: package manifest name 'other' does not match entry point"
+        ]
     finally:
-        source.write_text(original)
+        source.write_text(original_source)
+        package_manifest.write_text(original_manifest)
         product_manifest.write_text(original_product)
 
 
-def test_installed_package_import_lint_scans_single_file_module(
+def test_installed_package_import_lint_rejects_single_file_module(
     tmp_path: Path,
     installed_lint_layouts: Path,
 ) -> None:
     product_manifest = tmp_path / "services/backend/manifest.yaml"
     product_manifest.parent.mkdir(parents=True)
     product_manifest.write_text("packages: [single-module]\n")
-    source = installed_lint_layouts / "single_module.py"
-    original = source.read_text()
-    try:
-        assert lint_installed_packages(tmp_path, installed_lint_layouts) == []
-        source.write_text(original + "\nfrom services.backend.src.core import db\n")
-        assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
-            "single-module: single_module.py:7: forbidden import 'services.backend.src.core'"
-        ]
-    finally:
-        source.write_text(original)
+    assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
+        "single-module: InvalidPackageModuleRootError: entry point module "
+        "'single_module' must resolve to an installed package directory"
+    ]
 
 
 def test_installed_package_import_lint_rejects_missing_module_root(
@@ -337,8 +374,49 @@ def test_installed_package_import_lint_rejects_missing_module_root(
     product_manifest.write_text("packages: [missing-module]\n")
 
     assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
-        "missing-module: package sources could not be located for module 'missing_module'"
+        "missing-module: InvalidPackageModuleRootError: entry point module "
+        "'missing_module' must resolve to an installed package directory"
     ]
+
+
+def test_installed_package_import_lint_rejects_misplaced_manifest(
+    tmp_path: Path,
+    installed_lint_layouts: Path,
+) -> None:
+    product_manifest = tmp_path / "services/backend/manifest.yaml"
+    product_manifest.parent.mkdir(parents=True)
+    product_manifest.write_text("packages: [misplaced]\n")
+
+    assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
+        "misplaced: package.yaml must be installed inside entry point module directory "
+        "for 'misplaced'"
+    ]
+
+
+@pytest.mark.parametrize("name", ["single-module", "missing-module"])
+def test_activation_rejects_non_directory_module_roots(
+    name: str,
+    project_backend: Path,
+    installed_lint_layouts: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _load_runtime(project_backend, installed_lint_layouts, monkeypatch)
+    entry_point = _installed_entry_point(installed_lint_layouts, name)
+
+    with pytest.raises(runtime.InvalidPackageModuleRootError):
+        runtime._activate_entry_point(name, entry_point)
+
+
+def test_activation_rejects_misplaced_manifest(
+    project_backend: Path,
+    installed_lint_layouts: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _load_runtime(project_backend, installed_lint_layouts, monkeypatch)
+    entry_point = _installed_entry_point(installed_lint_layouts, "misplaced")
+
+    with pytest.raises(runtime.PackageManifestError, match="must install package.yaml at"):
+        runtime._activate_entry_point("misplaced", entry_point)
 
 
 @pytest.mark.parametrize(

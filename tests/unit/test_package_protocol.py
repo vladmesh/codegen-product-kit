@@ -87,7 +87,11 @@ def test_package_import_lint_rejects_invalid_site_packages(value: str) -> None:
     ("distribution", "message"),
     [
         (None, "entry point has no distribution metadata"),
-        (SimpleNamespace(files=[]), "distribution must contain exactly one package.yaml; found 0"),
+        (
+            SimpleNamespace(locate_file=lambda path: Path("/missing") / path),
+            "InvalidPackageModuleRootError: entry point module 'synthetic_package' "
+            "must resolve to an installed package directory",
+        ),
     ],
 )
 def test_installed_package_lint_reports_missing_manifest_metadata(
@@ -99,7 +103,7 @@ def test_installed_package_lint_reports_missing_manifest_metadata(
     manifest_path = tmp_path / "services/backend/manifest.yaml"
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text("packages: [synthetic]\n")
-    entry_point = SimpleNamespace(dist=distribution)
+    entry_point = SimpleNamespace(dist=distribution, value="synthetic_package:package")
     monkeypatch.setattr(
         package_imports,
         "_package_entry_points",

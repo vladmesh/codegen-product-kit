@@ -9,9 +9,10 @@
 - The package boundary now defines `CORE_VERSION` as its own semantic façade version, rejects
   duplicate HTTP prefixes, cleans up partial lifecycle startup, and fails import linting closed on
   invalid installation metadata or site-packages paths.
-- Package import linting now resolves both package directories and single-file modules and refuses
-  zero-source scans. Package lifecycle cleanup now uses a started-package ledger, isolates shutdown
-  failures, and never shuts down packages whose startup did not complete.
+- Package protocol v1 now requires `package.yaml` inside the entry point's package directory and
+  refuses single-file or missing module roots during activation and import linting. The lint checks
+  manifest identity and documents its entry-point-scoped scan. Lifecycle cleanup defaults to an
+  empty started-package ledger and never suppresses cancellation.
 - Product events now use Redis Streams with per-service consumer groups, automatic pending-message
   reclamation, generated versioned envelopes, and a PostgreSQL-backed idempotent-consumer helper.
 - The kit's template workflow now builds the generated backend development image and runs the real
