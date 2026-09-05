@@ -280,15 +280,27 @@ def configure_packages(application: Any, listed: Sequence[str]) -> None:
 async def startup_packages(application: Any) -> None:
     """Start packages in product-manifest order."""
 
+    started: list[ActivatedPackage] = []
+    application.state.codegen_started_packages = started
     for package in application.state.codegen_packages:
         await package.runtime.startup(application)
+        started.append(package)
 
 
-async def shutdown_packages(application: Any) -> None:
-    """Stop packages in reverse activation order."""
+async def shutdown_packages(application: Any, *, suppress_errors: bool = False) -> None:
+    """Stop successfully started packages in reverse order, attempting every stop."""
 
-    for package in reversed(application.state.codegen_packages):
-        await package.runtime.shutdown(application)
+    first_error: BaseException | None = None
+    started = application.state.codegen_started_packages
+    while started:
+        package = started.pop()
+        try:
+            await package.runtime.shutdown(application)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+    if first_error is not None and not suppress_errors:
+        raise first_error
 
 
 def product_packages(manifest_path: Path | None = None) -> list[str]:

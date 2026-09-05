@@ -96,21 +96,29 @@ startup. With `packages: []`, existing settings, jobs, events, and environment b
 
 The factory mounts each activated router under `http.prefix`. Once core connectivity is ready, the
 backend lifespan calls package `startup` in manifest order. It calls package `shutdown` in reverse
-order before closing core connectivity, including when a later package's startup fails. Core routers
-are registered first; if a package route has the same HTTP method and fully resolved path as a core
-route, the core route wins, while non-colliding routes under that package prefix remain available.
-A package connection check belongs in `startup` and must raise on failure. Package acceptance checks
+order before closing core connectivity, but only for packages whose `startup` completed. Successfully
+started packages are recorded on one application-state ledger; partial startup failure unwinds that
+ledger, does not call `shutdown` on the failing or later packages, and does not let a shutdown failure
+mask the original startup error. A package author therefore does not need to make `shutdown` tolerate
+an incomplete `startup`. Core routers are registered first; if a package route has the same HTTP
+method and fully resolved path as a core route, the core route wins, while non-colliding routes under
+that package prefix remain available. Exact duplicate package prefixes are refused, while nested
+prefixes such as `/a` and `/a/b` are accepted; final route collisions follow registration order. A
+package connection check belongs in `startup` and must raise on failure. Package acceptance checks
 must install the real wheel, resolve its real entry point, start the generated application, exercise a
 prefixed route, observe lifecycle calls, run manifest validation, and run the import lint. The kit's
 synthetic package performs these checks.
 
 The generated product's `make lint` runs the installed-package import check. Package source imports
-may target stdlib, `codegen_kit`, the package's own modules, and top-level modules named in
-`package_dependencies`. Importing product internals or an undeclared third-party package fails the
-check. A missing or ambiguous installed `package.yaml`, missing distribution metadata, and an empty
-or nonexistent explicit site-packages path also fail the lint rather than producing a vacuous pass.
-This is a source boundary, not a dependency resolver; normal Python packaging metadata still owns
-installation of dependencies.
+may target stdlib, `codegen_kit`, the entry point's one top-level module and its submodules, and
+top-level modules named in `package_dependencies`. A second top-level module shipped in the same
+distribution must be declared as a package dependency. Importing product internals or an undeclared
+third-party package fails the check. Each listed entry point resolves to either a recursively scanned
+package directory or one scanned top-level `.py` module. A missing or empty source root, missing or
+ambiguous installed `package.yaml`, missing distribution metadata, and an empty or nonexistent
+explicit site-packages path fail the lint rather than producing a vacuous pass. This is a source
+boundary, not a dependency resolver; normal Python packaging metadata still owns installation of
+dependencies.
 
 ## Core settings v1
 

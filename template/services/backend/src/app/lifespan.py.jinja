@@ -17,11 +17,15 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
     broker = get_broker()
     await broker.connect()
+    active_error: BaseException | None = None
     try:
         await startup_packages(application)
         yield
+    except BaseException as error:
+        active_error = error
+        raise
     finally:
         try:
-            await shutdown_packages(application)
+            await shutdown_packages(application, suppress_errors=active_error is not None)
         finally:
             await broker.close()

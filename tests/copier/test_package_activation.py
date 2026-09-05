@@ -20,6 +20,10 @@ import yaml
 from framework.lint.package_imports import lint_installed_packages
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
+LINT_LAYOUT_FIXTURES = (
+    Path(__file__).parents[1] / "fixtures/synthetic_single_module",
+    Path(__file__).parents[1] / "fixtures/synthetic_missing_module",
+)
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +41,22 @@ def installed_synthetic(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return target
 
 
+@pytest.fixture(scope="module")
+def installed_lint_layouts(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    target = tmp_path_factory.mktemp("installed-lint-layouts")
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to install the synthetic packages")
+    for fixture in LINT_LAYOUT_FIXTURES:
+        result = subprocess.run(  # noqa: S603
+            [uv, "pip", "install", "--target", str(target), str(fixture)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    return target
+
+
 def _load_runtime(project_backend: Path, installed: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.syspath_prepend(str(project_backend))
     monkeypatch.syspath_prepend(str(installed))
@@ -51,12 +71,15 @@ def generated_backend_runtime(
     project_backend: Path,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, Path]:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to install the generated backend")
     runtime_project = tmp_path_factory.mktemp("backend-runtime") / "output"
     shutil.copytree(project_backend, runtime_project)
     python = runtime_project / "services/backend/.venv/bin/python"
     commands = [
-        ["uv", "sync", "--project", "services/backend", "--frozen"],
-        ["uv", "pip", "install", "--python", str(python), str(FIXTURE)],
+        [uv, "sync", "--project", "services/backend", "--frozen"],
+        [uv, "pip", "install", "--python", str(python), str(FIXTURE)],
     ]
     for command in commands:
         result = subprocess.run(
@@ -168,17 +191,20 @@ def test_generated_lifespan_cleans_up_partial_package_startup(
                 calls.append("broker-close")
 
         class Package:
-            def __init__(self, name, fail=False):
+            def __init__(self, name, fail_start=False, fail_stop=False):
                 self.name = name
-                self.fail = fail
+                self.fail_start = fail_start
+                self.fail_stop = fail_stop
 
             async def startup(self, application):
                 calls.append(f"{self.name}-start")
-                if self.fail:
+                if self.fail_start:
                     raise RuntimeError("startup failed")
 
             async def shutdown(self, application):
                 calls.append(f"{self.name}-stop")
+                if self.fail_stop:
+                    raise RuntimeError("shutdown failed")
 
         broker = Broker()
         events._broker = broker
@@ -188,7 +214,9 @@ def test_generated_lifespan_cleans_up_partial_package_startup(
         application = FastAPI(lifespan=lifespan)
         application.state.codegen_packages = [
             SimpleNamespace(runtime=Package("first")),
-            SimpleNamespace(runtime=Package("second", fail=True)),
+            SimpleNamespace(runtime=Package("second", fail_stop=True)),
+            SimpleNamespace(runtime=Package("third", fail_start=True)),
+            SimpleNamespace(runtime=Package("fourth")),
         ]
         try:
             with TestClient(application):
@@ -202,6 +230,7 @@ def test_generated_lifespan_cleans_up_partial_package_startup(
             "broker-connect",
             "first-start",
             "second-start",
+            "third-start",
             "second-stop",
             "first-stop",
             "broker-close",
@@ -278,6 +307,38 @@ def test_installed_package_import_lint_reads_real_distribution(
     finally:
         source.write_text(original)
         product_manifest.write_text(original_product)
+
+
+def test_installed_package_import_lint_scans_single_file_module(
+    tmp_path: Path,
+    installed_lint_layouts: Path,
+) -> None:
+    product_manifest = tmp_path / "services/backend/manifest.yaml"
+    product_manifest.parent.mkdir(parents=True)
+    product_manifest.write_text("packages: [single-module]\n")
+    source = installed_lint_layouts / "single_module.py"
+    original = source.read_text()
+    try:
+        assert lint_installed_packages(tmp_path, installed_lint_layouts) == []
+        source.write_text(original + "\nfrom services.backend.src.core import db\n")
+        assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
+            "single-module: single_module.py:7: forbidden import 'services.backend.src.core'"
+        ]
+    finally:
+        source.write_text(original)
+
+
+def test_installed_package_import_lint_rejects_missing_module_root(
+    tmp_path: Path,
+    installed_lint_layouts: Path,
+) -> None:
+    product_manifest = tmp_path / "services/backend/manifest.yaml"
+    product_manifest.parent.mkdir(parents=True)
+    product_manifest.write_text("packages: [missing-module]\n")
+
+    assert lint_installed_packages(tmp_path, installed_lint_layouts) == [
+        "missing-module: package sources could not be located for module 'missing_module'"
+    ]
 
 
 @pytest.mark.parametrize(

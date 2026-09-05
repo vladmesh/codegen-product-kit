@@ -156,21 +156,24 @@ def load_package_manifest(path: Path) -> PackageManifest:
 
 
 def lint_package_imports(
-    source_root: Path,
+    module_path: Path,
     manifest: PackageManifest,
     *,
     module_root: str | None = None,
 ) -> list[str]:
     """Return imports outside stdlib, the public core API, and declared dependencies."""
 
-    own_module = (module_root or source_root.name).partition(".")[0]
+    own_module = (module_root or module_path.name).partition(".")[0]
+    source_files, display_root = _resolve_source_files(module_path)
+    if not source_files:
+        return [f"package sources could not be located for module {own_module!r}"]
     allowed = set(sys.stdlib_module_names) | {
         "codegen_kit",
         *manifest.package_dependencies,
         own_module,
     }
     violations: list[str] = []
-    for source in sorted(source_root.rglob("*.py")):
+    for source in source_files:
         tree = ast.parse(source.read_text(), filename=str(source))
         for node in ast.walk(tree):
             imported: list[str] = []
@@ -181,6 +184,17 @@ def lint_package_imports(
             for name in imported:
                 top_level = name.split(".", 1)[0]
                 if top_level not in allowed:
-                    relative = source.relative_to(source_root)
+                    relative = source.relative_to(display_root)
                     violations.append(f"{relative}:{node.lineno}: forbidden import {name!r}")
     return violations
+
+
+def _resolve_source_files(module_path: Path) -> tuple[tuple[Path, ...], Path]:
+    """Resolve an entry-point module root to every concrete Python source scanned."""
+
+    if module_path.is_dir():
+        return tuple(sorted(module_path.rglob("*.py"))), module_path
+    module_file = module_path.with_suffix(".py")
+    if module_file.is_file():
+        return (module_file,), module_file.parent
+    return (), module_path.parent

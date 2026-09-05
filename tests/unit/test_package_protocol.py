@@ -67,6 +67,16 @@ def test_package_import_lint_does_not_allow_namesake_subdirectory(tmp_path: Path
     ]
 
 
+def test_package_import_lint_rejects_empty_source_directory(tmp_path: Path) -> None:
+    manifest = load_package_manifest(FIXTURE)
+    source_root = tmp_path / "synthetic_package"
+    source_root.mkdir()
+
+    assert lint_package_imports(source_root, manifest) == [
+        "package sources could not be located for module 'synthetic_package'"
+    ]
+
+
 @pytest.mark.parametrize("value", ["", "   ", "/does/not/exist"])
 def test_package_import_lint_rejects_invalid_site_packages(value: str) -> None:
     with pytest.raises(ValueError, match="--site-packages"):

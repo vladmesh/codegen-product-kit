@@ -1,0 +1,9 @@
+protocol_version: 1
+name: single-module
+version: 1.0.0
+requires_core: ">=1,<2"
+provides: []
+requires: []
+package_dependencies: []
+http:
+  prefix: /single-module
