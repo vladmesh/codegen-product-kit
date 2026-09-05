@@ -25,10 +25,14 @@ PYTHON := $(VENV)/python
 ALEMBIC_CONFIG := services/backend/migrations/alembic.ini
 BACKEND_ALEMBIC := PYTHONPATH=. services/backend/.venv/bin/alembic -c $(ALEMBIC_CONFIG)
 DOCKER_ALEMBIC := $(DOCKER_COMPOSE) $(COMPOSE_DEV) run --rm --build backend alembic -c $(ALEMBIC_CONFIG)
+BACKEND_MIGRATE := PATH=services/backend/.venv/bin:$(PATH) PYTHONPATH=. services/backend/scripts/migrate.sh
+DOCKER_MIGRATE := $(DOCKER_COMPOSE) $(COMPOSE_DEV) run --rm --build backend services/backend/scripts/migrate.sh
 ifeq ($(SKIP_INFRA_START),1)
 ALEMBIC := $(BACKEND_ALEMBIC)
+MIGRATE := $(BACKEND_MIGRATE)
 else
 ALEMBIC := $(DOCKER_ALEMBIC)
+MIGRATE := $(DOCKER_MIGRATE)
 endif
 {% endif %}
 
@@ -58,7 +62,7 @@ setup:
 	$(PYTHON) -m framework.generate
 {%- endif %}
 	@echo ">> Formatting generated code"
-	$(VENV)/ruff format --exclude '*.md' .
+	$(VENV)/ruff format --extend-exclude '*.md' .
 	@$(VENV)/ruff check --fix . || { \
 		echo ">> Warning: lint auto-fix left issues in the generated project."; \
 		echo ">> Setup continues; run 'make lint' to see and fix them."; \
@@ -67,7 +71,7 @@ setup:
 	@echo ">> Setup complete!"
 
 lint:
-	$(VENV)/ruff format --check --exclude '*.md' .
+	$(VENV)/ruff format --check --extend-exclude '*.md' .
 	$(VENV)/ruff check .
 	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude 'tests/*,services/*/tests/*' .
 	$(PYTHON) -c "from framework.spec.loader import validate_specs_cli; from framework.lib.env import get_repo_root; ok, msg = validate_specs_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
@@ -95,7 +99,7 @@ lint-specs:
 	$(PYTHON) -m framework.enforce_spec_compliance
 {% endif %}
 format:
-	$(VENV)/ruff format --exclude '*.md' .
+	$(VENV)/ruff format --extend-exclude '*.md' .
 	$(VENV)/ruff check --fix .
 
 typecheck:
@@ -130,7 +134,7 @@ migrate:
 		echo "services/backend/.venv/bin/alembic not found; run uv sync --project services/backend"; \
 		exit 1; \
 	fi
-	$(ALEMBIC) upgrade head
+	$(MIGRATE)
 
 makemigrations:
 	@if [ -z "$(name)" ]; then \
@@ -146,8 +150,11 @@ makemigrations:
 	$(ALEMBIC) revision --autogenerate -m "$(name)"
 
 test-integration:
-	$(COMPOSE_ENV_INTEGRATION) $(DOCKER_COMPOSE) $(COMPOSE_TEST_INTEGRATION) up --build --abort-on-container-exit --exit-code-from integration-tests
-	$(COMPOSE_ENV_INTEGRATION) $(DOCKER_COMPOSE) $(COMPOSE_TEST_INTEGRATION) down --volumes --remove-orphans
+	@$(COMPOSE_ENV_INTEGRATION) $(DOCKER_COMPOSE) $(COMPOSE_TEST_INTEGRATION) down --volumes --remove-orphans >/dev/null 2>&1 || true
+	@status=0; \
+		$(COMPOSE_ENV_INTEGRATION) $(DOCKER_COMPOSE) $(COMPOSE_TEST_INTEGRATION) up --build --abort-on-container-exit --exit-code-from integration-tests || status=$$?; \
+		$(COMPOSE_ENV_INTEGRATION) $(DOCKER_COMPOSE) $(COMPOSE_TEST_INTEGRATION) down --volumes --remove-orphans; \
+		exit $$status
 {% endif %}
 log:
 	@service="$(if $(service),$(service),$(LOG_SERVICE))"; \

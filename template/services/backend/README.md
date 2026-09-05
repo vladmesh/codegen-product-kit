@@ -37,6 +37,10 @@ make migrate
 By default these targets start PostgreSQL through the dev Compose layers and run Alembic in a
 one-off backend container. `make dev-start` also applies pending migrations before starting the API.
 
+`make migrate` applies the core head first and then each active package's Alembic revisions in
+manifest order. Keep product-local package wheels in `services/backend/packages/` so backend image
+builds can install the locked dependency before application sources are copied.
+
 For an already reachable PostgreSQL instance, install the backend environment and bypass Compose:
 
 ```bash

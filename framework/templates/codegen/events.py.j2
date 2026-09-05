@@ -41,26 +41,26 @@ def get_broker() -> RedisBroker:
     return _broker
 
 {% for pub in publishers %}
-_pub_{{ pub.name }}: Any = None
+_pub_{{ pub.identifier }}: Any = None
 
 
-async def publish_{{ pub.name }}(
+async def publish_{{ pub.identifier }}(
     message: {{ pub.message_model }},
     *,
     event_id: UUID | None = None,
     occurred_at: datetime | None = None,
     schema_version: int = 1,
 ) -> EventEnvelope[{{ pub.message_model }}]:
-    global _pub_{{ pub.name }}
-    if _pub_{{ pub.name }} is None:
-        _pub_{{ pub.name }} = get_broker().publisher(stream="{{ pub.name }}")
+    global _pub_{{ pub.identifier }}
+    if _pub_{{ pub.identifier }} is None:
+        _pub_{{ pub.identifier }} = get_broker().publisher(stream="{{ pub.name }}")
     envelope = EventEnvelope[{{ pub.message_model }}](
         event_id=event_id or uuid4(),
         occurred_at=occurred_at or datetime.now(UTC),
         schema_version=schema_version,
         payload=message,
     )
-    await _pub_{{ pub.name }}.publish(envelope)
+    await _pub_{{ pub.identifier }}.publish(envelope)
     return envelope
 {% endfor %}
 

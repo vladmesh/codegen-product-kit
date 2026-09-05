@@ -12,6 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 FROM base AS runtime-deps
 COPY shared/pyproject.toml ./shared/pyproject.toml
 RUN mkdir -p ./shared/shared && touch ./shared/shared/__init__.py
+COPY services/backend/packages ./services/backend/packages
 COPY services/backend/pyproject.toml services/backend/uv.lock ./services/backend/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd services/backend \

@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import importlib
 from importlib import metadata
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ import yaml
 from framework.lint.package_imports import lint_installed_packages
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
+KIT_ROOT = Path(__file__).parents[2]
 LINT_LAYOUT_FIXTURES = (
     Path(__file__).parents[1] / "fixtures/synthetic_single_module",
     Path(__file__).parents[1] / "fixtures/synthetic_missing_module",
@@ -136,6 +138,13 @@ def test_generated_factory_and_lifespan_activate_installed_package(
     product = yaml.safe_load(original_product)
     product["packages"] = ["synthetic"]
     product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
+    generated = subprocess.run(
+        [sys.executable, "-m", "framework.generate"],
+        cwd=runtime_project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert generated.returncode == 0, generated.stdout + generated.stderr
     script = textwrap.dedent(
         """
         from fastapi.testclient import TestClient
@@ -447,3 +456,182 @@ def test_named_activation_failures_use_real_entry_point(
             runtime.discover_packages(listed)
     finally:
         installed_manifest.write_text(original)
+
+
+@pytest.mark.slow
+def test_package_contract_and_migrations_against_real_postgres(
+    project_backend: Path,
+    tmp_path: Path,
+) -> None:
+    """The existing integration stack proves the complete installed-package path."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to build the synthetic package")
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is required for the Postgres package migration proof")
+    project = tmp_path / "package-product"
+    shutil.copytree(project_backend, project)
+    packages = project / "services/backend/packages"
+    tooling_result = subprocess.run(
+        [uv, "build", "--wheel", str(KIT_ROOT), "--out-dir", str(packages)],
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert tooling_result.returncode == 0, tooling_result.stdout + tooling_result.stderr
+    tooling_wheel = next(packages.glob("codegen_kit_tooling-*.whl"))
+    tooling_add = subprocess.run(
+        [uv, "add", str(tooling_wheel.relative_to(project))],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert tooling_add.returncode == 0, tooling_add.stdout + tooling_add.stderr
+    wheel_result = subprocess.run(
+        [uv, "build", "--wheel", str(FIXTURE), "--out-dir", str(packages)],
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert wheel_result.returncode == 0, wheel_result.stdout + wheel_result.stderr
+    wheel = next(packages.glob("codegen_kit_synthetic_package-*.whl"))
+    add_result = subprocess.run(
+        [uv, "add", "--project", "services/backend", str(wheel.relative_to(project))],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert add_result.returncode == 0, add_result.stdout + add_result.stderr
+
+    manifest_path = project / "services/backend/manifest.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["packages"] = ["synthetic"]
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    (project / "services/backend/spec/synthetic_consumer.yaml").write_text(
+        "domain: synthetic_consumer\n"
+        "operations:\n"
+        "  accept_synthetic:\n"
+        "    input: SyntheticRequested\n"
+        "    events:\n"
+        "      subscribe: synthetic.requested\n"
+    )
+    sync_result = subprocess.run(
+        [uv, "sync", "--project", ".", "--frozen"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
+    )  # noqa: S603
+    assert sync_result.returncode == 0, sync_result.stdout + sync_result.stderr
+    generate_result = subprocess.run(
+        [sys.executable, "-m", "framework.generate"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert generate_result.returncode == 0, generate_result.stdout + generate_result.stderr
+    lint_result = subprocess.run(
+        ["make", "lint"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert lint_result.returncode == 0, lint_result.stdout + lint_result.stderr
+
+    (project / "tests/integration/test_package_protocol.py").write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            import os
+            from pathlib import Path
+            import subprocess
+
+            import asyncpg
+            from httpx import AsyncClient
+            import pytest
+            from redis.asyncio import Redis
+
+            from services.backend.src.core.db import async_engine
+            from shared.generated.events import get_broker
+            from shared.generated.schemas import SyntheticReady
+            from synthetic_package import announce_ready, orm_base, session
+
+
+            @pytest.mark.asyncio
+            async def test_package_schema_contract_and_job() -> None:
+                database_url = os.environ["ASYNC_DATABASE_URL"].replace(
+                    "postgresql+asyncpg://", "postgresql://"
+                )
+                connection = await asyncpg.connect(database_url)
+                try:
+                    tables = await connection.fetch(
+                        "SELECT table_schema, table_name FROM information_schema.tables "
+                        "WHERE table_name IN ('alembic_version', 'synthetic_records')"
+                    )
+                    locations = {(row["table_schema"], row["table_name"]) for row in tables}
+                    assert ("public", "alembic_version") in locations
+                    assert ("synthetic", "alembic_version") in locations
+                    assert ("synthetic", "synthetic_records") in locations
+                    assert ("public", "synthetic_records") not in locations
+                    assert await connection.fetchval(
+                        "SELECT version_num FROM synthetic.alembic_version"
+                    ) == "synthetic_0001"
+                finally:
+                    await connection.close()
+
+                second = subprocess.run(
+                    ["services/backend/scripts/migrate.sh"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                assert second.returncode == 0, second.stdout + second.stderr
+                assert orm_base().metadata.schema == "synthetic"
+                await async_engine.dispose()
+                async with session() as package_db:
+                    assert await package_db.scalar(
+                        __import__("sqlalchemy").text("SELECT count(*) FROM synthetic_records")
+                    ) == 0
+
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
+                    payload = {
+                        "command_id": "package-command",
+                        "name": "synthetic.refresh",
+                        "arguments": {"force": True},
+                        "fired_by_product": "package-test",
+                        "fired_by_run": "run-1",
+                    }
+                    accepted = await client.post("/jobs/fire", headers=headers, json=payload)
+                    assert accepted.status_code == 200, accepted.text
+                    payload["name"] = "synthetic.undeclared"
+                    refused = await client.post("/jobs/fire", headers=headers, json=payload)
+                    assert refused.status_code == 404
+
+                redis = Redis.from_url(os.environ["REDIS_URL"])
+                broker = get_broker()
+                await broker.connect()
+                try:
+                    envelope = await announce_ready(
+                        SyntheticReady(package_id="installed-package")
+                    )
+                    assert envelope.payload.package_id == "installed-package"
+                    assert await redis.xlen("synthetic.ready") >= 1
+                finally:
+                    await broker.close()
+                    await redis.aclose()
+
+                adapter = Path("services/backend/src/generated/event_adapter.py").read_text()
+                assert '"synthetic.requested"' in adapter
+                assert "SyntheticRequested" in adapter
+            """
+        )
+    )
+
+    result = subprocess.run(
+        ["make", "test-integration"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 import sys
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from jsonschema import Draft202012Validator, SchemaError
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import yaml
 
 from framework.spec.manifests import _validate_declaration_schema, empty_declaration_schema
@@ -55,19 +57,76 @@ class HttpDeclaration(BaseModel):
 
 
 class DatabaseDeclaration(BaseModel):
-    """Package-owned database declarations, enforced by the next card."""
+    """Package-owned database schema and Alembic revision resource."""
 
     schema_name: str = Field(alias="schema")
     migrations: str
     model_config = {"extra": "forbid", "populate_by_name": True}
 
+    @field_validator("schema_name")
+    @classmethod
+    def validate_schema_name(cls, schema: str) -> str:
+        if schema == "public" or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema) is None:
+            raise ValueError("must be a non-public PostgreSQL identifier")
+        return schema
+
+    @field_validator("migrations")
+    @classmethod
+    def validate_migrations(cls, declaration: str) -> str:
+        module, separator, relative = declaration.partition(":")
+        if not separator or not module or not relative or ".." in Path(relative).parts:
+            raise ValueError("must use a non-traversing module:path resource")
+        return declaration
+
+
+class PackageEventMessage(BaseModel):
+    """Language-neutral message schema for one package event."""
+
+    model: str
+    schema_data: dict[str, Any] = Field(alias="schema")
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+    @field_validator("model")
+    @classmethod
+    def validate_model_name(cls, name: str) -> str:
+        if not name.isidentifier():
+            raise ValueError("must be a Python-compatible generated model name")
+        return name
+
+    @field_validator("schema_data")
+    @classmethod
+    def validate_schema(cls, schema: dict[str, Any]) -> dict[str, Any]:
+        try:
+            Draft202012Validator.check_schema(schema)
+        except SchemaError as error:
+            raise ValueError(f"must be a valid Draft 2020-12 schema: {error.message}") from error
+        if schema.get("type") != "object":
+            raise ValueError("must describe an object message")
+        return schema
+
 
 class EventsDeclaration(BaseModel):
-    """Package event names, merged by the next card."""
+    """Package event names and the message contract bound to each name."""
 
     publishes: list[str] = Field(default_factory=list)
     consumes: list[str] = Field(default_factory=list)
+    messages: dict[str, PackageEventMessage] = Field(default_factory=dict)
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_messages_cover_events(self) -> EventsDeclaration:
+        declared = self.publishes + self.consumes
+        if len(set(self.publishes)) != len(self.publishes):
+            raise ValueError("events.publishes must not repeat an event")
+        if len(set(self.consumes)) != len(self.consumes):
+            raise ValueError("events.consumes must not repeat an event")
+        missing = sorted(set(declared) - set(self.messages))
+        extra = sorted(set(self.messages) - set(declared))
+        if missing:
+            raise ValueError(f"events.messages is missing declared event {missing[0]!r}")
+        if extra:
+            raise ValueError(f"events.messages describes undeclared event {extra[0]!r}")
+        return self
 
 
 class EnvironmentDeclaration(BaseModel):
@@ -77,6 +136,13 @@ class EnvironmentDeclaration(BaseModel):
     required: bool = True
     model_config = {"extra": "forbid"}
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        if re.fullmatch(r"[A-Z_][A-Z0-9_]*", name) is None:
+            raise ValueError("must be an uppercase environment variable name")
+        return name
+
 
 class ResourceDeclaration(BaseModel):
     """One package-owned resource included in its distribution."""
@@ -84,6 +150,21 @@ class ResourceDeclaration(BaseModel):
     name: str
     path: str
     model_config = {"extra": "forbid"}
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        if not name:
+            raise ValueError("must not be empty")
+        return name
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, path: str) -> str:
+        candidate = Path(path)
+        if candidate.is_absolute() or not path or ".." in candidate.parts:
+            raise ValueError("must be a non-traversing distribution-relative path")
+        return path
 
 
 class PackageManifest(BaseModel):
@@ -106,6 +187,18 @@ class PackageManifest(BaseModel):
 
     model_config = {"extra": "forbid"}
 
+    @model_validator(mode="after")
+    def validate_named_lists(self) -> PackageManifest:
+        for field_name, values in (
+            ("provides", self.provides),
+            ("requires", self.requires),
+            ("environment", [item.name for item in self.environment]),
+            ("resources", [item.name for item in self.resources]),
+        ):
+            if len(set(values)) != len(values):
+                raise ValueError(f"{field_name} must not repeat a name")
+        return self
+
     @field_validator("settings_schema")
     @classmethod
     def validate_settings_schema(cls, schema: dict[str, Any]) -> dict[str, Any]:
@@ -114,7 +207,15 @@ class PackageManifest(BaseModel):
     @field_validator("jobs_schema")
     @classmethod
     def validate_jobs_schema(cls, schema: dict[str, Any]) -> dict[str, Any]:
-        return _validate_declaration_schema(schema, "jobs_schema")
+        _validate_declaration_schema(schema, "jobs_schema")
+        for name, arguments in schema["properties"].items():
+            if arguments.get("type") != "object":
+                raise ValueError(f"jobs_schema.properties.{name}.type must be 'object'")
+            if arguments.get("additionalProperties") is not False:
+                raise ValueError(
+                    f"jobs_schema.properties.{name}.additionalProperties must be false"
+                )
+        return schema
 
 
 def parse_package_manifest(data: object) -> PackageManifest:
@@ -194,7 +295,4 @@ def _resolve_source_files(module_path: Path) -> tuple[tuple[Path, ...], Path]:
 
     if module_path.is_dir():
         return tuple(sorted(module_path.rglob("*.py"))), module_path
-    module_file = module_path.with_suffix(".py")
-    if module_file.is_file():
-        return (module_file,), module_file.parent
     return (), module_path.parent

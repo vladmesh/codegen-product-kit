@@ -30,6 +30,7 @@ class SchemasGenerator(BaseGenerator):
         """Generate Pydantic models from spec."""
         # Convert specs to JSON Schema
         json_schema = self.specs.models.to_json_schema()
+        json_schema["definitions"].update(self.specs.package_models)
 
         # Write through a scratch file so the output is atomically replaced.
         self.output_file.parent.mkdir(parents=True, exist_ok=True)

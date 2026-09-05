@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
-from framework.spec.packages import lint_package_imports, parse_package_manifest
+from framework.spec.package_resolution import PackageResolutionError, resolve_active_packages
+from framework.spec.packages import PackageManifestError, lint_package_imports
 
 ENTRY_POINT_GROUP = "codegen_kit.packages"
-INVALID_MODULE_ROOT = "InvalidPackageModuleRootError"
 
 
 def _package_entry_points(distribution_path: Path | None) -> dict[str, metadata.EntryPoint]:
@@ -29,75 +30,31 @@ def _package_entry_points(distribution_path: Path | None) -> dict[str, metadata.
     return {entry_point.name: entry_point for entry_point in entry_points}
 
 
-def _package_root(
-    entry_point: metadata.EntryPoint,
-    distribution: metadata.Distribution,
-) -> tuple[Path, Path] | str:
-    """Resolve the protocol-defined package directory and relative module path."""
-
-    module_name = entry_point.value.partition(":")[0]
-    module_path = Path(*module_name.split("."))
-    package_root = Path(distribution.locate_file(module_path))
-    if not module_name or not package_root.is_dir():
-        return (
-            f"{INVALID_MODULE_ROOT}: entry point module {module_name!r} "
-            "must resolve to an installed package directory"
-        )
-    return package_root, module_path
-
-
-def _manifest_path(
-    name: str,
-    distribution: metadata.Distribution,
-    package_root: Path,
-) -> Path | str:
-    """Resolve the sole manifest at its protocol-defined package location."""
-
-    manifest_files = [file for file in distribution.files or () if file.name == "package.yaml"]
-    if len(manifest_files) != 1:
-        return f"distribution must contain exactly one package.yaml; found {len(manifest_files)}"
-    manifest_path = Path(distribution.locate_file(manifest_files[0]))
-    if manifest_path != package_root / "package.yaml":
-        return f"package.yaml must be installed inside entry point module directory for {name!r}"
-    return manifest_path
-
-
 def lint_installed_packages(repo_root: Path, distribution_path: Path | None = None) -> list[str]:
     """Lint every package explicitly listed by the backend service manifest."""
 
     product = yaml.safe_load((repo_root / "services/backend/manifest.yaml").read_text())
-    listed = set(product.get("packages", []))
-    violations: list[str] = []
+    manifest = SimpleNamespace(packages=product.get("packages", []))
     entry_points = _package_entry_points(distribution_path)
-    for name in sorted(listed - set(entry_points)):
-        violations.append(f"{name}: listed package has no installed entry point")
-    for name in sorted(listed & set(entry_points)):
+    try:
+        active = resolve_active_packages(
+            repo_root,
+            {"backend": manifest},
+            distribution_path,
+            entry_points,
+        )
+    except (PackageResolutionError, PackageManifestError, ValueError) as error:
+        return [str(error)]
+    violations: list[str] = []
+    for package in active:
+        name = package.name
         entry_point = entry_points[name]
-        distribution = entry_point.dist
-        if distribution is None:
-            violations.append(f"{name}: entry point has no distribution metadata")
-            continue
-        resolved_root = _package_root(entry_point, distribution)
-        if isinstance(resolved_root, str):
-            violations.append(f"{name}: {resolved_root}")
-            continue
-        package_root, _ = resolved_root
-        resolved_manifest = _manifest_path(name, distribution, package_root)
-        if isinstance(resolved_manifest, str):
-            violations.append(f"{name}: {resolved_manifest}")
-            continue
-        manifest = parse_package_manifest(yaml.safe_load(resolved_manifest.read_text()))
-        if manifest.name != name:
-            violations.append(
-                f"{name}: package manifest name {manifest.name!r} does not match entry point"
-            )
-            continue
         module_root = entry_point.value.partition(":")[0].partition(".")[0]
         violations.extend(
             f"{name}: {item}"
             for item in lint_package_imports(
-                package_root,
-                manifest,
+                package.package_root,
+                package.manifest,
                 module_root=module_root,
             )
         )
