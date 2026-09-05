@@ -38,21 +38,6 @@ services:
       PATH: /app/services/tg_bot/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
       TG_BOT_ALLOW_PLACEHOLDER_TOKEN: "true"
 {%- endif %}
-{%- if 'notifications' in modules %}
-  notifications_worker:
-    extends:
-      file: compose.base.yml
-      service: notifications_worker
-    volumes:
-      - ../:/workspace:delegated
-      - /app/services/notifications_worker/.venv
-    working_dir: /workspace
-    env_file:
-      - ../.env
-    environment:
-      PYTHONPATH: /workspace
-      PATH: /app/services/notifications_worker/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-{%- endif %}
 {%- if 'backend' in modules %}
 
   db:
@@ -60,7 +45,7 @@ services:
       file: compose.base.yml
       service: db
 {%- endif %}
-{%- if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{%- if 'backend' in modules or 'tg_bot' in modules %}
 
   redis:
     extends:

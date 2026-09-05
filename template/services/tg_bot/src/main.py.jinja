@@ -37,7 +37,7 @@ configure_logging(service_name="tg_bot")
 LOGGER = structlog.stdlib.get_logger()
 
 DEFAULT_GREETING: Final[str] = (
-    "Привет! Мы Service Template и этот бот помогает подключиться к нашему сервису."
+    "Привет! Этот бот помогает подключиться к нашему сервису."
 )
 PLACEHOLDER_TELEGRAM_BOT_TOKEN: Final[str] = "your-telegram-bot-token"  # noqa: S105
 ALLOW_PLACEHOLDER_TOKEN_ENV: Final[str] = "TG_BOT_ALLOW_PLACEHOLDER_TOKEN"  # noqa: S105

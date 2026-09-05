@@ -93,9 +93,6 @@ event = CommandReceived(...)
 await publish_command_received(event)  # broker должен быть подключён
 ```
 
-{%- if 'notifications' in modules %}
-**FastStream workers** (`python-faststream`) создают `RedisBroker` напрямую в `main()` и передают в `create_event_adapter()`. Lifecycle управляется через `FastStream(broker).run()`.
-{%- endif %}
 {%- elif 'tg_bot' in modules %}
 
 ## Standalone Telegram Bot
@@ -111,10 +108,4 @@ await publish_command_received(event)  # broker должен быть подкл
 {%- endif %}
 {%- if 'tg_bot' in modules %}
 - **Telegram Bot:** `services/tg_bot/AGENTS.md`
-{%- endif %}
-{%- if 'notifications' in modules %}
-- **Notifications Worker:** `services/notifications_worker/AGENTS.md`
-{%- endif %}
-{%- if 'frontend' in modules %}
-- **Frontend:** `services/frontend/AGENTS.md`
 {%- endif %}

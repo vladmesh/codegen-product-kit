@@ -1,6 +1,6 @@
 # Framework architecture
 
-This document describes the current service-template framework. Generated projects carry their own
+This document describes the current codegen-product-kit framework. Generated projects carry their own
 module-specific `ARCHITECTURE.md` and `infra/README.md`.
 
 ## Repository planes
@@ -87,15 +87,23 @@ Copier selects one or more modules:
 |---|---|
 | `backend` | FastAPI, PostgreSQL, Redis |
 | `tg_bot` | Python Telegram bot with FastStream event integration |
-| `notifications` | FastStream notification worker |
-| `frontend` | Astro + React placeholder on port 4321 |
 
 Unselected module directories are excluded before copy. Projects without backend do not receive
 backend specs or generated shared contracts. Adding a previously excluded predefined module to an
 existing project is not currently automated.
 
-Arbitrary services may be added manually by creating their directory, registry entry, Compose
-configuration, environment contract, and tests. There is no service-scaffolding command.
+Arbitrary containers may be added manually by creating their directory, registry entry, Compose
+configuration, environment contract, and tests. There is no container-scaffolding command.
+
+## Component direction
+
+The planned component model distinguishes a shared platform **service**, a product-owned
+**container**, and an in-process **package**. **Component** is the umbrella term. The author of a
+catalog component will declare its delivery form so a product-building agent does not choose a
+runtime boundary heuristically.
+
+That model is not implemented yet. There is no package registration protocol, component catalog,
+or deterministic installer in the current kit; `backend` and `tg_bot` remain Copier selections.
 
 ## Tooling and runtime
 

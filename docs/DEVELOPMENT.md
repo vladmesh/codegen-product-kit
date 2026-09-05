@@ -1,6 +1,6 @@
 # Framework development
 
-This guide is for contributors to service-template itself. Generated products have their own
+This guide is for contributors to codegen-product-kit itself. Generated products have their own
 README, AGENTS, architecture, and infrastructure documents.
 
 ## Setup and verification
@@ -77,7 +77,7 @@ tests together. Do not hand-edit a generated fixture and treat it as the fix.
 For a manual render:
 
 ```bash
-uvx copier copy . /tmp/service-template-smoke \
+uvx copier copy . /tmp/codegen-product-kit-smoke \
   --data project_name=smoke \
   --data modules=backend,tg_bot \
   --defaults --vcs-ref=HEAD --overwrite
@@ -88,8 +88,7 @@ Then run the generated project's `make setup`, `make lint`, `make typecheck`, an
 ## Adding a predefined module
 
 Add the service under `template/services/`, then update `copier.yml`, `services.yml.jinja`, Compose
-layers, environment contracts, generated documentation, and the Copier matrix. Module names and
-runtime service names may differ (`notifications` selects `notifications_worker`), so test both.
+layers, environment contracts, generated documentation, and the Copier matrix.
 
 There is no supported command to add a previously excluded module to an existing generated project.
 

@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{% if 'backend' in modules or 'tg_bot' in modules %}
 from shared.generated.events import get_broker
 {% endif %}
 from ..core.logging import configure_logging
@@ -14,11 +14,11 @@ from ..core.logging import configure_logging
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager."""
     configure_logging()
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{% if 'backend' in modules or 'tg_bot' in modules %}
     broker = get_broker()
     await broker.connect()
 {% endif %}
     yield
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{% if 'backend' in modules or 'tg_bot' in modules %}
     await broker.close()
 {% endif -%}

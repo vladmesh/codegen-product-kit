@@ -1,5 +1,5 @@
 # Framework Development Makefile
-# This Makefile is for developing the service-template framework itself.
+# This Makefile is for developing codegen-product-kit itself.
 # For product development commands, see the generated project's Makefile.
 
 .PHONY: setup lint format test test-copier test-copier-slow test-all help sync-framework sync-framework-preview check-sync

@@ -8,15 +8,9 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
 {%- endif %}
-{%- if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{%- if 'backend' in modules or 'tg_bot' in modules %}
 
   redis:
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
-{%- endif %}
-{%- if 'frontend' in modules %}
-
-  frontend:
-    ports:
-      - "${FRONTEND_PORT:-4321}:4321"
 {%- endif %}

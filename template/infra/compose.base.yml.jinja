@@ -53,19 +53,6 @@ services:
         condition: service_started
 {%- endif %}
 {%- endif %}
-{%- if 'notifications' in modules %}
-  notifications_worker:
-    image: ${NOTIFICATIONS_WORKER_IMAGE:-{{ project_slug }}-notifications:latest}
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    build:
-      context: ..
-      dockerfile: services/notifications_worker/Dockerfile
-    env_file:
-      - ../.env
-    depends_on:
-      redis:
-        condition: service_healthy
-{%- endif %}
 {%- if 'backend' in modules %}
 
   db:
@@ -83,15 +70,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
 {%- endif %}
-{%- if 'frontend' in modules %}
-
-  frontend:
-    image: ${FRONTEND_IMAGE:-{{ project_slug }}-frontend:latest}
-    build:
-      context: ../services/frontend
-      dockerfile: Dockerfile
-{%- endif %}
-{%- if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %}
+{%- if 'backend' in modules or 'tg_bot' in modules %}
 
   redis:
     image: redis:7-alpine

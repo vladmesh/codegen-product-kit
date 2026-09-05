@@ -16,14 +16,3 @@ services:
       redis: service_healthy
     profiles:
       - tg
-  - name: frontend
-    type: node
-    description: >
-      Astro and React frontend placeholder served by the standard Compose layers on port 4321.
-  - name: notifications_worker
-    type: python-faststream
-    description: >
-      Service for notifications (email, telegram).
-    dev_template: false
-    depends_on:
-      redis: service_healthy

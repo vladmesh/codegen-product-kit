@@ -22,18 +22,3 @@ services:
 {%- endif %}
       redis: service_healthy
 {%- endif %}
-{%- if 'frontend' in modules %}
-  - name: frontend
-    type: node
-    description: >
-      Astro and React frontend placeholder served by the standard Compose layers on port 4321.
-{%- endif %}
-{%- if 'notifications' in modules %}
-  - name: notifications_worker
-    type: python-faststream
-    description: >
-      Service for notifications (email, telegram).
-    dev_template: true
-    depends_on:
-      redis: service_healthy
-{%- endif %}

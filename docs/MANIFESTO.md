@@ -21,10 +21,12 @@ We do not tolerate technical debt. The pipeline is designed to fail fast and fai
 
 ### 4. Everything is a Template
 Uniqueness is a bug.
-- **Batteries Included:** Services are modular units (containers) that plug into the system.
+- **Batteries Included:** Reusable components plug into products through explicit contracts. The
+  planned delivery forms are shared platform services, product-owned containers, and in-process
+  packages; the package protocol is not implemented yet.
 - **No "Special Snowflakes":** If a service needs a custom build process, it probably shouldn't exist in this repo.
-- **Runtime containers are the boundary:** Services run in Docker; deterministic developer tooling
-  runs from project-owned uv environments.
+- **Declared runtime boundaries:** Current application services run in Docker; future catalog
+  components will declare their delivery form instead of leaving that choice to the assembly agent.
 
 ### 5. Language Agnosticism as a Goal
 

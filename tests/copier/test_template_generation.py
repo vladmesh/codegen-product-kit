@@ -48,6 +48,26 @@ def test_root_infra_readme_points_to_template_contract() -> None:
     assert "worker-mode\ncontract" in root_readme
 
 
+def test_template_exposes_only_supported_product_shapes() -> None:
+    """The kit must not advertise removed placeholder components."""
+    copier_config = Path("copier.yml").read_text()
+    registry = Path("services.yml").read_text()
+
+    for removed_component in ("frontend", "notifications", "notifications_worker"):
+        assert removed_component not in copier_config
+    assert "name: frontend" not in registry
+    assert "name: notifications_worker" not in registry
+
+
+@pytest.mark.parametrize("removed_component", ["frontend", "notifications"])
+def test_removed_component_selection_is_rejected(tmp_path: Path, removed_component: str) -> None:
+    """Legacy selections must fail instead of producing an incomplete project."""
+    _, result = run_copier_command(tmp_path, removed_component)
+
+    assert result.returncode != 0
+    assert "Modules must contain only: backend, tg_bot" in (result.stdout + result.stderr)
+
+
 def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     """Template CI should typecheck one backend project from the exact revision."""
     workflow = Path(".github/workflows/test-template.yml").read_text()
@@ -171,11 +191,8 @@ class TestBackendOnlyGeneration:
         assert "sslmode=require" not in backend_env["ASYNC_DATABASE_URL"]
 
         tg_bot = compose["services"]["tg_bot"]
-        notifications_worker = compose["services"]["notifications_worker"]
         assert tg_bot["env_file"] == ["../.env"]
-        assert notifications_worker["env_file"] == ["../.env"]
         assert "REDIS_URL" not in tg_bot.get("environment", {})
-        assert "REDIS_URL" not in notifications_worker.get("environment", {})
 
         assert "full URLs do not replace those service" in infra_readme
         assert "`REDIS_URL=... docker" in infra_readme
@@ -408,14 +425,12 @@ class TestBackendWithTgBotGeneration:
 
 
 class TestFullStackGeneration:
-    """Test generation with all modules."""
+    """Test generation with both supported modules."""
 
     def test_all_services_exist(self, project_fullstack: Path):
         """All services should exist."""
         assert (project_fullstack / "services" / "backend").exists()
         assert (project_fullstack / "services" / "tg_bot").exists()
-        assert (project_fullstack / "services" / "notifications_worker").exists()
-        assert (project_fullstack / "services" / "frontend").exists()
 
     def test_no_jinja_artifacts(self, project_fullstack: Path):
         """No Jinja artifacts in full generation."""
@@ -430,14 +445,12 @@ class TestFullStackGeneration:
         services = {service["name"]: service for service in content["services"]}
         assert services["backend"]["type"] == "python-fastapi"
         assert services["tg_bot"]["type"] == "python-faststream"
-        assert services["notifications_worker"]["type"] == "python-faststream"
-        assert services["frontend"]["type"] == "node"
 
     def test_deptry_uses_dependency_groups_without_optional_group_overrides(
         self, project_fullstack: Path
     ):
         """deptry should not look for dev deps in missing optional-dependencies groups."""
-        for service in ("backend", "tg_bot", "notifications_worker"):
+        for service in ("backend", "tg_bot"):
             pyproject = tomllib.loads(
                 (project_fullstack / "services" / service / "pyproject.toml").read_text()
             )
@@ -448,23 +461,6 @@ class TestFullStackGeneration:
             assert "pep_621_dev_dependency_groups" not in deptry_config
             assert "optional_dependencies_dev_groups" not in deptry_config
 
-    def test_notifications_import_before_setup_has_clear_error(self, project_fullstack: Path):
-        """Fresh projects should point to setup instead of leaking an import path."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import services.notifications_worker.src.main",
-            ],
-            cwd=project_fullstack,
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode != 0
-        assert "run `make setup` from the project root" in result.stderr
-
-
 class TestEnvExample:
     """Test .env.example generation."""
 
@@ -473,8 +469,6 @@ class TestEnvExample:
         [
             "project_backend",
             "project_standalone",
-            "project_notifications",
-            "project_frontend",
             "project_backend_tg_bot",
             "project_fullstack",
         ],
@@ -534,11 +528,7 @@ class TestModuleExclusion:
         )
 
         log_output = f"{result.stdout}\n{result.stderr}".replace("\\", "/")
-        unselected_paths = (
-            "services/backend",
-            "services/frontend",
-            "services/notifications_worker",
-        )
+        unselected_paths = ("services/backend",)
 
         for path in unselected_paths:
             assert not (output / path).exists()
@@ -594,21 +584,9 @@ class TestModuleExclusion:
             f"Copier update failed:\nstdout: {update_result.stdout}\nstderr: {update_result.stderr}"
         )
 
-    def test_notifications_excluded_when_not_selected(self, tmp_path: Path):
-        """notifications_worker should not exist when not in modules."""
-        output = run_copier(tmp_path, "backend,tg_bot")
-        assert not (output / "services" / "notifications_worker").exists()
-        assert "notifications_worker" not in (output / "services.yml").read_text()
-
-    def test_frontend_excluded_when_not_selected(self, tmp_path: Path):
-        """frontend should not exist when not in modules."""
-        output = run_copier(tmp_path, "backend,notifications")
-        assert not (output / "services" / "frontend").exists()
-        assert "frontend" not in (output / "services.yml").read_text()
-
     def test_tg_bot_excluded_when_not_selected(self, tmp_path: Path):
         """tg_bot should not exist when not in modules."""
-        output = run_copier(tmp_path, "backend,frontend")
+        output = run_copier(tmp_path, "backend")
         assert not (output / "services" / "tg_bot").exists()
         assert "tg_bot" not in (output / "services.yml").read_text()
 
@@ -623,14 +601,6 @@ class TestComposeServices:
         compose = yaml.safe_load((project_backend / "infra" / "compose.base.yml").read_text())
         assert "redis" in compose.get("services", {})
 
-    def test_redis_with_notifications(self, tmp_path: Path):
-        """Redis should be included with notifications module."""
-        import yaml
-
-        output = run_copier(tmp_path, "backend,notifications")
-        compose = yaml.safe_load((output / "infra" / "compose.base.yml").read_text())
-        assert "redis" in compose["services"]
-
     def test_fullstack_compose_services(self, project_fullstack: Path):
         """All selected services should be in compose."""
         import yaml
@@ -638,7 +608,6 @@ class TestComposeServices:
         compose = yaml.safe_load((project_fullstack / "infra" / "compose.base.yml").read_text())
         assert "backend" in compose["services"]
         assert "tg_bot" in compose["services"]
-        assert "notifications_worker" in compose["services"]
         assert "redis" in compose["services"]
         assert "db" in compose["services"]
 
@@ -718,11 +687,9 @@ class TestComposeServices:
         assert '"${BACKEND_PORT:-8000}:8000"' in compose_text
         assert '"${POSTGRES_HOST_PORT:-5432}:5432"' in compose_text
         assert '"${REDIS_HOST_PORT:-6379}:6379"' in compose_text
-        assert '"${FRONTEND_PORT:-4321}:4321"' in compose_text
         assert compose_local["services"]["backend"]["ports"] == ["${BACKEND_PORT:-8000}:8000"]
         assert compose_local["services"]["db"]["ports"] == ["${POSTGRES_HOST_PORT:-5432}:5432"]
         assert compose_local["services"]["redis"]["ports"] == ["${REDIS_HOST_PORT:-6379}:6379"]
-        assert compose_local["services"]["frontend"]["ports"] == ["${FRONTEND_PORT:-4321}:4321"]
 
     def test_prod_compose_publishes_backend_port(self, project_backend_tg_bot: Path):
         """Prod deploy (base+prod, no local) must publish backend on the host."""
@@ -756,7 +723,6 @@ class TestComposeServices:
         service_paths = {
             "backend": "/app/services/backend/.venv",
             "tg_bot": "/app/services/tg_bot/.venv",
-            "notifications_worker": "/app/services/notifications_worker/.venv",
         }
 
         for service_name, venv_path in service_paths.items():
@@ -947,7 +913,7 @@ class TestIntegration:
         if shutil.which("docker") is None:
             pytest.skip("docker not available")
 
-        output = run_copier(tmp_path, "backend,notifications")
+        output = run_copier(tmp_path, "backend,tg_bot")
         shutil.copy(output / ".env.example", output / ".env")
         result = subprocess.run(  # noqa: S603, S607
             [
@@ -1151,7 +1117,7 @@ class TestIntegration:
         if shutil.which("docker") is None:
             pytest.skip("docker not available")
 
-        output = run_copier(tmp_path, "backend,tg_bot,notifications,frontend")
+        output = run_copier(tmp_path, "backend,tg_bot")
         shutil.copy(output / ".env.example", output / ".env")
         result = subprocess.run(  # noqa: S603, S607
             [
@@ -1502,24 +1468,18 @@ class TestWorkflowGeneration:
         ci_yml = (project_backend / ".github" / "workflows" / "ci.yml").read_text()
         assert "id: backend" in ci_yml
         assert "id: tg-bot" not in ci_yml
-        assert "id: frontend" not in ci_yml
-        assert "id: notifications-worker" not in ci_yml
 
     def test_full_stack_workflow_matrix(self, project_fullstack: Path):
         """Full stack should have all services in CI matrix."""
         ci_yml = (project_fullstack / ".github" / "workflows" / "ci.yml").read_text()
         assert "id: backend" in ci_yml
         assert "id: tg-bot" in ci_yml
-        assert "id: frontend" in ci_yml
-        assert "id: notifications-worker" in ci_yml
 
     def test_partial_modules_workflow_matrix(self, project_backend_tg_bot: Path):
         """Partial module selection should reflect in CI matrix."""
         ci_yml = (project_backend_tg_bot / ".github" / "workflows" / "ci.yml").read_text()
         assert "id: backend" in ci_yml
         assert "id: tg-bot" in ci_yml
-        assert "id: frontend" not in ci_yml
-        assert "id: notifications-worker" not in ci_yml
 
     def test_workflow_runs_dev_smoke(self, project_backend_tg_bot: Path):
         """CI should exercise dev compose, not only integration compose."""
@@ -1643,7 +1603,7 @@ class TestCIWorkflowSimulation:
         compose_files = [
             f
             for f in (project_dir / "infra").glob("compose.*.yml")
-            if "prod" not in f.name and "frontend" not in f.name
+            if "prod" not in f.name
         ]
 
         for compose_path in compose_files:
@@ -1739,9 +1699,6 @@ class TestCIWorkflowSimulation:
             "backend",
             "tg_bot",
             "backend,tg_bot",
-            "backend,notifications",
-            "backend,tg_bot,notifications",
-            "backend,tg_bot,notifications,frontend",
         ],
     )
     def test_ci_simulation_all_module_combinations(self, tmp_path: Path, modules: str):
@@ -1797,7 +1754,7 @@ class TestDockerReadiness:
         assert lifespan.exists(), "lifespan.py not found"
         content = lifespan.read_text()
         assert "get_broker" in content, (
-            "Fullstack lifespan.py should import get_broker for tg_bot/notifications."
+            "Combined lifespan.py should import get_broker for tg_bot."
         )
 
     def test_compose_prod_config_valid(self, tmp_path: Path):
@@ -1805,7 +1762,7 @@ class TestDockerReadiness:
         if shutil.which("docker") is None:
             pytest.skip("docker not available")
 
-        output = run_copier(tmp_path, "backend,tg_bot,notifications,frontend")
+        output = run_copier(tmp_path, "backend,tg_bot")
         shutil.copy(output / ".env.example", output / ".env")
 
         # Set required IMAGE variables for prod compose
@@ -1813,8 +1770,6 @@ class TestDockerReadiness:
             **os.environ,
             "BACKEND_IMAGE": "test:latest",
             "TG_BOT_IMAGE": "test:latest",
-            "NOTIFICATIONS_WORKER_IMAGE": "test:latest",
-            "FRONTEND_IMAGE": "test:latest",
         }
 
         result = subprocess.run(  # noqa: S603, S607
@@ -2167,7 +2122,7 @@ class TestSlowIntegration:
         assert lint_result.returncode != 0, "make lint should report the dirty user file"
         assert "S105" in (lint_result.stdout + lint_result.stderr)
 
-    @pytest.mark.parametrize("modules", ["backend", "tg_bot", "notifications", "frontend"])
+    @pytest.mark.parametrize("modules", ["backend", "tg_bot"])
     def test_make_lint_after_setup(self, tmp_path: Path, modules: str):
         """make lint should pass after make setup in generated project."""
         output = run_copier(tmp_path, modules)
@@ -2256,7 +2211,6 @@ class TestSlowIntegration:
         [
             ("backend", "backend,tg_bot"),
             ("tg_bot", "backend,tg_bot"),
-            ("notifications_worker", "backend,tg_bot,notifications"),
         ],
     )
     def test_docker_entrypoint_imports(self, tmp_path: Path, service: str, modules: str):
