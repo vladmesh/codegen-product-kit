@@ -11,7 +11,7 @@ database:
   schema: synthetic
   migrations: synthetic_package:migrations
 events:
-  publishes: [synthetic.ready]
+  publishes: [synthetic.ready, synthetic.requested]
   consumes: [synthetic.requested]
   messages:
     synthetic.ready:

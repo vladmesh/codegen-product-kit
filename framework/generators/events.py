@@ -1,9 +1,9 @@
 """Events generator for FastStream publishers."""
 
 from pathlib import Path
-import re
 
 from framework.generators.base import BaseGenerator
+from framework.spec.events import event_identifier
 
 
 class EventsGenerator(BaseGenerator):
@@ -24,12 +24,9 @@ class EventsGenerator(BaseGenerator):
         imports: set[str] = set()
 
         for event in self.specs.events.events:
-            identifier = re.sub(r"\W", "_", event.name)
-            if not identifier.isidentifier():
-                identifier = f"_{identifier}"
             event_ctx = {
                 "name": event.name,
-                "identifier": identifier,
+                "identifier": event_identifier(event.name),
                 "message_model": event.message,
                 "subject": event.name.replace("_", "."),  # user_created -> user.created
             }

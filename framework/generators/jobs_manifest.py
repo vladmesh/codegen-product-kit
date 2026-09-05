@@ -9,32 +9,15 @@ from framework.generators.base import BaseGenerator
 
 
 class JobsManifestGenerator(BaseGenerator):
-    """Emit one deterministic, backend-consumable job declaration registry."""
+    """Render the loader's deterministic product job registry."""
 
     def generate(self) -> list[Path]:
-        schemas: dict[str, object] = {}
-        sources: dict[str, str] = {}
+        schemas = self.specs.job_schemas
+        sources = self.specs.job_schema_sources
         providers: dict[str, list[str]] = {}
         for service_name, manifest in sorted(self.specs.manifests.items()):
-            for name, schema in sorted(manifest.jobs_schema["properties"].items()):
-                if name in schemas:
-                    msg = f"Job '{name}' is declared by both '{sources[name]}' and '{service_name}'"
-                    raise ValueError(msg)
-                schemas[name] = schema
-                sources[name] = service_name
             for capability in sorted(manifest.provides):
                 providers.setdefault(capability, []).append(service_name)
-        for package in self.specs.packages:
-            source = f"package:{package.name}"
-            prefix = package.name.replace("-", "_")
-            for local_name, schema in sorted(package.manifest.jobs_schema["properties"].items()):
-                name = f"{prefix}.{local_name}"
-                if name in schemas:
-                    raise ValueError(
-                        f"Job '{name}' is declared by both '{sources[name]}' and '{source}'"
-                    )
-                schemas[name] = schema
-                sources[name] = source
 
         for service_dir in sorted((self.repo_root / "services").glob("*/")):
             if service_dir.name != "backend":

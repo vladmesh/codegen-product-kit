@@ -9,34 +9,11 @@ from framework.generators.base import BaseGenerator
 
 
 class SettingsManifestGenerator(BaseGenerator):
-    """Emit one deterministic, backend-consumable settings schema registry."""
+    """Render the loader's deterministic product settings registry."""
 
     def generate(self) -> list[Path]:
-        schemas: dict[str, object] = {}
-        sources: dict[str, str] = {}
-        for service_name, manifest in sorted(self.specs.manifests.items()):
-            properties = manifest.settings_schema["properties"]
-            for key, schema in sorted(properties.items()):
-                if key in schemas:
-                    msg = (
-                        f"Setting '{key}' is declared by both '{sources[key]}' and '{service_name}'"
-                    )
-                    raise ValueError(msg)
-                schemas[key] = schema
-                sources[key] = service_name
-        for package in self.specs.packages:
-            source = f"package:{package.name}"
-            prefix = package.name.replace("-", "_")
-            for local_name, schema in sorted(
-                package.manifest.settings_schema["properties"].items()
-            ):
-                key = f"{prefix}.{local_name}"
-                if key in schemas:
-                    raise ValueError(
-                        f"Setting '{key}' is declared by both '{sources[key]}' and '{source}'"
-                    )
-                schemas[key] = schema
-                sources[key] = source
+        schemas = self.specs.settings_schemas
+        sources = self.specs.settings_schema_sources
 
         for service_dir in sorted((self.repo_root / "services").glob("*/")):
             if service_dir.name != "backend":

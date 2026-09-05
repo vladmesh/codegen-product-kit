@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 import yaml
 
-from framework.spec.events import EventSpec, EventsSpec
+from framework.spec.events import EventSpec, EventsSpec, event_identifier
 from framework.spec.manifests import ServiceManifest, parse_service_manifest
 from framework.spec.models import ModelsSpec
 from framework.spec.operations import DomainSpec, unwrap_list
@@ -48,6 +48,10 @@ class AllSpecs:
     manifests: dict[str, ServiceManifest] = field(default_factory=dict)
     packages: list[ActivePackage] = field(default_factory=list)
     package_models: dict[str, dict[str, Any]] = field(default_factory=dict)
+    settings_schemas: dict[str, object] = field(default_factory=dict)
+    settings_schema_sources: dict[str, str] = field(default_factory=dict)
+    job_schemas: dict[str, object] = field(default_factory=dict)
+    job_schema_sources: dict[str, str] = field(default_factory=dict)
 
 
 def load_yaml_file(file_path: Path) -> dict[str, Any]:
@@ -260,36 +264,45 @@ def _claim_name(
     owner: str,
     owners: dict[str, str],
     errors: list[str],
-) -> None:
+) -> bool:
     """Record one exclusive name or report both declarers."""
 
     previous = owners.get(name)
     if previous is not None:
         errors.append(f"{label} {name!r} is declared by both {previous!r} and {owner!r}")
-    else:
-        owners[name] = owner
+        return False
+    owners[name] = owner
+    return True
 
 
 def _merge_package_events(
     specs: AllSpecs,
     package: ActivePackage,
     event_owners: dict[str, str],
+    event_identifier_owners: dict[str, str],
+    event_bindings: dict[str, tuple[str, dict[str, Any] | None, str]],
     model_owners: dict[str, str],
     errors: list[str],
 ) -> None:
-    """Merge one package's event names and inline message schemas."""
+    """Merge one package's declarations; consumed names remain references."""
 
     owner = f"package:{package.name}"
-    event_names = package.manifest.events.publishes + package.manifest.events.consumes
-    for event_name in dict.fromkeys(event_names):
+    for event_name in package.manifest.events.publishes:
         message = package.manifest.events.messages[event_name]
-        if event_name in event_owners:
-            _claim_name("Event", event_name, owner, event_owners, errors)
-        else:
-            event_owners[event_name] = owner
+        claimed = _claim_name("Event", event_name, owner, event_owners, errors)
+        identifier_owner = f"{owner} event {event_name!r}"
+        _claim_name(
+            "Event identifier",
+            event_identifier(event_name),
+            identifier_owner,
+            event_identifier_owners,
+            errors,
+        )
+        if claimed:
             specs.events.events.append(
                 EventSpec(name=event_name, message=message.model, publish=True)
             )
+            event_bindings[event_name] = (message.model, message.schema_data, owner)
         previous_model = model_owners.get(message.model)
         if previous_model is not None and previous_model != owner:
             errors.append(
@@ -305,7 +318,39 @@ def _merge_package_events(
             )
 
 
+def _validate_package_event_consumers(
+    packages: list[ActivePackage],
+    event_bindings: dict[str, tuple[str, dict[str, Any] | None, str]],
+    errors: list[str],
+) -> None:
+    """Bind consumed event references to one existing published declaration."""
+
+    for package in packages:
+        consumer = f"package:{package.name}"
+        for event_name in package.manifest.events.consumes:
+            message = package.manifest.events.messages[event_name]
+            binding = event_bindings.get(event_name)
+            if binding is None:
+                errors.append(
+                    f"{consumer!r} consumes event {event_name!r}, but no active package or "
+                    "shared/spec/events.yaml declaration publishes it"
+                )
+                continue
+            declared_model, declared_schema, declarer = binding
+            referenced_schema = message.schema_data
+            comparable_schema = dict(declared_schema or {})
+            if comparable_schema.get("title") == declared_model:
+                comparable_schema.pop("title")
+            if declared_model != message.model or comparable_schema != referenced_schema:
+                errors.append(
+                    f"Event {event_name!r} consumed by {consumer!r} binds message schema "
+                    f"{message.model!r}, conflicting with {declared_model!r} declared by "
+                    f"{declarer!r}"
+                )
+
+
 def _merge_package_names(
+    specs: AllSpecs,
     package: ActivePackage,
     setting_owners: dict[str, str],
     job_owners: dict[str, str],
@@ -337,7 +382,15 @@ def _merge_package_names(
         ("Job", package.manifest.jobs_schema, job_owners),
     ):
         for local_name in schema["properties"]:
-            _claim_name(label, f"{prefix}.{local_name}", owner, owners, errors)
+            name = f"{prefix}.{local_name}"
+            if not _claim_name(label, name, owner, owners, errors):
+                continue
+            if label == "Setting":
+                specs.settings_schemas[name] = schema["properties"][local_name]
+                specs.settings_schema_sources[name] = owner
+            else:
+                specs.job_schemas[name] = schema["properties"][local_name]
+                specs.job_schema_sources[name] = owner
 
 
 def _validate_and_merge_packages(
@@ -346,17 +399,36 @@ def _validate_and_merge_packages(
     """Merge package contracts once and return named ownership violations."""
 
     errors: list[str] = []
-    setting_owners = {
-        key: service
-        for service, manifest in specs.manifests.items()
-        for key in manifest.settings_schema["properties"]
-    }
-    job_owners = {
-        key: service
-        for service, manifest in specs.manifests.items()
-        for key in manifest.jobs_schema["properties"]
-    }
-    event_owners = {event.name: "shared/spec/events.yaml" for event in specs.events.events}
+    setting_owners: dict[str, str] = {}
+    job_owners: dict[str, str] = {}
+    specs.settings_schemas = {}
+    specs.settings_schema_sources = {}
+    specs.job_schemas = {}
+    specs.job_schema_sources = {}
+    for service, manifest in sorted(specs.manifests.items()):
+        for name, schema in sorted(manifest.settings_schema["properties"].items()):
+            if _claim_name("Setting", name, service, setting_owners, errors):
+                specs.settings_schemas[name] = schema
+                specs.settings_schema_sources[name] = service
+        for name, schema in sorted(manifest.jobs_schema["properties"].items()):
+            if _claim_name("Job", name, service, job_owners, errors):
+                specs.job_schemas[name] = schema
+                specs.job_schema_sources[name] = service
+    event_owners: dict[str, str] = {}
+    event_identifier_owners: dict[str, str] = {}
+    model_schemas = specs.models.to_json_schema()["definitions"]
+    event_bindings: dict[str, tuple[str, dict[str, Any] | None, str]] = {}
+    for event in specs.events.events:
+        owner = "shared/spec/events.yaml"
+        _claim_name("Event", event.name, owner, event_owners, errors)
+        _claim_name(
+            "Event identifier",
+            event_identifier(event.name),
+            f"{owner} event {event.name!r}",
+            event_identifier_owners,
+            errors,
+        )
+        event_bindings[event.name] = (event.message, model_schemas.get(event.message), owner)
     model_owners = dict.fromkeys(specs.models.get_model_names(), "shared/spec/models.yaml")
     database_owners: dict[str, str] = {}
     capability_owners = {
@@ -373,6 +445,7 @@ def _validate_and_merge_packages(
 
     for package in specs.packages:
         _merge_package_names(
+            specs,
             package,
             setting_owners,
             job_owners,
@@ -381,7 +454,16 @@ def _validate_and_merge_packages(
             capability_owners,
             errors,
         )
-        _merge_package_events(specs, package, event_owners, model_owners, errors)
+        _merge_package_events(
+            specs,
+            package,
+            event_owners,
+            event_identifier_owners,
+            event_bindings,
+            model_owners,
+            errors,
+        )
+    _validate_package_event_consumers(specs.packages, event_bindings, errors)
     return errors
 
 
@@ -399,23 +481,23 @@ def load_specs(repo_root: Path, package_site_packages: Path | None = None) -> Al
     """
     services_dir = repo_root / "services"
     manifests = _load_service_manifests(services_dir)
-    manifest_errors = validate_manifest_settings(manifests) + validate_manifest_jobs(manifests)
-    if manifest_errors:
-        message = "Manifest settings validation failed:\n" + "\n".join(
-            f"  - {error}" for error in manifest_errors
-        )
-        raise SpecValidationError(message)
-
     # 1. Load models (required)
     shared_spec_dir = repo_root / "shared" / "spec"
     models_file = shared_spec_dir / "models.yaml"
 
     if not models_file.exists():
-        return AllSpecs(
+        empty_specs = AllSpecs(
             models=ModelsSpec(models={}),
             events=EventsSpec(events=[]),
             manifests=manifests,
         )
+        manifest_errors = _validate_and_merge_packages(empty_specs)
+        if manifest_errors:
+            raise SpecValidationError(
+                "Package contract merge failed:\n"
+                + "\n".join(f"  - {error}" for error in manifest_errors)
+            )
+        return empty_specs
 
     models = load_models(models_file)
 

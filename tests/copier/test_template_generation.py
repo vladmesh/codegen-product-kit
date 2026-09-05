@@ -1278,6 +1278,11 @@ class TestIntegration:
         assert "ps:" in makefile
         assert "$(DOCKER_COMPOSE) $(COMPOSE_DEV) ps" in makefile
         assert "dev-smoke:" in makefile
+        assert (
+            "ruff format --check --exclude "
+            "'*.md,.venv/**,**/.venv/**,services/**/migrations/**' ." in makefile
+        )
+        assert "ruff format --check --extend-exclude '*.md' ." not in makefile
 
     def test_makefile_passes_checkout_owner_to_integration_compose(self, project_backend: Path):
         """Local integration runs derive the same ownership contract as CI."""

@@ -71,7 +71,7 @@ setup:
 	@echo ">> Setup complete!"
 
 lint:
-	$(VENV)/ruff format --check --extend-exclude '*.md' .
+	$(VENV)/ruff format --check --exclude '*.md,.venv/**,**/.venv/**,services/**/migrations/**' .
 	$(VENV)/ruff check .
 	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude 'tests/*,services/*/tests/*' .
 	$(PYTHON) -c "from framework.spec.loader import validate_specs_cli; from framework.lib.env import get_repo_root; ok, msg = validate_specs_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"

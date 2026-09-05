@@ -110,16 +110,28 @@ backend package environment and names listed in the backend manifest. Generation
 once, feeds it to every contract generator, and records package names, versions, and manifest
 digests in
 `codegen_kit._active_packages`; runtime refuses a changed manifest or wheel until generation is run
-again. The backend site-packages path is explicit across the root-tooling/backend-environment split.
+again. Installing or changing a package is therefore incomplete until the product contract is
+regenerated. The backend site-packages path is explicit across the root-tooling/backend-environment
+split.
 
 Package settings and jobs are emitted as `<normalized-package-name>.<local-name>`, where hyphens are
-normalized to underscores. The existing service registries own duplicate detection, so collisions
-between a package and a service, or between normalized package prefixes, name both declarers.
-Package event names remain their declared stream names. Each published or consumed event has one
-`events.messages` entry containing its generated model name and inline JSON Schema. Event-name and
-message-model collisions with product or package declarations are refused before generation writes
-the merged schemas and publishers. A service domain may subscribe to the package event and refer to
-its model without editing `shared/spec/events.yaml` or `shared/spec/models.yaml`.
+normalized to underscores. The loader's shared ownership registry is the single duplicate-refusal
+mechanism for service and package declarations; generators render its already-merged settings and
+jobs registries. Collisions between a package and a service, or between normalized package prefixes,
+name both declarers. Package event names remain their declared stream names, while their generated
+Python publisher identifiers are normalized and claimed separately so names such as `order_placed`
+and `order.placed` cannot silently produce the same function. Each published or consumed event has
+one `events.messages` entry containing its generated model name and inline JSON Schema. A published
+event is a declaration; a consumed event is a reference that must bind to an existing declaration in
+`shared/spec/events.yaml` or an active package with the same message schema. Conflicting bindings and
+consumed events with no publisher are refused with both relevant package or product sides named. A
+service domain may subscribe to the package event and refer to its model without editing
+`shared/spec/events.yaml` or `shared/spec/models.yaml`.
+
+The generated product's `make lint` deliberately overrides Ruff's configured exclusions for its
+format check, so generated Python files are checked for canonical formatting as rendered while
+virtual environments and migration revisions remain excluded. Generated directories remain excluded
+from Ruff's diagnostic lint rules.
 
 Package-provided interfaces must have one owner in the active set, and every required interface must
 already have an active provider. Package environment requirements are merged into

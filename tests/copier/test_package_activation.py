@@ -552,8 +552,8 @@ def test_package_contract_and_migrations_against_real_postgres(
             from redis.asyncio import Redis
 
             from services.backend.src.core.db import async_engine
-            from shared.generated.events import get_broker
-            from shared.generated.schemas import SyntheticReady
+            from shared.generated.events import get_broker, publish_synthetic_requested
+            from shared.generated.schemas import SyntheticReady, SyntheticRequested
             from synthetic_package import announce_ready, orm_base, session
 
 
@@ -616,7 +616,12 @@ def test_package_contract_and_migrations_against_real_postgres(
                         SyntheticReady(package_id="installed-package")
                     )
                     assert envelope.payload.package_id == "installed-package"
+                    requested = await publish_synthetic_requested(
+                        SyntheticRequested(request_id="published-consumed-event")
+                    )
+                    assert requested.payload.request_id == "published-consumed-event"
                     assert await redis.xlen("synthetic.ready") >= 1
+                    assert await redis.xlen("synthetic.requested") >= 1
                 finally:
                     await broker.close()
                     await redis.aclose()
