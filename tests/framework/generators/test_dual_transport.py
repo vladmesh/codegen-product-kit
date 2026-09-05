@@ -31,13 +31,10 @@ class TestDualTransport:
         router_file = next(path for path in generated_files if path.name == "users.py")
         content = router_file.read_text()
 
-        assert "from faststream.redis import RedisBroker" in content
-
-        assert "get_broker: Callable[[], RedisBroker]," in content
-
-        assert "broker: RedisBroker = Depends(get_broker)" in content
-
-        assert 'await broker.publish(result, "user.created")' in content
+        assert "from shared.generated.events import publish_event" in content
+        assert "RedisBroker" not in content
+        assert "get_broker" not in content
+        assert 'await publish_event("user.created", result)' in content
         assert "await session.commit()" not in content
 
     def test_router_skips_broker_if_no_events(self, tmp_path):

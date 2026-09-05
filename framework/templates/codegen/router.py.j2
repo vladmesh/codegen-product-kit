@@ -19,7 +19,7 @@ from fastapi import (
 {% endif %}
 )
 {% if needs_broker %}
-from faststream.redis import RedisBroker
+from shared.generated.events import publish_event
 {% endif %}
 from sqlalchemy.ext.asyncio import AsyncSession
 {% if param_type_imports %}
@@ -44,9 +44,6 @@ def create_router(
     *,
     get_session: Callable[..., object],
     get_controller: Callable[[], {{ protocol_name }}],
-{% if needs_broker %}
-    get_broker: Callable[[], RedisBroker],
-{% endif %}
 ) -> APIRouter:
     router = APIRouter(
         prefix="{{ router_prefix }}",
@@ -70,9 +67,6 @@ def create_router(
 {% endif %}
         session: AsyncSession = Depends(get_session),  # noqa: B008
         controller: {{ protocol_name }} = Depends(get_controller),  # noqa: B008
-{% if handler.publish_channel %}
-        broker: RedisBroker = Depends(get_broker),  # noqa: B008
-{% endif %}
     ) -> {{ handler.computed_return_type }}:
 {% if handler.output_model %}
         result = await controller.{{ handler.name }}(
@@ -88,7 +82,7 @@ def create_router(
 {% endif %}
         )
 {% if handler.publish_channel %}
-        await broker.publish(result, "{{ handler.publish_channel }}")
+        await publish_event("{{ handler.publish_channel }}", result)
 {% endif %}
 {% if handler.output_model %}
         return result

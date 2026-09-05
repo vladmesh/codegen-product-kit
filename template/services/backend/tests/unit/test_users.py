@@ -199,10 +199,11 @@ async def test_grant_publishes_user_granted(client: AsyncClient) -> None:
     publish.assert_awaited_once()
     await_args = publish.await_args
     assert await_args is not None
-    event, channel = await_args.args
-    assert channel == "user_granted"
-    assert event.user_id == granted["user_id"]
-    assert event.status == "active"
+    (event,) = await_args.args
+    assert await_args.kwargs == {"stream": "user_granted"}
+    assert event.schema_version == 1
+    assert event.payload.user_id == granted["user_id"]
+    assert event.payload.status == "active"
 
 
 @pytest.mark.asyncio

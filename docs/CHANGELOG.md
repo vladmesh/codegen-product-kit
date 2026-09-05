@@ -2,6 +2,12 @@
 
 ## 2026-09-05
 
+- Product events now use Redis Streams with per-service consumer groups, automatic pending-message
+  reclamation, generated versioned envelopes, and a PostgreSQL-backed idempotent-consumer helper.
+- The kit's template workflow now builds the generated backend development image and runs the real
+  Postgres/Redis durable-event integration suite.
+- Root setup now installs locked project metadata with exact `ruff` and
+  `datamodel-code-generator` pins.
 - Generated products resolve the installable `codegen-kit-tooling` distribution from an exact Git
   commit recorded in the root lock. The Python import remains `framework`.
 - Copier now creates that lock as a trusted generation task. The framework source copy and its

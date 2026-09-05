@@ -17,8 +17,7 @@ help:
 	@echo "  make test-all              - Run all tests"
 
 setup:
-	uv venv
-	uv pip install ruff pytest pytest-cov copier "datamodel-code-generator[http]>=0.25" jsonschema pyyaml jinja2 pydantic
+	uv sync
 
 lint:
 	$(VENV)/ruff check --no-cache framework/ tests/
