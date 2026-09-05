@@ -1,5 +1,24 @@
 # Framework contracts
 
+## Generated-product tooling
+
+The repository root is the only source of the `codegen-kit-tooling` distribution. Its installed
+Python package remains `framework`. Copier renders an exact Git commit requirement into each
+product's root `pyproject.toml` and runs `uv lock`, so setup, generation, spec validation,
+controller checks, and tooling tests all use the committed resolution. The lock-generation task is
+why project bootstrap requires Copier's `--trust` flag.
+
+The kit's template workflow passes the pull request head repository URL and head SHA as Copier data.
+That commit is reachable from the contributor's remote, unlike GitHub's synthetic merge commit; push
+runs use the current repository and commit. This override remains an exact Git requirement and is
+used only while generating the workflow candidate. Ordinary users receive the resolved template
+commit in the same requirement position.
+
+Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
+`dev` target installs the root tooling lock for integration generation; its final `runtime` target
+copies only the service environment and application sources. An audit of `template/services/`,
+`template/shared/`, and generated Python sources found no runtime `framework` import.
+
 ## Core settings v1
 
 Every backend generated from this template provides the versioned core settings contract:

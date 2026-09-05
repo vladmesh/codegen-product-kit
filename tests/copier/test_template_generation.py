@@ -9,7 +9,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tomllib
 
 import pytest
@@ -20,6 +19,7 @@ from tests.copier.conftest import (
     check_no_jinja_artifacts,
     run_copier,
     run_copier_command,
+    template_source,
 )
 
 
@@ -76,18 +76,63 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     assert "uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a" in workflow
     assert 'version: "0.11.29"' in workflow
     assert (
-        'checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"' in workflow
+        'checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"'
+        in workflow
     )
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "--data modules=backend" in workflow
+    assert "--data tooling_requirement=" in workflow
+    assert "github.event.pull_request.head.sha || github.sha" in workflow
     assert "matrix:" not in workflow
-    assert "make setup && make typecheck" in workflow
+    assert "make generate-from-spec" in workflow
+    assert "make validate-specs" in workflow
+    assert "make lint" in workflow
+    assert "make typecheck" in workflow
+    assert "make tests" in workflow
+    assert 'test -z "$(git status --porcelain)"' in workflow
     assert "Smoke generated pre-commit hook" in workflow
     assert "git init" in workflow
     makefile = Path("template/Makefile.jinja").read_text()
     assert '"$$svc/.venv/bin/mypy" "$$svc"' in makefile
     assert 'targets="$$svc/src"' not in makefile
     assert "generated/" not in Path("template/mypy.ini.jinja").read_text()
+
+
+def test_default_tooling_requirement_uses_template_commit(tmp_path: Path) -> None:
+    """The normal generated requirement is an immutable Git commit, not a branch."""
+    source = template_source()
+    expected_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    output = tmp_path / "default-pin"
+    result = subprocess.run(
+        [
+            str(VENV_COPIER),
+            "copy",
+            str(source),
+            str(output),
+            "--defaults",
+            "--skip-tasks",
+            "--vcs-ref=HEAD",
+            "--data=project_name=default-pin",
+            "--data=modules=tg_bot",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    dependency = tomllib.loads((output / "pyproject.toml").read_text())["project"][
+        "dependencies"
+    ]
+    assert dependency == [
+        "codegen-kit-tooling @ "
+        f"git+https://github.com/vladmesh/codegen-product-kit.git@{expected_sha}"
+    ]
 
 
 class TestBackendOnlyGeneration:
@@ -227,12 +272,7 @@ class TestBackendOnlyGeneration:
             assert step["with"]["version"] == UV_VERSION
             assert step["with"]["checksum"] == UV_LINUX_X86_64_CHECKSUM
 
-        embedded_toolchain = (
-            project_backend / ".framework" / "framework" / "toolchain.py"
-        ).read_text()
-        assert f'SETUP_UV_ACTION = "{SETUP_UV_ACTION}"' in embedded_toolchain
-        assert f'UV_VERSION = "{UV_VERSION}"' in embedded_toolchain
-        assert f'UV_LINUX_X86_64_CHECKSUM = "{UV_LINUX_X86_64_CHECKSUM}"' in embedded_toolchain
+        assert not (project_backend / f".{'framework'}").exists()
 
     def test_copier_answers_file_created(self, project_backend: Path):
         """Generated project should have .copier-answers.yml."""
@@ -244,6 +284,18 @@ class TestBackendOnlyGeneration:
         answers = yaml.safe_load(answers_file.read_text())
         assert answers["project_name"] == "test-project"
         assert answers["modules"] == "backend"
+        assert "tooling_requirement" not in answers
+
+    def test_root_lock_records_tooling_distribution(self, project_backend: Path):
+        """The trusted Copier task commits one resolved tooling dependency."""
+        lock = project_backend / "uv.lock"
+        pyproject = tomllib.loads((project_backend / "pyproject.toml").read_text())
+
+        assert lock.exists()
+        assert pyproject["project"]["dependencies"][0].startswith(
+            "codegen-kit-tooling @ "
+        )
+        assert 'name = "codegen-kit-tooling"' in lock.read_text()
 
 
 class TestStandaloneGeneration:
@@ -520,19 +572,12 @@ class TestEnvExample:
 class TestModuleExclusion:
     """Test that unselected modules are properly excluded."""
 
-    def test_copy_without_trust_excludes_unselected_modules_before_copy(self, tmp_path: Path):
-        """Standalone tg_bot generation should not copy unselected module paths."""
-        output, result = run_copier_command(tmp_path, "tg_bot")
-        assert result.returncode == 0, (
-            f"Copier failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+    def test_copy_without_trust_refuses_lock_task(self, tmp_path: Path):
+        """Generation requires trust because it creates the committed root lock."""
+        _, result = run_copier_command(tmp_path, "tg_bot", trust=False)
 
-        log_output = f"{result.stdout}\n{result.stderr}".replace("\\", "/")
-        unselected_paths = ("services/backend",)
-
-        for path in unselected_paths:
-            assert not (output / path).exists()
-            assert path not in log_output
+        assert result.returncode != 0
+        assert "unsafe" in (result.stdout + result.stderr).lower()
 
     def test_copy_with_trust_still_succeeds(self, tmp_path: Path):
         """Existing callers may keep passing --trust."""
@@ -546,7 +591,7 @@ class TestModuleExclusion:
         assert (output / "services" / "backend" / "spec").exists()
 
     def test_copier_update_on_fresh_project(self, tmp_path: Path):
-        """Fresh generated projects should update without post-task side effects."""
+        """Fresh generated projects should update and refresh their tooling lock."""
         output = run_copier(tmp_path, "tg_bot")
 
         subprocess.run(["git", "init"], cwd=output, check=True, capture_output=True, text=True)  # noqa: S603
@@ -572,11 +617,22 @@ class TestModuleExclusion:
             capture_output=True,
             text=True,
         )  # noqa: S603
-
         update_result = subprocess.run(  # noqa: S603
-            [str(VENV_COPIER), "update", "--defaults", "--vcs-ref=HEAD"],
+            [
+                str(VENV_COPIER),
+                "update",
+                "--defaults",
+                "--trust",
+                "--vcs-ref=HEAD",
+            ],
             cwd=output,
             capture_output=True,
+            env={
+                **os.environ,
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.file://{template_source()}/.insteadOf",
+                "GIT_CONFIG_VALUE_0": "https://github.com/vladmesh/codegen-product-kit.git",
+            },
             text=True,
             timeout=120,
         )
@@ -833,8 +889,9 @@ class TestIntegrationCompose:
             compose["services"]["integration-tests"]["environment"]["SERVICE_TEMPLATE_ROOT"]
             == "/workspace"
         )
-        dockerignore = (project_backend / ".dockerignore").read_text()
-        assert "!.framework/**" in dockerignore
+        dockerfile = (project_backend / "services" / "backend" / "Dockerfile").read_text()
+        runtime = dockerfile.split("\nFROM base AS runtime\n", maxsplit=1)[1]
+        assert "framework" not in runtime
 
     def test_backend_has_healthcheck(self, project_backend: Path):
         """Backend must define a healthcheck so integration-tests can wait for readiness."""
@@ -937,6 +994,10 @@ class TestIntegration:
         """Container generation can write a checkout owned by a non-1000 UID/GID."""
         if shutil.which("docker") is None:
             pytest.skip("docker not available")
+        if "CODEGEN_TOOLING_REQUIREMENT" not in os.environ:
+            pytest.skip(
+                "Docker generation requires the CI-provided exact remote tooling requirement"
+            )
 
         output = run_copier(tmp_path, "backend")
         shutil.copy(output / ".env.example", output / ".env")
@@ -1136,14 +1197,18 @@ class TestIntegration:
         assert result.returncode == 0, f"docker compose config failed: {result.stderr}"
 
     def test_framework_generate_runs(self, project_backend: Path):
-        """framework generation should run successfully via python."""
-        framework_path = project_backend / ".framework"
-        env = {"PYTHONPATH": str(framework_path)}
+        """Installed tooling should generate successfully from the product root."""
+        subprocess.run(
+            ["uv", "sync", "--frozen"],
+            cwd=project_backend,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
         result = subprocess.run(
-            [sys.executable, "-m", "framework.generate"],
+            [str(project_backend / ".venv" / "bin" / "python"), "-m", "framework.generate"],
             cwd=project_backend,
-            env={**os.environ, **env},
             capture_output=True,
             text=True,
         )
@@ -2157,6 +2222,20 @@ class TestSlowIntegration:
         """E2E: setup → generate-from-spec → lint → tests with dual-transport ops."""
         modules = "backend,tg_bot"
         output = run_copier(tmp_path, modules)
+        subprocess.run(["git", "init"], cwd=output, check=True, capture_output=True)  # noqa: S603, S607
+        subprocess.run(  # noqa: S603, S607
+            ["git", "config", "user.email", "test@example.com"], cwd=output, check=True
+        )
+        subprocess.run(  # noqa: S603, S607
+            ["git", "config", "user.name", "Template tests"], cwd=output, check=True
+        )
+        subprocess.run(["git", "add", "-A"], cwd=output, check=True)  # noqa: S603, S607
+        subprocess.run(  # noqa: S603, S607
+            ["git", "commit", "-m", "Generated baseline"],
+            cwd=output,
+            check=True,
+            capture_output=True,
+        )
 
         # Step 1: make setup (creates venvs, installs deps, generates code)
         result = subprocess.run(  # noqa: S603, S607
@@ -2181,6 +2260,14 @@ class TestSlowIntegration:
         assert result.returncode == 0, (
             f"make generate-from-spec failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
+        status = subprocess.run(  # noqa: S603, S607
+            ["git", "status", "--porcelain"],
+            cwd=output,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert status.stdout == ""
 
         # Step 3: make lint (ruff + spec validation + controller sync)
         result = subprocess.run(  # noqa: S603, S607

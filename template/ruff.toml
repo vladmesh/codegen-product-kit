@@ -4,7 +4,6 @@ target-version = "py311"
 exclude = [
     "shared/shared/generated/**",
     "**/generated/**",
-    ".framework/**",
     ".venv/**",
     "**/.venv/**",
     "services/**/migrations/**",

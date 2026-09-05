@@ -33,7 +33,7 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(
         prefix="/jobs",
-        tags=['jobs'],
+        tags=["jobs"],
     )
 
     @router.post(

@@ -34,6 +34,7 @@ uvx copier copy gh:vladmesh/codegen-product-kit my-product \
   --data project_name=my-product \
   --data modules=backend,tg_bot \
   --defaults \
+  --trust \
   --vcs-ref=HEAD
 ```
 
@@ -46,7 +47,6 @@ make setup
 make lint
 make test
 make test-copier
-make check-sync
 ```
 
 See [architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md), and

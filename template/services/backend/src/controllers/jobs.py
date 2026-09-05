@@ -83,9 +83,7 @@ class JobsController(JobsControllerProtocol):
         await session.commit()
         return await _emit_once(repository, payload.fired_by_product, payload.command_id)
 
-    async def evidence(
-        self, session: AsyncSession, payload: JobCommandRef
-    ) -> JobCommandContract:
+    async def evidence(self, session: AsyncSession, payload: JobCommandRef) -> JobCommandContract:
         """Return the recorded evidence of a command within its own product."""
 
         command = await JobCommandRepository(session).get(

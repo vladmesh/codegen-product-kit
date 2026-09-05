@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'framework/**'
+      - 'pyproject.toml'
       - 'tests/**'
       - 'scripts/**'
       - 'docs/**'
@@ -38,9 +39,6 @@ jobs:
 
       - name: Install framework dependencies
         run: make setup
-
-      - name: Check framework sync
-        run: make check-sync
 
       - name: Run linters
         run: |

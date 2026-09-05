@@ -4,4 +4,17 @@ version = "0.1.0"
 description = "{{ project_description }}"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "{{ _copier_conf.data.get('tooling_requirement') or 'codegen-kit-tooling @ git+https://github.com/vladmesh/codegen-product-kit.git@' ~ _copier_conf.vcs_ref_hash }}",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.11",
+    "xenon>=0.9.3",
+]
+
+[tool.uv]
+package = false

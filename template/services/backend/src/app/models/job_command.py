@@ -29,9 +29,7 @@ class JobCommand(ORMBase):
 
     __tablename__ = "job_commands"
     __table_args__ = (
-        UniqueConstraint(
-            "fired_by_product", "command_id", name="uq_job_commands_product_command"
-        ),
+        UniqueConstraint("fired_by_product", "command_id", name="uq_job_commands_product_command"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -48,9 +46,7 @@ class JobCommand(ORMBase):
         ),
         nullable=False,
     )
-    accepted_at: Mapped[datetime] = mapped_column(
-        TzAwareDateTime(timezone=True), nullable=False
-    )
+    accepted_at: Mapped[datetime] = mapped_column(TzAwareDateTime(timezone=True), nullable=False)
     dispatched_at: Mapped[datetime | None] = mapped_column(
         TzAwareDateTime(timezone=True), nullable=True
     )

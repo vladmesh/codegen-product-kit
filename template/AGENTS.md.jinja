@@ -64,7 +64,7 @@ if not value:
 - `shared/shared/generated/` — перегенерируется через `make generate-from-spec`
 - `services/*/src/generated/` — перегенерируется по спекам сервиса
 {%- endif %}
-- `.framework/` — внутренности фреймворка
+- Корневой `uv.lock` — точный источник установленного инструментария `framework`
 {%- if 'backend' in modules %}
 
 ## Брокер событий — паттерн get_broker()

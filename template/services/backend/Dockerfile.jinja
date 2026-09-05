@@ -1,6 +1,4 @@
 # syntax=docker/dockerfile:1.7
-ARG INSTALL_DEV_DEPS="false"
-
 FROM python:{{ python_version }}-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,29 +9,46 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-FROM base AS deps
-ARG INSTALL_DEV_DEPS
+FROM base AS runtime-deps
 COPY shared/pyproject.toml ./shared/pyproject.toml
 RUN mkdir -p ./shared/shared && touch ./shared/shared/__init__.py
 COPY services/backend/pyproject.toml services/backend/uv.lock ./services/backend/
-COPY .framework ./.framework
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd services/backend \
-    && if [ "$INSTALL_DEV_DEPS" = "true" ]; then \
-    uv sync --frozen --no-install-project \
-    && uv pip install --python .venv/bin/python -e ../../.framework; \
-    else \
-    uv sync --frozen --no-install-project --no-dev; \
-    fi
+    && uv sync --frozen --no-install-project --no-dev
 COPY shared/shared ./shared/shared
 
-FROM base AS runtime
-COPY --from=deps /app/services/backend/.venv /app/services/backend/.venv
+FROM runtime-deps AS dev-deps
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project \
+    && cd services/backend \
+    && uv sync --frozen --no-install-project
+
+FROM base AS dev
+COPY --from=dev-deps /app/.venv /app/.venv
+COPY --from=dev-deps /app/services/backend/.venv /app/services/backend/.venv
 ENV PATH="/app/services/backend/.venv/bin:${PATH}"
 COPY services/backend ./services/backend
 COPY services/backend/README.md ./README.md
 COPY shared ./shared
-COPY .framework ./.framework
+
+RUN chown -R 1000:1000 /app
+USER 1000
+
+EXPOSE 8000
+
+CMD ["uvicorn", "services.backend.src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+FROM base AS runtime
+COPY --from=runtime-deps /app/services/backend/.venv /app/services/backend/.venv
+ENV PATH="/app/services/backend/.venv/bin:${PATH}"
+COPY services/backend ./services/backend
+COPY services/backend/README.md ./README.md
+COPY shared ./shared
 
 RUN chown -R 1000:1000 /app
 USER 1000

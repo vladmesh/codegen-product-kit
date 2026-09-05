@@ -1,6 +1,7 @@
 """Shared fixtures for copier template tests."""
 
 import atexit
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -92,21 +93,26 @@ def copier_available():
 
 
 def run_copier_command(
-    dest: Path, modules: str, *, trust: bool = False
+    dest: Path, modules: str, *, trust: bool = True
 ) -> tuple[Path, subprocess.CompletedProcess[str]]:
     """Run copier copy and return the output directory plus process result."""
     output_dir = dest / "output"
     output_dir.mkdir(exist_ok=True)
 
+    source = template_source()
+    tooling_requirement = os.environ.get(
+        "CODEGEN_TOOLING_REQUIREMENT", f"codegen-kit-tooling @ file://{source}"
+    )
     cmd = [
         str(VENV_COPIER),
         "copy",
-        str(template_source()),
+        str(source),
         str(output_dir),
         "--defaults",
         "--vcs-ref=HEAD",
         *(f"--data={k}={v}" for k, v in BASE_DATA.items()),
         f"--data=modules={modules}",
+        f"--data=tooling_requirement={tooling_requirement}",
     ]
     if trust:
         cmd.insert(4, "--trust")
@@ -115,7 +121,7 @@ def run_copier_command(
     return output_dir, result
 
 
-def run_copier(dest: Path, modules: str, *, trust: bool = False) -> Path:
+def run_copier(dest: Path, modules: str, *, trust: bool = True) -> Path:
     """Run copier copy and return the output directory."""
     output_dir, result = run_copier_command(dest, modules, trust=trust)
     if result.returncode != 0:

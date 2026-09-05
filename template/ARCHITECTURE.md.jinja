@@ -84,7 +84,7 @@ Services can specify `depends_on` in `services.yml` to document runtime dependen
     - `spec/`: YAML specifications (Source of Truth).
     - `generated/`: Auto-generated code (Do Not Edit).
 {%- endif %}
-- `.framework/`: Framework internals (spec validation and code generation).
+- `pyproject.toml` and `uv.lock`: pinned installed tooling for spec validation and generation.
 
 ## Infrastructure Components
 

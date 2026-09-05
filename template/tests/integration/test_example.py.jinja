@@ -1,4 +1,4 @@
-{% if 'backend' in modules %}
+{% if 'backend' in modules -%}
 from httpx import AsyncClient
 import pytest
 
@@ -22,4 +22,4 @@ async def test_backend_openapi_spec():
         assert "openapi" in spec
         assert "info" in spec
         assert "paths" in spec
-{% endif %}
+{% endif -%}

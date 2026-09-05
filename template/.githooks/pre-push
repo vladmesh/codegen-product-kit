@@ -37,8 +37,8 @@ affected_services=()
 
 # --- Detect affected areas ---
 
-# shared/ or .framework/ affects all services
-if echo "$changed_files" | grep -qE '^(shared/|\.framework/)'; then
+# Shared contracts affect all services.
+if echo "$changed_files" | grep -qE '^shared/'; then
   run_lint=true
   run_generate=true
   # Mark all services as affected

@@ -47,8 +47,7 @@ endif
 endif
 
 setup:
-	uv venv --quiet 2>/dev/null || uv venv --clear --quiet
-	uv pip install -e .framework/ ruff xenon
+	uv sync --frozen
 	@for svc in services/*/; do \
 		[ -f "$$svc/pyproject.toml" ] || continue; \
 		echo ">> Setting up $$svc"; \
@@ -59,7 +58,7 @@ setup:
 	$(PYTHON) -m framework.generate
 {%- endif %}
 	@echo ">> Formatting generated code"
-	$(VENV)/ruff format .
+	$(VENV)/ruff format --exclude '*.md' .
 	@$(VENV)/ruff check --fix . || { \
 		echo ">> Warning: lint auto-fix left issues in the generated project."; \
 		echo ">> Setup continues; run 'make lint' to see and fix them."; \
@@ -68,16 +67,16 @@ setup:
 	@echo ">> Setup complete!"
 
 lint:
-	$(VENV)/ruff format --check .
+	$(VENV)/ruff format --check --exclude '*.md' .
 	$(VENV)/ruff check .
-	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude '.framework/*,tests/*,services/*/tests/*' .
+	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude 'tests/*,services/*/tests/*' .
 	$(PYTHON) -c "from framework.spec.loader import validate_specs_cli; from framework.lib.env import get_repo_root; ok, msg = validate_specs_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
 	$(PYTHON) -m framework.enforce_spec_compliance
 	$(PYTHON) -c "from framework.lint.controller_sync import lint_controllers_cli; from framework.lib.env import get_repo_root; ok, msg = lint_controllers_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
 	$(MAKE) check-deps
 
 lint-complexity:
-	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude ".framework/*,tests/*,services/*/tests/*" .
+	$(VENV)/xenon --max-absolute B --max-modules A --max-average A --exclude "tests/*,services/*/tests/*" .
 
 check-deps:
 	@for svc in services/*/; do \
@@ -93,7 +92,7 @@ lint-specs:
 	$(PYTHON) -m framework.enforce_spec_compliance
 {% endif %}
 format:
-	$(VENV)/ruff format .
+	$(VENV)/ruff format --exclude '*.md' .
 	$(VENV)/ruff check --fix .
 
 typecheck:
@@ -228,7 +227,7 @@ tooling-tests:
 	if [ -z "$$dirs" ]; then \
 		echo "No tooling/unit tests found, skipping"; \
 	else \
-		PYTHONPATH=.framework $(VENV)/pytest -q --cov=framework --cov-report=term-missing --cov-fail-under=70 $$dirs; \
+		$(VENV)/pytest -q --cov=framework --cov-report=term-missing --cov-fail-under=70 $$dirs; \
 	fi
 {% if 'backend' in modules %}
 generate-from-spec:

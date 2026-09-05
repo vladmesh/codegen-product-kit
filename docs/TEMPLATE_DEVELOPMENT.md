@@ -1,7 +1,7 @@
 # Copier template development
 
 `template/` is the source tree rendered by Copier. `copier.yml` owns questions, module exclusions,
-update preservation, and the embedded framework version.
+update preservation, the exact tooling requirement, and the trusted task that writes `uv.lock`.
 
 ## Modules and names
 
@@ -39,7 +39,6 @@ inside the same backend condition as the corresponding Make target.
 make lint
 make test
 make test-copier
-make check-sync
 ```
 
 Run `make test-copier-slow` for changes to setup, Docker, Compose, module combinations, or actual
@@ -49,7 +48,7 @@ generated-project execution. A focused render can use:
 uvx copier copy . /tmp/codegen-product-kit-smoke \
   --data project_name=smoke \
   --data modules=backend,tg_bot \
-  --defaults --vcs-ref=HEAD --overwrite
+  --defaults --trust --vcs-ref=HEAD --overwrite
 ```
 
 Inspect the result for unresolved Jinja markers, missing paths, invalid YAML, and commands absent

@@ -98,13 +98,17 @@ async def test_settings_round_trip_is_idempotent_for_same_effective_value(
     second = await _set(client, payload)
     fetched = await client.post("/settings/get", json={"key": "languages"})
 
-    assert first == second == {
-        "contract_version": 1,
-        "key": "languages",
-        "scope": "product",
-        "subject_id": None,
-        "value": ["ru", "en"],
-    }
+    assert (
+        first
+        == second
+        == {
+            "contract_version": 1,
+            "key": "languages",
+            "scope": "product",
+            "subject_id": None,
+            "value": ["ru", "en"],
+        }
+    )
     assert fetched.status_code == status.HTTP_200_OK
     assert fetched.json() == first
     assert len((await db_session.execute(select(Setting))).scalars().all()) == 1

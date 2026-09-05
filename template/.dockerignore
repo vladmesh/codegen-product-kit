@@ -1,8 +1,5 @@
 .venv/
 services/*/.venv/
-.framework/
-!.framework/
-!.framework/**
 __pycache__/
 *.pyc
 .git/
