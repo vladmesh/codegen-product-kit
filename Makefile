@@ -20,14 +20,14 @@ setup:
 	uv sync
 
 lint:
-	$(VENV)/ruff check --no-cache framework/ tests/
+	$(VENV)/ruff check --no-cache framework/ packages/ tests/
 
 lint-template:
 	cd template && ../.venv/bin/ruff check .
 
 format:
-	$(VENV)/ruff format framework/ tests/
-	$(VENV)/ruff check --no-cache --fix framework/ tests/
+	$(VENV)/ruff format framework/ packages/ tests/
+	$(VENV)/ruff check --no-cache --fix framework/ packages/ tests/
 
 test:
 	$(VENV)/pytest -q --cov=framework --cov-report=term-missing tests/unit tests/tooling

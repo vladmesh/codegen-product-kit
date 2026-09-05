@@ -16,7 +16,7 @@ from packaging.version import InvalidVersion, Version
 import yaml
 
 PACKAGE_PROTOCOL_VERSION = 1
-CORE_VERSION = "1.1.0"
+CORE_VERSION = "1.2.0"
 ENTRY_POINT_GROUP = "codegen_kit.packages"
 
 
@@ -73,6 +73,7 @@ class PackageManifest:
     version: str
     requires_core: str
     http_prefix: str
+    deployment_modes: tuple[str, ...] = ("in_process",)
     database_schema: str | None = None
     database_migrations: str | None = None
 
@@ -165,6 +166,7 @@ def _validate_manifest_fields(data: dict[str, Any]) -> None:
         "events",
         "settings_schema",
         "jobs_schema",
+        "deployment",
         "environment",
         "resources",
     }
@@ -232,6 +234,24 @@ def _database_declaration(data: dict[str, Any]) -> tuple[str | None, str | None]
     return schema, migrations
 
 
+def _deployment_modes(data: dict[str, Any]) -> tuple[str, ...]:
+    """Return the validated additive package deployability declaration."""
+
+    deployment = data.get("deployment", {"modes": ["in_process"]})
+    if not isinstance(deployment, dict) or set(deployment) != {"modes"}:
+        raise PackageManifestError("package.yaml has malformed deployment declaration")
+    modes = deployment["modes"]
+    allowed = {"in_process", "container"}
+    if (
+        not isinstance(modes, list)
+        or not modes
+        or any(not isinstance(mode, str) or mode not in allowed for mode in modes)
+        or len(set(modes)) != len(modes)
+    ):
+        raise PackageManifestError("package.yaml has malformed deployment declaration")
+    return tuple(modes)
+
+
 def _parse_manifest(path: Path) -> PackageManifest:
     data = _load_manifest_data(path)
     _validate_manifest_fields(data)
@@ -242,6 +262,7 @@ def _parse_manifest(path: Path) -> PackageManifest:
         version=data["version"],
         requires_core=data["requires_core"],
         http_prefix=_http_prefix(data),
+        deployment_modes=_deployment_modes(data),
         database_schema=database_schema,
         database_migrations=database_migrations,
     )

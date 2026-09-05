@@ -1,0 +1,25 @@
+[project]
+name = "codegen-kit-reminders"
+version = "0.1.0"
+description = "One-time text reminders for codegen-product-kit products"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.13.0,<2.0.0",
+    "fastapi>=0.110.0,<1.0.0",
+    "faststream[redis]>=0.5.0",
+    "pydantic>=2.5",
+    "sqlalchemy>=2.0.0,<3.0.0",
+]
+
+[project.entry-points."codegen_kit.packages"]
+reminders = "codegen_kit_reminders:package"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["codegen_kit_reminders"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"codegen_kit_reminders/package.yaml" = "codegen_kit_reminders/package.yaml"

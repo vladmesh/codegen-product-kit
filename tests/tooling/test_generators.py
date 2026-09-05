@@ -96,6 +96,9 @@ operations:
     assert "event_id: UUID" in events
     assert "occurred_at: AwareDatetime" in events
     assert "schema_version: int = 1" in events
+    assert "async def publish_event(" in events
+    assert "event_id: UUID | None = None" in events
+    assert "event_id=event_id or uuid4()" in events
 
     backend_gen = root / "services" / "backend" / "src" / "generated"
     assert (backend_gen / "protocols.py").exists()

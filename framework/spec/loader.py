@@ -225,33 +225,6 @@ def _load_service_manifests(services_dir: Path) -> dict[str, ServiceManifest]:
     return manifests
 
 
-def _validate_unique_declarations(
-    manifests: dict[str, ServiceManifest], field: str, label: str
-) -> list[str]:
-    """Reject a declared name claimed by more than one service manifest."""
-    owners: dict[str, str] = {}
-    errors: list[str] = []
-    for service_name, manifest in manifests.items():
-        for key in getattr(manifest, field)["properties"]:
-            if key in owners:
-                errors.append(
-                    f"{label} '{key}' is declared by both '{owners[key]}' and '{service_name}'"
-                )
-            else:
-                owners[key] = service_name
-    return errors
-
-
-def validate_manifest_settings(manifests: dict[str, ServiceManifest]) -> list[str]:
-    """Reject settings keys declared by more than one service."""
-    return _validate_unique_declarations(manifests, "settings_schema", "Setting")
-
-
-def validate_manifest_jobs(manifests: dict[str, ServiceManifest]) -> list[str]:
-    """Reject fireable job names declared by more than one service."""
-    return _validate_unique_declarations(manifests, "jobs_schema", "Job")
-
-
 def _package_prefix(name: str) -> str:
     """Return the stable identifier prefix used for package-owned names."""
 
