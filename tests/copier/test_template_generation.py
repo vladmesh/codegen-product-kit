@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tomllib
 
 import pytest
@@ -177,6 +178,18 @@ class TestBackendOnlyGeneration:
             / "services/backend/migrations/versions/d4a7b2c9e1f0_create_event_consumptions.py"
         ).exists()
         assert (project_backend / "tests/integration/test_durable_events.py").exists()
+
+    def test_durable_event_integration_test_is_lint_clean(self, project_backend: Path):
+        """Setup must not rewrite the generated durable-event integration test."""
+        integration_test = project_backend / "tests/integration/test_durable_events.py"
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "ruff", "check", "--select", "I", integration_test],
+            cwd=project_backend,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_other_services_excluded(self, project_backend: Path):
         """Other service directories should not exist."""
