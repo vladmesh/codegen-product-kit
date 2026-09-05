@@ -35,13 +35,20 @@ def lint_installed_packages(repo_root: Path, distribution_path: Path | None = No
     listed = set(product.get("packages", []))
     violations: list[str] = []
     entry_points = _package_entry_points(distribution_path)
+    for name in sorted(listed - set(entry_points)):
+        violations.append(f"{name}: listed package has no installed entry point")
     for name in sorted(listed & set(entry_points)):
         entry_point = entry_points[name]
         distribution = entry_point.dist
         if distribution is None:
+            violations.append(f"{name}: entry point has no distribution metadata")
             continue
         manifest_files = [file for file in distribution.files or () if file.name == "package.yaml"]
         if len(manifest_files) != 1:
+            violations.append(
+                f"{name}: distribution must contain exactly one package.yaml; "
+                f"found {len(manifest_files)}"
+            )
             continue
         manifest = parse_package_manifest(
             yaml.safe_load(Path(distribution.locate_file(manifest_files[0])).read_text())
@@ -49,18 +56,41 @@ def lint_installed_packages(repo_root: Path, distribution_path: Path | None = No
         module_root = entry_point.value.partition(":")[0].partition(".")[0]
         package_root = Path(distribution.locate_file(module_root))
         violations.extend(
-            f"{name}: {item}" for item in lint_package_imports(package_root, manifest)
+            f"{name}: {item}"
+            for item in lint_package_imports(
+                package_root,
+                manifest,
+                module_root=module_root,
+            )
         )
     return violations
+
+
+def _distribution_path(value: str | None) -> Path | None:
+    """Validate an explicitly supplied site-packages path without a vacuous fallback."""
+
+    if value is None:
+        return None
+    if not value.strip():
+        raise ValueError("--site-packages must not be empty")
+    path = Path(value)
+    if not path.is_dir():
+        raise ValueError(f"--site-packages is not an existing directory: {path}")
+    return path
 
 
 def main() -> int:
     """Run the package import check for the current generated product."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--site-packages", type=Path)
+    parser.add_argument("--site-packages")
     arguments = parser.parse_args()
-    violations = lint_installed_packages(Path.cwd(), arguments.site_packages)
+    try:
+        distribution_path = _distribution_path(arguments.site_packages)
+    except ValueError as error:
+        print(f"Package import lint FAILED: {error}")
+        return 1
+    violations = lint_installed_packages(Path.cwd(), distribution_path)
     if violations:
         print("Package import lint FAILED:")
         print("\n".join(f"  - {item}" for item in violations))

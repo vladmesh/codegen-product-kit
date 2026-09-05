@@ -53,6 +53,10 @@ class IncompatibleCoreVersionError(PackageActivationError):
     """A package's core version constraint excludes this core."""
 
 
+class DuplicatePackageHttpPrefixError(PackageActivationError):
+    """Two activated packages declare the same HTTP mount prefix."""
+
+
 @dataclass(frozen=True)
 class PackageManifest:
     """The activation subset of a validated package.yaml."""
@@ -234,6 +238,21 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
     return ActivatedPackage(manifest=manifest, runtime=runtime)
 
 
+def _validate_http_prefixes(packages: Sequence[ActivatedPackage]) -> None:
+    """Refuse ambiguous package router mounts before mutating the application."""
+
+    owners: dict[str, str] = {}
+    for package in packages:
+        prefix = package.manifest.http_prefix
+        previous = owners.get(prefix)
+        if previous is not None:
+            raise DuplicatePackageHttpPrefixError(
+                f"packages {previous!r} and {package.manifest.name!r} "
+                f"declare duplicate HTTP prefix {prefix!r}"
+            )
+        owners[prefix] = package.manifest.name
+
+
 def discover_packages(
     listed: Sequence[str],
     *,
@@ -244,7 +263,9 @@ def discover_packages(
     listed_set = set(listed)
     discovered = {entry_point.name: entry_point for entry_point in entry_points()}
     _validate_allowlist(listed_set, discovered)
-    return [_activate_entry_point(name, discovered[name]) for name in listed]
+    activated = [_activate_entry_point(name, discovered[name]) for name in listed]
+    _validate_http_prefixes(activated)
+    return activated
 
 
 def configure_packages(application: Any, listed: Sequence[str]) -> None:

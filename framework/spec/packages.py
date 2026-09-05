@@ -155,15 +155,19 @@ def load_package_manifest(path: Path) -> PackageManifest:
     return parse_package_manifest(data)
 
 
-def lint_package_imports(source_root: Path, manifest: PackageManifest) -> list[str]:
+def lint_package_imports(
+    source_root: Path,
+    manifest: PackageManifest,
+    *,
+    module_root: str | None = None,
+) -> list[str]:
     """Return imports outside stdlib, the public core API, and declared dependencies."""
 
-    own_modules = {path.name for path in source_root.iterdir() if path.is_dir()}
-    own_modules.update(path.stem for path in source_root.glob("*.py"))
+    own_module = (module_root or source_root.name).partition(".")[0]
     allowed = set(sys.stdlib_module_names) | {
         "codegen_kit",
         *manifest.package_dependencies,
-        *own_modules,
+        own_module,
     }
     violations: list[str] = []
     for source in sorted(source_root.rglob("*.py")):

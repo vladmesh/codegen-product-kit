@@ -23,9 +23,13 @@ copies only the service environment and application sources. An audit of `templa
 
 Package protocol version `1` is the stable boundary between an independently built Python wheel and
 any generated product that installs it. The boundary is a generated in-product `codegen_kit` façade,
-not a separately released runtime distribution. This keeps the façade version identical to the
-product's exact `codegen-kit-tooling` template pin and avoids making the whole product core a public
-runtime dependency. A package imports only `Package`, `CORE_VERSION`, and
+not a separately released runtime distribution. This avoids making the whole product core a public
+runtime dependency. `CORE_VERSION` is the kit-declared semantic version of this façade and its
+activation semantics; it is rendered into each product and is deliberately independent of the exact
+Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface is `1.0.0`. Backward-compatible
+public additions require a minor bump, breaking changes require a major bump, and fixes that preserve
+the promised surface require a patch bump. The package protocol version remains `1` across compatible
+next-card additions. A package imports only `Package`, `CORE_VERSION`, and
 `PACKAGE_PROTOCOL_VERSION` from `codegen_kit`; product-specific `services.*`, generated contracts,
 database objects, and application settings are not public API. The unchanged wheel can therefore be
 installed into another generated product with the same compatible core without rebuilding it.
@@ -63,6 +67,10 @@ The distribution declares one entry point whose name equals `package.yaml.name`:
 weather = "weather_package:package"
 ```
 
+Protocol v1 intentionally excludes dotted entry-point names: product manifests accept a name only
+when replacing `-` with `_` produces a Python identifier, and the entry-point and package manifest
+names must still match exactly.
+
 The referenced object implements `codegen_kit.Package`: it exposes a FastAPI `router` and async
 `startup(application)` and `shutdown(application)` methods. Install the wheel as an explicit backend
 dependency, keep it in the backend lock, and add its entry-point name to
@@ -82,21 +90,27 @@ activates the package only when the entry point is installed and its name is lis
 unlisted package raises `InstalledPackageNotListedError`; a listed but absent entry point raises
 `ListedPackageNotInstalledError`; an incompatible `protocol_version` raises
 `IncompatiblePackageProtocolError`; and a `requires_core` mismatch raises
-`IncompatibleCoreVersionError`. All abort application startup. With `packages: []`, existing
-settings, jobs, events, and environment behavior is unchanged.
+`IncompatibleCoreVersionError`. Two activated packages with the same `http.prefix` raise
+`DuplicatePackageHttpPrefixError` before any package router is mounted. All abort application
+startup. With `packages: []`, existing settings, jobs, events, and environment behavior is unchanged.
 
 The factory mounts each activated router under `http.prefix`. Once core connectivity is ready, the
 backend lifespan calls package `startup` in manifest order. It calls package `shutdown` in reverse
-order before closing core connectivity. A package connection check belongs in `startup` and must
-raise on failure. Package acceptance checks must install the real wheel, resolve its real entry
-point, start the application, exercise a prefixed route, observe lifecycle calls, run manifest
-validation, and run the import lint. The kit's synthetic package performs these checks.
+order before closing core connectivity, including when a later package's startup fails. Core routers
+are registered first; if a package route has the same HTTP method and fully resolved path as a core
+route, the core route wins, while non-colliding routes under that package prefix remain available.
+A package connection check belongs in `startup` and must raise on failure. Package acceptance checks
+must install the real wheel, resolve its real entry point, start the generated application, exercise a
+prefixed route, observe lifecycle calls, run manifest validation, and run the import lint. The kit's
+synthetic package performs these checks.
 
 The generated product's `make lint` runs the installed-package import check. Package source imports
 may target stdlib, `codegen_kit`, the package's own modules, and top-level modules named in
 `package_dependencies`. Importing product internals or an undeclared third-party package fails the
-check. This is a source boundary, not a dependency resolver; normal Python packaging metadata still
-owns installation of dependencies.
+check. A missing or ambiguous installed `package.yaml`, missing distribution metadata, and an empty
+or nonexistent explicit site-packages path also fail the lint rather than producing a vacuous pass.
+This is a source boundary, not a dependency resolver; normal Python packaging metadata still owns
+installation of dependencies.
 
 ## Core settings v1
 

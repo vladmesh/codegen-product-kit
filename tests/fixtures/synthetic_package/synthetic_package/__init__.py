@@ -3,6 +3,8 @@
 from codegen_kit import Package
 from fastapi import APIRouter
 
+from synthetic_package.status import response
+
 router = APIRouter()
 
 
@@ -10,7 +12,7 @@ router = APIRouter()
 async def status() -> dict[str, bool]:
     """Expose a route that exists only after activation."""
 
-    return {"synthetic": True}
+    return response()
 
 
 class SyntheticPackage:

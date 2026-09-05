@@ -19,9 +19,9 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     await broker.connect()
     try:
         await startup_packages(application)
-        try:
-            yield
-        finally:
-            await shutdown_packages(application)
+        yield
     finally:
-        await broker.close()
+        try:
+            await shutdown_packages(application)
+        finally:
+            await broker.close()
