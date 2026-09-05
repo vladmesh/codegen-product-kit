@@ -1,98 +1,53 @@
-# Service Template Framework
+# Codegen Product Kit
 
-A rigid, spec-first, modular framework for building AI-Agent-ready microservices.
+`codegen-product-kit` is the product foundation used by the code-generation pipeline. It generates
+a Python product with deterministic contracts, runtime infrastructure, and agent instructions.
 
-> **Start here:** Read the [MANIFESTO](docs/MANIFESTO.md) to understand the philosophy behind this project.
+The repository was derived from `vladmesh/service-template` at commit
+`40b54d87dbfe64a9fa6ec379820e43137aaba04c`. It is now an independent project; changes are not
+automatically synchronized in either direction.
 
-## Quick Start
+## Current scope
 
-### Create a New Project
+The kit currently generates two built-in product shapes:
+
+| Selection | Result |
+|---|---|
+| `backend` | FastAPI, PostgreSQL, Redis, users/access, settings, jobs, env contracts, OpenAPI |
+| `tg_bot` | Telegram adapter with Redis integration; it can also be generated without a backend |
+
+The future component vocabulary is:
+
+- **service** — an already-running platform capability shared by multiple products;
+- **container** — an image deployed inside one product's Compose application;
+- **package** — code imported and executed inside a product process;
+- **component** — the common term for all three.
+
+This repository does not yet implement a package runtime, a component catalog, or automatic
+composition across those component types. The current `modules` Copier option selects only the two
+built-in application shapes above.
+
+## Generate a project
 
 ```bash
-# Generate a new project
-uvx copier copy gh:vladmesh/service-template my-project \
-  --data project_name=my-project \
-  --defaults \
-  --vcs-ref=HEAD
-
-# Or with specific modules (e.g. standalone bot)
-uvx copier copy gh:vladmesh/service-template my-project \
-  --data project_name=my-project \
-  --data modules=tg_bot \
+uvx copier copy gh:vladmesh/codegen-product-kit my-product \
+  --data project_name=my-product \
+  --data modules=backend,tg_bot \
   --defaults \
   --vcs-ref=HEAD
 ```
 
-Copier uses the latest git tag for git sources by default. For `gh:vladmesh/service-template`,
-omitting `--vcs-ref` can silently generate from an older release tag instead of the current
-default branch. `--vcs-ref=HEAD` keeps bootstrap output on the latest template state; replace it
-with another branch/ref when needed.
+Then run `make setup`, copy `.env.example` to `.env`, and use `make dev-start`.
 
-### Available Modules
-
-| Module | Description |
-|--------|-------------|
-| `backend` | FastAPI REST API + PostgreSQL (Optional) |
-| `tg_bot` | Telegram bot (FastStream, can be standalone) |
-| `notifications` | Email/Telegram notification worker |
-| `frontend` | Node.js frontend |
-
-### After Generation
+## Develop the kit
 
 ```bash
-cd my-project
 make setup
-cp .env.example .env
-make dev-start
+make lint
+make test
+make test-copier
+make check-sync
 ```
 
-### Update Infrastructure
-
-Pull latest infrastructure updates while preserving your code:
-
-```bash
-uvx copier update --vcs-ref=HEAD
-```
-
-## Development Workflow (in Generated Projects)
-
-After generating a project with `copier copy`:
-
-- **Update API:** Edit `shared/spec/*.yaml` → `make generate-from-spec`
-- **Run Tests:** `make tests`
-- **Lint:** `make lint`
-
-## Framework Development
-
-Developing the framework itself (this repository):
-
-- **Run Tests:** `make test` (framework unit tests) or `make test-copier` (template generation tests)
-- **Lint:** `make lint` (framework code only)
-- **Sync `.framework/`:** `make sync-framework` (copy framework code to template)
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed framework development instructions.
-
-## Documentation
-
-### For Framework Users (Template Users)
-- Generated projects include `README.md`, `AGENTS.md`, and `CONTRIBUTING.md` with usage instructions
-- The infrastructure and worker-mode contract is readable before generation at
-  [template/infra/README.md](template/infra/README.md). The root
-  [infra/README.md](infra/README.md) points to that canonical copy.
-
-### For Framework Developers
-- **[docs/MANIFESTO.md](docs/MANIFESTO.md)**: The core philosophy
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: How the framework works
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**: How to develop the framework
-
-## Tech Stack
-
-- **Core:** Python 3.11+, Docker Compose
-- **API:** FastAPI, Pydantic (Spec-First)
-- **Data:** PostgreSQL, SQLAlchemy, Alembic
-- **Messaging:** Redis, FastStream
-- **Quality:** Ruff, Mypy, Pytest
-
-## License
-
-Open Source. Use it, fork it, build agents with it.
+See [architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md), and
+[testing](docs/TESTING.md) for the current contracts.

@@ -13,12 +13,10 @@ Compose service names are part of the project API. Other containers resolve
 services by these DNS names on the default Compose network:
 
 - `db` is PostgreSQL on port `5432` when the `backend` module is enabled.
-- `redis` is Redis on port `6379` when `backend`, `tg_bot`, or `notifications`
-  is enabled.
+- `redis` is Redis on port `6379` when `backend` or `tg_bot` is enabled.
 - `backend` is the FastAPI service on port `8000` when the `backend` module is
   enabled.
-- `tg_bot`, `notifications_worker`, and `frontend` are the optional application
-  services for their modules.
+- `tg_bot` is the optional application service for its module.
 
 Do not rename these services without updating callers that use Compose DNS.
 For example, generated defaults use `POSTGRES_HOST=db` and
@@ -45,10 +43,9 @@ not include `infra/compose.local.yml`.
 
 This starts every service in the selected module set without the local-port
 layer. Pass `svc=...` to start only selected services. Backend projects have
-both `db` and `redis`; bot-only or notifications-only projects have `redis` but
-no `db`.
+both `db` and `redis`; bot-only projects have `redis` but no `db`.
 
-For a backend plus notifications project, a full worker-mode smoke run is:
+For a backend project, a full worker-mode smoke run is:
 
 ```bash
 make worker-start
@@ -99,7 +96,6 @@ the host. Configure those ports in `.env`:
 - `BACKEND_PORT` maps to `backend:8000`.
 - `POSTGRES_HOST_PORT` maps to `db:5432`.
 - `REDIS_HOST_PORT` maps to `redis:6379`.
-- `FRONTEND_PORT` maps to `frontend:4321`.
 
 Production mode uses:
 
@@ -134,7 +130,6 @@ ports in `.env` when the local-port layer is enabled:
 - `POSTGRES_HOST_PORT` for PostgreSQL.
 - `REDIS_HOST_PORT` for Redis.
 - `BACKEND_PORT` for the backend HTTP service.
-- `FRONTEND_PORT` for the frontend.
 
 Use `make ps` and `make log <service>` to inspect the selected Compose project.
 For local work, prefer the Makefile targets. They include and export the

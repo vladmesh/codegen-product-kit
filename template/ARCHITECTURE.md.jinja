@@ -47,7 +47,7 @@ does not.
 The project is a collection of modular services defined in `services.yml`.
 
 - **Definition:** A service is simply an entry in `services.yml` with a `name`, `type`, and `description`.
-- **Isolation:** Each service is its own Docker container. They communicate only via defined APIs or shared infrastructure ({% if 'backend' in modules %}DB, Queue{% elif 'tg_bot' in modules or 'notifications' in modules %}Queue{% endif %}).
+- **Isolation:** Each service is its own Docker container. They communicate only via defined APIs or shared infrastructure ({% if 'backend' in modules %}DB, Queue{% elif 'tg_bot' in modules %}Queue{% endif %}).
 
 ### Service Types
 
@@ -56,12 +56,6 @@ The project is a collection of modular services defined in `services.yml`.
 {% endif -%}
 {% if 'tg_bot' in modules -%}
 - `python-faststream`: Telegram bot with Redis event integration.
-{% endif -%}
-{% if 'notifications' in modules -%}
-- `python-faststream`: Event-driven worker using FastStream (no HTTP, consumes from message broker).
-{% endif -%}
-{% if 'frontend' in modules -%}
-- `node`: Node.js service (exposes port 4321).
 {% endif -%}
 - `default`: Generic container placeholder.
 
@@ -85,12 +79,6 @@ Services can specify `depends_on` in `services.yml` to document runtime dependen
 {%- if 'tg_bot' in modules %}
   - `tg_bot/`: Telegram bot using python-telegram-bot polling.
 {%- endif %}
-{%- if 'notifications' in modules %}
-  - `notifications_worker/`: Notification service (email, telegram).
-{%- endif %}
-{%- if 'frontend' in modules %}
-  - `frontend/`: Node.js frontend.
-{%- endif %}
 {%- if 'backend' in modules %}
 - `shared/`:
     - `spec/`: YAML specifications (Source of Truth).
@@ -103,7 +91,7 @@ Services can specify `depends_on` in `services.yml` to document runtime dependen
 {% if 'backend' in modules -%}
 - **PostgreSQL:** Primary database for persistent storage.
 {% endif -%}
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules -%}
+{% if 'backend' in modules or 'tg_bot' in modules -%}
 - **Redis:** Message broker for async event processing.
 {% endif -%}
 {% if 'backend' in modules %}

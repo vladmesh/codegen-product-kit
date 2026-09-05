@@ -50,8 +50,6 @@ def fragments(project: Path) -> list[tuple[Path, dict[str, object]]]:
     [
         "project_backend",
         "project_standalone",
-        "project_notifications",
-        "project_frontend",
         "project_backend_tg_bot",
         "project_fullstack",
     ],
@@ -72,8 +70,6 @@ def test_env_contract_fragments_match_vendored_schema(
     [
         "project_backend",
         "project_standalone",
-        "project_notifications",
-        "project_frontend",
         "project_backend_tg_bot",
         "project_fullstack",
     ],
@@ -160,8 +156,6 @@ def test_required_local_contract_values_are_present_for_documented_backend_start
     [
         "project_backend",
         "project_standalone",
-        "project_notifications",
-        "project_frontend",
         "project_backend_tg_bot",
         "project_fullstack",
     ],

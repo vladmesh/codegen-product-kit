@@ -36,7 +36,7 @@ def template_source() -> Path:
     if not status.strip():
         _TEMPLATE_SOURCE = REPO_ROOT
         return _TEMPLATE_SOURCE
-    snapshot_root = Path(tempfile.mkdtemp(prefix="service-template-snapshot-"))
+    snapshot_root = Path(tempfile.mkdtemp(prefix="codegen-product-kit-snapshot-"))
     atexit.register(shutil.rmtree, snapshot_root, True)
     clone = snapshot_root / "template"
     _git("clone", "--quiet", "--no-hardlinks", str(REPO_ROOT), str(clone), cwd=REPO_ROOT)
@@ -155,18 +155,6 @@ def project_standalone(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def project_notifications(tmp_path_factory):
-    """Generate a standalone notifications project (once per session)."""
-    return run_copier(tmp_path_factory.mktemp("notifications"), "notifications")
-
-
-@pytest.fixture(scope="session")
-def project_frontend(tmp_path_factory):
-    """Generate a standalone frontend project (once per session)."""
-    return run_copier(tmp_path_factory.mktemp("frontend"), "frontend")
-
-
-@pytest.fixture(scope="session")
 def project_backend_tg_bot(tmp_path_factory):
     """Generate a backend+tg_bot project (once per session)."""
     return run_copier(tmp_path_factory.mktemp("backend_tg_bot"), "backend,tg_bot")
@@ -174,5 +162,5 @@ def project_backend_tg_bot(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def project_fullstack(tmp_path_factory):
-    """Generate a fullstack project (once per session)."""
-    return run_copier(tmp_path_factory.mktemp("fullstack"), "backend,tg_bot,notifications,frontend")
+    """Generate a backend plus Telegram bot project (once per session)."""
+    return run_copier(tmp_path_factory.mktemp("fullstack"), "backend,tg_bot")

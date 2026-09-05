@@ -18,7 +18,7 @@
    # Edit .env with your settings
    ```
 
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules or 'frontend' in modules -%}
+{% if 'backend' in modules or 'tg_bot' in modules -%}
 ### Development Ports
 
 `make dev-start` includes `infra/compose.local.yml`, which publishes host ports from `.env`:
@@ -26,12 +26,9 @@
 - `BACKEND_PORT` maps the backend HTTP service to container port `8000`.
 - `POSTGRES_HOST_PORT` maps PostgreSQL to container port `5432`.
 {% endif -%}
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules -%}
+{% if 'backend' in modules or 'tg_bot' in modules -%}
 - `REDIS_HOST_PORT` maps Redis to container port `6379`.
 {% endif -%}
-{% if 'frontend' in modules -%}
-- `FRONTEND_PORT` maps the frontend to container port `4321`.
-{% endif %}
 
 Set different host ports when running multiple generated projects on one machine.
 Use `infra/compose.base.yml` plus `infra/compose.dev.yml` without the local layer when services
@@ -88,12 +85,6 @@ This project includes the following modules:
 {% if 'tg_bot' in modules -%}
 - **tg_bot** - Telegram bot (python-telegram-bot polling)
 {% endif -%}
-{% if 'notifications' in modules -%}
-- **notifications** - Notification worker (email, telegram)
-{% endif -%}
-{% if 'frontend' in modules -%}
-- **frontend** - Node.js frontend
-{% endif %}
 
 ## Development Workflow
 
@@ -132,14 +123,11 @@ This project includes the following modules:
 - **FastAPI** + **Pydantic** (spec-first)
 - **PostgreSQL** + **SQLAlchemy** + **Alembic**
 {% endif -%}
-{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules -%}
+{% if 'backend' in modules or 'tg_bot' in modules -%}
 - **Redis** + **FastStream** (async messaging)
-{% endif -%}
-{% if 'frontend' in modules -%}
-- **Node.js** 20
 {% endif -%}
 - **Docker Compose** (containerized development)
 
 ---
 
-*Generated with [service-template](https://github.com/your-org/service-template)*
+*Generated with [codegen-product-kit](https://github.com/vladmesh/codegen-product-kit)*

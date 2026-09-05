@@ -27,12 +27,8 @@ _exclude:
   - "**/.coverage"
   - "{% if 'tg_bot' not in modules %}services/tg_bot{% endif %}"
   - "{% if 'tg_bot' not in modules %}services/tg_bot/**{% endif %}"
-  - "{% if 'notifications' not in modules %}services/notifications_worker{% endif %}"
-  - "{% if 'notifications' not in modules %}services/notifications_worker/**{% endif %}"
   - "{% if 'backend' not in modules %}services/backend{% endif %}"
   - "{% if 'backend' not in modules %}services/backend/**{% endif %}"
-  - "{% if 'frontend' not in modules %}services/frontend{% endif %}"
-  - "{% if 'frontend' not in modules %}services/frontend/**{% endif %}"
   - "{% if 'backend' not in modules %}shared/spec{% endif %}"
   - "{% if 'backend' not in modules %}shared/spec/**{% endif %}"
   - "{% if 'backend' not in modules %}shared/shared/generated{% endif %}"
@@ -62,7 +58,7 @@ project_slug:
 project_description:
   type: str
   help: "Short project description"
-  default: "A microservice project built with service-template framework"
+  default: "A product generated with codegen-product-kit"
 
 task_description:
   type: str
@@ -83,11 +79,14 @@ modules:
   type: str
   help: |
     Modules to include (comma-separated).
-    Available: backend, tg_bot, notifications, frontend
+    Available: backend, tg_bot
     Example: backend,tg_bot
     Note: at least one module must be selected.
   default: "backend"
-  validator: "{% if not modules or modules.strip() == '' %}At least one module must be selected{% endif %}"
+  validator: >-
+    {% if not modules or not (modules | regex_search('^\\s*(backend|tg_bot)(\\s*,\\s*(backend|tg_bot))*\\s*$')) %}
+    Modules must contain only: backend, tg_bot
+    {% endif %}
 
 modules_list:
   type: str
@@ -101,9 +100,3 @@ python_version:
   choices:
     - "3.11"
     - "3.12"
-
-node_version:
-  type: str
-  help: "Node.js version (for frontend)"
-  default: "20"
-  when: "{{ 'frontend' in modules }}"

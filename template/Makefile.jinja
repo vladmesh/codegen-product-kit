@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck tests infra-start ps worker-start worker-stop worker-clean smoke-probe worker-call down dev-start dev-smoke dev-stop dev-clean prod-start prod-stop {% if 'backend' in modules %}migrate makemigrations generate-from-spec validate-specs lint-controllers openapi typescript test-integration{% endif %} log tooling-tests check-deps
+.PHONY: setup lint format typecheck tests infra-start ps worker-start worker-stop worker-clean smoke-probe worker-call down dev-start dev-smoke dev-stop dev-clean prod-start prod-stop {% if 'backend' in modules %}migrate makemigrations generate-from-spec validate-specs lint-controllers openapi test-integration{% endif %} log tooling-tests check-deps
 
 -include .env
 export
@@ -13,8 +13,8 @@ CHECKOUT_UID := $(shell stat -c '%u' .)
 CHECKOUT_GID := $(shell stat -c '%g' .)
 COMPOSE_ENV_INTEGRATION := COMPOSE_PROJECT_NAME=tests-integration HOST_UID=$(CHECKOUT_UID) HOST_GID=$(CHECKOUT_GID)
 COMPOSE_ENV_DEV_SMOKE := COMPOSE_PROJECT_NAME={{ project_slug }}-dev-smoke
-INFRA_SERVICES :={% if 'backend' in modules %} db{% endif %}{% if 'backend' in modules or 'tg_bot' in modules or 'notifications' in modules %} redis{% endif %}
-SMOKE_RUNNER ?={% if 'backend' in modules %} backend{% elif 'tg_bot' in modules %} tg_bot{% elif 'notifications' in modules %} notifications_worker{% endif %}
+INFRA_SERVICES :={% if 'backend' in modules %} db{% endif %}{% if 'backend' in modules or 'tg_bot' in modules %} redis{% endif %}
+SMOKE_RUNNER ?={% if 'backend' in modules %} backend{% elif 'tg_bot' in modules %} tg_bot{% endif %}
 SMOKE_URL ?={% if 'backend' in modules %} http://backend:8000/health{% endif %}
 method ?= POST
 body ?=
@@ -197,7 +197,7 @@ dev-start:
 
 dev-smoke:
 	@set -e; \
-	services="{% if 'backend' in modules %}backend {% endif %}{% if 'tg_bot' in modules %}tg_bot {% endif %}{% if 'notifications' in modules %}notifications_worker{% endif %}"; \
+	services="{% if 'backend' in modules %}backend {% endif %}{% if 'tg_bot' in modules %}tg_bot{% endif %}"; \
 	if [ -z "$$services" ]; then \
 		echo "No Python services selected, skipping"; \
 		exit 0; \
@@ -240,6 +240,4 @@ lint-controllers:
 openapi:
 	$(PYTHON) -m framework.openapi.generator
 
-typescript:
-	$(PYTHON) -m framework.frontend.generator
 {% endif %}

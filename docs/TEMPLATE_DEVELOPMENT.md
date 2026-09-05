@@ -5,8 +5,7 @@ update preservation, and the embedded framework version.
 
 ## Modules and names
 
-The supported selection values are `backend`, `tg_bot`, `notifications`, and `frontend`.
-`notifications` renders the service name `notifications_worker`. At least one module is required.
+The supported selection values are `backend` and `tg_bot`. At least one module is required.
 
 Unselected modules are removed through conditional `_exclude` entries before copy. Every new module
 must update the service registry, Compose layers, environment contract, documentation conditionals,
@@ -30,8 +29,8 @@ Use the normalized module values from `modules`. Keep conditionals at column zer
 Whitespace trimming can remove Python indentation, YAML indentation, or Make recipe tabs, so verify
 rendered output instead of applying `{%-` and `-%}` mechanically.
 
-Generated Markdown must render cleanly for backend-only, bot-only, frontend-only,
-notifications-only, and combined configurations. Commands that exist only with backend must be
+Generated Markdown must render cleanly for backend-only, bot-only, and combined configurations.
+Commands that exist only with backend must be
 inside the same backend condition as the corresponding Make target.
 
 ## Validation
@@ -47,7 +46,7 @@ Run `make test-copier-slow` for changes to setup, Docker, Compose, module combin
 generated-project execution. A focused render can use:
 
 ```bash
-uvx copier copy . /tmp/service-template-smoke \
+uvx copier copy . /tmp/codegen-product-kit-smoke \
   --data project_name=smoke \
   --data modules=backend,tg_bot \
   --defaults --vcs-ref=HEAD --overwrite
