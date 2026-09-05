@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI now pins setup-uv to its immutable v7.4.0 commit, an exact uv release, and its Linux x86_64 checksum, avoiding the mutable remote version manifest while retaining download verification.
+
 - **Breaking:** Generated backends now include the versioned, manifest-backed core jobs v1
   contract. Capability-protected `POST /jobs/fire` records a caller-supplied command identity for a
   behaviour declared in `services/<service>/manifest.yaml` and emits `job_fired`; unprotected

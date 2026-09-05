@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from framework.toolchain import SETUP_UV_ACTION, UV_VERSION
+from framework.toolchain import SETUP_UV_ACTION, UV_LINUX_X86_64_CHECKSUM, UV_VERSION
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,6 +21,7 @@ WORKFLOWS = [
 SETUP_UV_USES = re.compile(r"uses:\s*astral-sh/setup-uv@\S+")
 PINNED_SETUP_UV_STEP = re.compile(
     r"uses:\s*(?P<action>astral-sh/setup-uv@\S+)\n\s*with:\n\s*version:\s*\"(?P<version>[^\"]+)\""
+    r"\n\s*checksum:\s*\"(?P<checksum>[^\"]+)\""
 )
 
 
@@ -38,12 +39,16 @@ def test_setup_uv_steps_are_pinned(workflow: Path) -> None:
     )
     assert steps, f"{workflow.relative_to(REPO_ROOT)} no longer sets up uv"
 
-    for action, version in steps:
+    for action, version, checksum in steps:
         assert action == SETUP_UV_ACTION, (
             f"{workflow.relative_to(REPO_ROOT)} uses {action}, expected {SETUP_UV_ACTION}"
         )
         assert version == UV_VERSION, (
             f"{workflow.relative_to(REPO_ROOT)} pins uv {version}, expected {UV_VERSION}"
+        )
+        assert checksum == UV_LINUX_X86_64_CHECKSUM, (
+            f"{workflow.relative_to(REPO_ROOT)} checks {checksum}, "
+            f"expected {UV_LINUX_X86_64_CHECKSUM}"
         )
 
 

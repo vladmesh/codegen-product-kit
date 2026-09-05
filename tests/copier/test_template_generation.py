@@ -53,8 +53,11 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     workflow = Path(".github/workflows/test-template.yml").read_text()
 
     assert "fetch-depth: 0" in workflow
-    assert "uses: astral-sh/setup-uv@v7" in workflow
+    assert "uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a" in workflow
     assert 'version: "0.11.29"' in workflow
+    assert (
+        'checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"' in workflow
+    )
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "--data modules=backend" in workflow
     assert "matrix:" not in workflow
@@ -141,8 +144,7 @@ class TestBackendOnlyGeneration:
         assert "## Parallel run isolation" in infra_readme
         assert "COMPOSE_PROJECT_NAME=my-project-dev make dev-start" in infra_readme
         assert (
-            "make worker-call SMOKE_RUNNER=backend url=http://backend:8000/health"
-            in infra_readme
+            "make worker-call SMOKE_RUNNER=backend url=http://backend:8000/health" in infra_readme
         )
         assert "docker compose --env-file .env" in infra_readme
         assert "`--project-name` option explicitly" in infra_readme
@@ -192,11 +194,9 @@ class TestBackendOnlyGeneration:
         """Generated CI must pin setup-uv and uv instead of resolving 'latest'."""
         import yaml
 
-        from framework.toolchain import SETUP_UV_ACTION, UV_VERSION
+        from framework.toolchain import SETUP_UV_ACTION, UV_LINUX_X86_64_CHECKSUM, UV_VERSION
 
-        ci_yml = yaml.safe_load(
-            (project_backend / ".github" / "workflows" / "ci.yml").read_text()
-        )
+        ci_yml = yaml.safe_load((project_backend / ".github" / "workflows" / "ci.yml").read_text())
         steps = [
             step
             for job in ci_yml["jobs"].values()
@@ -208,6 +208,14 @@ class TestBackendOnlyGeneration:
         for step in steps:
             assert step["uses"] == SETUP_UV_ACTION
             assert step["with"]["version"] == UV_VERSION
+            assert step["with"]["checksum"] == UV_LINUX_X86_64_CHECKSUM
+
+        embedded_toolchain = (
+            project_backend / ".framework" / "framework" / "toolchain.py"
+        ).read_text()
+        assert f'SETUP_UV_ACTION = "{SETUP_UV_ACTION}"' in embedded_toolchain
+        assert f'UV_VERSION = "{UV_VERSION}"' in embedded_toolchain
+        assert f'UV_LINUX_X86_64_CHECKSUM = "{UV_LINUX_X86_64_CHECKSUM}"' in embedded_toolchain
 
     def test_copier_answers_file_created(self, project_backend: Path):
         """Generated project should have .copier-answers.yml."""
@@ -372,7 +380,6 @@ class TestBackendWithTgBotGeneration:
         assert (backend / "src" / "generated" / "routers" / "settings.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "jobs.py").is_file()
         assert (backend / "src" / "generated" / "jobs_schemas.py").is_file()
-
 
     def test_the_jobs_core_adds_no_scheduler_container_worker_or_timer(
         self, project_backend: Path
