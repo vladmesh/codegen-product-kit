@@ -1,15 +1,25 @@
-# Reminders package idle RSS observation
+# Reminders package idle RSS observations
 
-Product A's incremental idle backend RSS was 584 KiB in the local CI-equivalent compose run on
-2026-09-05. This is an observation, not a limit or performance promise.
+GitHub Actions run `33996786092`, job `101388614893`, tested commit `9cfe1ce` on 2026-09-05 and
+produced these five-read ranges from the same two running containers:
 
-The slow Copier proof generates product A and preserves its package-free baseline before running
-`kit add reminders`. It starts each backend separately with the existing
-`infra/compose.tests.integration.yml` stack, waits for Compose health, and reads `VmRSS` for PID 1
-from `/proc/1/status` inside the backend container. The package-free process measured 98,308 KiB and
-the otherwise unchanged product A process measured 98,892 KiB, producing the recorded 584 KiB
-difference.
+| Product | Emitted readings (KiB) | Observed range (KiB) |
+|---|---|---|
+| Package-free | 98,856, 98,856, 98,856, 98,856, 98,856 | 98,856 to 98,856 |
+| Product A with reminders | 99,268, 99,268, 99,268, 99,268, 99,268 | 99,268 to 99,268 |
+| Incremental | derived from the two ranges | +412 to +412 |
 
-This is a single pair of Linux container measurements. Allocator behavior, import timing, and host
-noise can change either reading, so CI repeats and reports the measurement without asserting this
-recorded value or smoothing multiple samples.
+The immediately preceding attested CI run, `33995848608`, measured 99,112 KiB package-free and
+98,940 KiB for product A, an incremental -172 KiB sample. The negative sample is reported as
+negative. Its sign conflicts with the repeated run's +412 KiB range, placing the delta at or below
+the noise floor of this `/proc/1/status` pair. This method does not resolve the reminders package's
+idle memory cost.
+
+Method: the slow Copier proof generates product A and preserves its package-free baseline before
+running `kit add reminders`. In one test invocation it starts both backends with the existing
+`infra/compose.tests.integration.yml` stack, waits for both Compose health checks, then reads PID 1's
+`VmRSS` from `/proc/1/status` five times per already-running container without rebuilding or
+restarting between samples. It emits both reading arrays, both observed ranges, and the incremental
+range so the calculation is traceable from the CI log.
+
+These observations set no limit and imply no performance promise.
