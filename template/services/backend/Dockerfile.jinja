@@ -26,7 +26,8 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project \
     && cd services/backend \
-    && uv sync --frozen --no-install-project
+    && uv sync --frozen --no-install-project \
+    && .venv/bin/python -c "from pathlib import Path; import site; Path(site.getsitepackages()[0], 'codegen-kit-tooling.pth').write_text('/app/.venv/lib/python{{ python_version }}/site-packages\\n')"
 
 FROM base AS dev
 COPY --from=dev-deps /app/.venv /app/.venv

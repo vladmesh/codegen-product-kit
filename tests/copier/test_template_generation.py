@@ -859,6 +859,15 @@ class TestIntegrationCompose:
             f"integration-tests PATH must not use host-mounted venv: {path_val}"
         )
 
+    def test_dev_backend_venv_can_import_root_tooling(self, project_backend: Path):
+        """The dev target exposes root tooling without adding it to the runtime target."""
+        dockerfile = (project_backend / "services" / "backend" / "Dockerfile").read_text()
+        dev_dependencies, runtime = dockerfile.split("\nFROM base AS runtime\n", maxsplit=1)
+
+        assert "codegen-kit-tooling.pth" in dev_dependencies
+        assert "/app/.venv/lib/python3.12/site-packages" in dev_dependencies
+        assert "codegen-kit-tooling.pth" not in runtime
+
     def test_workspace_writers_require_checkout_ownership(self, project_backend: Path):
         """Both containers writing to /workspace must use the checkout owner."""
         import yaml
