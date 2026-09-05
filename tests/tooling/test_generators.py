@@ -89,8 +89,13 @@ operations:
 
     events = (shared_gen / "events.py").read_text()
     assert "broker = RedisBroker" in events
-    assert 'async def publish_UserCreated(message: UserCreated)' in events
-    assert '_pub_UserCreated = get_broker().publisher("UserCreated")' in events
+    assert "async def publish_UserCreated(" in events
+    assert "message: UserCreated," in events
+    assert '_pub_UserCreated = get_broker().publisher(stream="UserCreated")' in events
+    assert "class EventEnvelope(BaseModel, Generic[PayloadT]):" in events
+    assert "event_id: UUID" in events
+    assert "occurred_at: AwareDatetime" in events
+    assert "schema_version: int = 1" in events
 
     backend_gen = root / "services" / "backend" / "src" / "generated"
     assert (backend_gen / "protocols.py").exists()

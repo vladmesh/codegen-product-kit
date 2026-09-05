@@ -16,9 +16,9 @@ from fastapi import (
     Depends,
     Query,
 )
-from faststream.redis import RedisBroker
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.generated.events import publish_event
 from shared.generated.schemas import (
     UserAccess,
     UserGrant,
@@ -32,7 +32,6 @@ def create_router(
     *,
     get_session: Callable[..., object],
     get_controller: Callable[[], UsersControllerProtocol],
-    get_broker: Callable[[], RedisBroker],
 ) -> APIRouter:
     router = APIRouter(
         prefix="/users",
@@ -48,13 +47,12 @@ def create_router(
         payload: UserGrant = Body(...),  # noqa: B008
         session: AsyncSession = Depends(get_session),  # noqa: B008
         controller: UsersControllerProtocol = Depends(get_controller),  # noqa: B008
-        broker: RedisBroker = Depends(get_broker),  # noqa: B008
     ) -> UserAccess:
         result = await controller.grant(
             session=session,
             payload=payload,
         )
-        await broker.publish(result, "user_granted")
+        await publish_event("user_granted", result)
         return result
 
     @router.post(

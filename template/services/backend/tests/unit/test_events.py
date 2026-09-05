@@ -19,4 +19,9 @@ async def test_publish_user_granted() -> None:
             external_id="456",
         )
 
-        await publish_user_granted(event)
+        envelope = await publish_user_granted(event)
+
+        assert envelope.payload == event
+        assert envelope.event_id
+        assert envelope.occurred_at.tzinfo is not None
+        assert envelope.schema_version == 1

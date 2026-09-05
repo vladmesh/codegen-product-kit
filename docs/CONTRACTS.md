@@ -48,6 +48,29 @@ Environment variables remain startup, connectivity, platform, and secret configu
 derived from the Product Brief or intended for a user to change belongs in a manifest-declared
 setting instead.
 
+## Durable product events v1
+
+Every generated product event is appended to a Redis Stream. The stream name is the event name from
+`shared/spec/events.yaml`, such as `job_fired`; generated code has no Redis channel pub/sub path for
+product events. Each entry contains a generated envelope with `event_id` (UUID), timezone-aware
+`occurred_at`, integer `schema_version` (currently `1`), and the declared message under `payload`.
+Publishers create this metadata, while consumers deserialize the whole typed envelope.
+
+Generated subscriber groups are named `events:<service>`. Each consuming service gets its own stable
+group, preserving fan-out: replicas of one service compete within that service's group, while a
+different service receives the same stream entry through its own group. Consumer names include the
+role, hostname and process id. Every generated subscription has a live reader and a recovery reader
+in the same group; the recovery reader uses FastStream's Redis `XAUTOCLAIM` support after one second
+of idle time so a delivery abandoned by a failed process is processed again.
+
+The backend core provides `consume_once(session, consumer_group, event_id, effect)`. It records the
+group and event UUID in the core-owned `event_consumptions` table before running the effect. The
+marker and effect share the caller's database transaction, so rollback makes a failed delivery
+eligible to run again, while a committed redelivery skips the effect. This exactly-once boundary
+therefore applies to effects made atomically through that session; external side effects require
+their own idempotency key. Services without database state may consume streams but cannot claim this
+helper's exactly-once guarantee.
+
 ## Core jobs v1
 
 Every backend generated from this template provides the versioned core jobs contract:
@@ -110,9 +133,10 @@ second time, while the opposite direction is ruled out by the ordering — a com
 `dispatched` always had its `job_fired` published, because the emission precedes the transition and
 is never inverted.
 
-That is a statement about emission, and no more. `job_fired` is published on Redis pub/sub, where a
-publish with no subscriber attached still succeeds, so `dispatched` is evidence that the core
-emitted the event — not evidence that a provider consumed it, ran the behaviour or completed it.
+That is a statement about emission, and no more. `job_fired` is appended to its Redis Stream, so
+`dispatched` is evidence that the core durably emitted the event, not evidence that a provider has
+already consumed it, run the behaviour or completed it. An established provider consumer group can
+resume from its backlog after downtime.
 Whether the behaviour actually happened is asserted by central QA against the behaviour's own
 output, never inferred from dispatch evidence.
 

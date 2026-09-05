@@ -14,7 +14,6 @@ from services.backend.src.controllers.jobs import JobsController
 from services.backend.src.controllers.settings import SettingsController
 from services.backend.src.controllers.users import UsersController
 from services.backend.src.core.db import get_async_db
-from shared.generated.events import get_broker
 
 from .protocols import JobsControllerProtocol, SettingsControllerProtocol, UsersControllerProtocol
 from .routers import jobs, settings, users
@@ -50,7 +49,6 @@ def create_api_router() -> APIRouter:
         users.create_router(
             get_session=get_async_db,
             get_controller=get_users_controller,
-            get_broker=get_broker,
         )
     )
     return router

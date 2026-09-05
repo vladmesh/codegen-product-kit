@@ -71,6 +71,19 @@ jobs:
           make tests
           test -z "$(git status --porcelain)"
 
+      - name: Run generated durable-event integration stack
+        run: |
+          cd /tmp/test-project
+          cp .env.example .env
+          make test-integration
+
+      - name: Clean up generated integration stack
+        if: always()
+        run: |
+          cd /tmp/test-project
+          COMPOSE_PROJECT_NAME=tests-integration docker compose \
+            -f infra/compose.tests.integration.yml down --volumes --remove-orphans || true
+
       - name: Smoke generated pre-commit hook
         run: |
           cd /tmp/test-project

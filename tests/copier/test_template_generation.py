@@ -89,6 +89,7 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     assert "make lint" in workflow
     assert "make typecheck" in workflow
     assert "make tests" in workflow
+    assert "make test-integration" in workflow
     assert 'test -z "$(git status --porcelain)"' in workflow
     assert "Smoke generated pre-commit hook" in workflow
     assert "git init" in workflow
@@ -157,6 +158,25 @@ class TestBackendOnlyGeneration:
         """Backend service directory should exist."""
         assert (project_backend / "services" / "backend").exists()
         assert (project_backend / "services" / "backend" / "Dockerfile").exists()
+
+    def test_durable_event_contract_is_generated(self, project_backend: Path):
+        """Backend products include stream envelopes, state, migration, and proof."""
+        events = (project_backend / "shared" / "shared" / "generated" / "events.py").read_text()
+
+        assert 'publisher(stream="job_fired")' in events
+        assert "class EventEnvelope" in events
+        assert "event_id: UUID" in events
+        assert "occurred_at: AwareDatetime" in events
+        assert "schema_version: int = 1" in events
+        assert (
+            project_backend
+            / "services/backend/src/core/idempotent_consumer.py"
+        ).exists()
+        assert (
+            project_backend
+            / "services/backend/migrations/versions/d4a7b2c9e1f0_create_event_consumptions.py"
+        ).exists()
+        assert (project_backend / "tests/integration/test_durable_events.py").exists()
 
     def test_other_services_excluded(self, project_backend: Path):
         """Other service directories should not exist."""

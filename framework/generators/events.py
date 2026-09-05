@@ -37,7 +37,7 @@ class EventsGenerator(BaseGenerator):
             "events.py.j2",
             self.output_file,
             publishers=publishers,
-            imports=imports,
+            imports=sorted(imports),
         )
 
         return [self.output_file]

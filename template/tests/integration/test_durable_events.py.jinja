@@ -1,0 +1,112 @@
+{% if 'backend' in modules -%}
+from __future__ import annotations
+
+import asyncio
+import os
+from uuid import uuid4
+
+from faststream.redis import RedisBroker, StreamSub
+import pytest
+from redis.asyncio import Redis
+
+from services.backend.src.core.db import AsyncSessionLocal
+from services.backend.src.core.idempotent_consumer import consume_once
+from shared.generated.events import EventEnvelope, get_broker, publish_job_fired
+from shared.generated.schemas import JobFired
+
+STREAM = "job_fired"
+GROUP = "events:integration"
+
+
+def _event() -> JobFired:
+    return JobFired(
+        contract_version=1,
+        command_id="durable-command",
+        name="integration",
+        arguments={},
+        fired_by_product="integration-product",
+        fired_by_run="integration-run",
+        accepted_at="2026-09-05T00:00:00Z",
+    )
+
+
+async def _read(consumer: str, *, min_idle_time: int | None = None):
+    broker = RedisBroker(os.environ["REDIS_URL"])
+    subscriber = broker.subscriber(
+        stream=StreamSub(
+            STREAM,
+            group=GROUP,
+            consumer=consumer,
+            min_idle_time=min_idle_time,
+        )
+    )
+    await broker.start()
+    message = await subscriber.get_one(timeout=5)
+    assert message is not None
+    return broker, message
+
+
+@pytest.mark.asyncio
+async def test_stream_backlog_recovery_and_idempotent_redelivery() -> None:
+    redis = Redis.from_url(os.environ["REDIS_URL"])
+    await redis.flushdb()
+    await redis.xgroup_create(STREAM, GROUP, id="0-0", mkstream=True)
+
+    publisher = get_broker()
+    await publisher.connect()
+    try:
+        # The service group exists but no consumer is running when this event is published.
+        down_envelope = await publish_job_fired(_event())
+        live_broker, live_message = await _read("consumer-after-downtime")
+        try:
+            decoded = EventEnvelope[JobFired].model_validate(await live_message.decode())
+            assert decoded.event_id == down_envelope.event_id
+            assert decoded.occurred_at == down_envelope.occurred_at
+            assert decoded.schema_version == 1
+            await redis.xack(STREAM, GROUP, *live_message.raw_message["message_ids"])
+        finally:
+            await live_broker.stop()
+
+        # This delivery is deliberately left pending, as if the process died mid-effect.
+        crashed_envelope = await publish_job_fired(_event())
+        crashed_broker, crashed_message = await _read("consumer-that-crashes")
+        assert (
+            EventEnvelope[JobFired].model_validate(await crashed_message.decode()).event_id
+            == crashed_envelope.event_id
+        )
+        await crashed_broker.stop()
+
+        await asyncio.sleep(0.01)
+        reclaim_broker, reclaimed_message = await _read("replacement-consumer", min_idle_time=1)
+        try:
+            reclaimed = EventEnvelope[JobFired].model_validate(await reclaimed_message.decode())
+            assert reclaimed.event_id == crashed_envelope.event_id
+            await redis.xack(STREAM, GROUP, *reclaimed_message.raw_message["message_ids"])
+        finally:
+            await reclaim_broker.stop()
+
+        duplicate_id = uuid4()
+        await publish_job_fired(_event(), event_id=duplicate_id)
+        await publish_job_fired(_event(), event_id=duplicate_id)
+        calls = 0
+        for delivery in range(2):
+            duplicate_broker, message = await _read(f"idempotent-consumer-{delivery}")
+            try:
+                envelope = EventEnvelope[JobFired].model_validate(await message.decode())
+
+                async def effect() -> None:
+                    nonlocal calls
+                    calls += 1
+
+                async with AsyncSessionLocal() as session:
+                    await consume_once(session, GROUP, envelope.event_id, effect)
+                    await session.commit()
+                await redis.xack(STREAM, GROUP, *message.raw_message["message_ids"])
+            finally:
+                await duplicate_broker.stop()
+
+        assert calls == 1
+    finally:
+        await publisher.stop()
+        await redis.aclose()
+{% endif -%}
