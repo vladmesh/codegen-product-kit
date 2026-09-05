@@ -713,7 +713,8 @@ def test_package_contract_and_migrations_against_real_postgres(
                             for item in groups
                             if item["name"] in (group, group.encode())
                         )
-                        if state["pending"] == 0 and state.get("lag") == 0:
+                        lag = state.get("lag")
+                        if state["pending"] == 0 and lag in (0, None):
                             return
                         await __import__("asyncio").sleep(0.01)
 
