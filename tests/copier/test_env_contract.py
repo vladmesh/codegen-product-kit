@@ -11,11 +11,23 @@ from jsonschema import Draft202012Validator
 import pytest
 import yaml
 
-from tests.copier.conftest import VENV_COPIER
-
 REPO_ROOT = Path(__file__).parent.parent.parent
 SCHEMA = json.loads((REPO_ROOT / "tests/fixtures/env-contract.schema.json").read_text())
 VALIDATOR = Draft202012Validator(SCHEMA)
+
+
+def installed_tooling_python(project: Path) -> Path:
+    """Install the generated root lock once and return its Python interpreter."""
+    python = project / ".venv" / "bin" / "python"
+    if not python.exists():
+        subprocess.run(
+            ["uv", "sync", "--frozen"],
+            cwd=project,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    return python
 
 
 def env_keys(path: Path) -> set[str]:
@@ -169,7 +181,7 @@ def test_env_contract_gate_accepts_baseline_fragments(
 
     result = subprocess.run(
         [
-            str(VENV_COPIER.parent / "python"),
+            str(installed_tooling_python(project)),
             "-m",
             "framework.contracts.env_usage",
             "--root",
@@ -180,7 +192,7 @@ def test_env_contract_gate_accepts_baseline_fragments(
             "test-sha",
         ],
         cwd=project,
-        env={**os.environ, "PYTHONPATH": ".framework"},
+        env=os.environ.copy(),
         capture_output=True,
         text=True,
         check=False,
@@ -197,7 +209,7 @@ def test_env_contract_gate_rejects_undeclared_key(project_backend: Path) -> None
 
     result = subprocess.run(
         [
-            str(VENV_COPIER.parent / "python"),
+            str(installed_tooling_python(project_backend)),
             "-m",
             "framework.contracts.env_usage",
             "--root",
@@ -208,7 +220,7 @@ def test_env_contract_gate_rejects_undeclared_key(project_backend: Path) -> None
             "test-sha",
         ],
         cwd=project_backend,
-        env={**os.environ, "PYTHONPATH": ".framework"},
+        env=os.environ.copy(),
         capture_output=True,
         text=True,
         check=False,
@@ -226,4 +238,4 @@ def test_ci_publishes_commit_bound_environment_contract(project_backend: Path) -
     assert '--commit-sha "${{ github.sha }}"' in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "env-contract-${{ github.sha }}" in workflow
-    assert (project_backend / ".framework" / "framework" / "contracts" / "env_usage.py").exists()
+    assert not (project_backend / f".{'framework'}").exists()

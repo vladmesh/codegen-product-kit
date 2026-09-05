@@ -24,6 +24,7 @@ def get_broker() -> RedisBroker:
         _broker = RedisBroker(redis_url, message_format=BinaryMessageFormatV1)
     return _broker
 
+
 _pub_user_granted: Any = None
 
 
@@ -32,6 +33,8 @@ async def publish_user_granted(message: UserAccess) -> Any:
     if _pub_user_granted is None:
         _pub_user_granted = get_broker().publisher("user_granted")
     return await _pub_user_granted.publish(message)
+
+
 _pub_command_received: Any = None
 
 
@@ -40,6 +43,8 @@ async def publish_command_received(message: CommandReceived) -> Any:
     if _pub_command_received is None:
         _pub_command_received = get_broker().publisher("command_received")
     return await _pub_command_received.publish(message)
+
+
 _pub_job_fired: Any = None
 
 

@@ -9,12 +9,12 @@ module-specific `ARCHITECTURE.md` and `infra/README.md`.
 |---|---|---|
 | `framework/` | framework developers | Spec models, validators, and generators |
 | `template/` | template developers | Copier source for generated projects |
-| `template/.framework/framework/` | sync script | Embedded mirror of `framework/` |
 | `tests/unit/`, `tests/tooling/` | framework tests | Typed specs and generator behavior |
 | `tests/copier/` | template tests | Rendered module combinations and updates |
 
-`scripts/sync-framework-to-template.sh` is the only supported mirror writer. The mirror must be
-byte-for-byte synchronized before merge.
+The repository root builds the `codegen-kit-tooling` distribution while preserving the
+`framework` Python import name. Generated products resolve that distribution from an exact Git
+commit and commit the resulting root `uv.lock`.
 
 ## Spec-first generation
 
@@ -132,7 +132,7 @@ behavior; those defaults do not weaken required production application settings.
 
 ## Change validation
 
-- Framework source change: sync the mirror, then run lint, unit/tooling tests, and sync check.
+- Framework source change: run lint, unit/tooling tests, and the generated-product checks.
 - Template or Copier change: add the non-slow Copier matrix.
 - Compose, setup, Docker, or module-combination change: add slow Copier/generated-project checks.
 

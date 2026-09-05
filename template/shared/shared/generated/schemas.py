@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, RootModel, conint, constr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, conint, constr
 
 
 class Status(StrEnum):

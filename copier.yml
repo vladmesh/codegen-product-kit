@@ -3,6 +3,10 @@ _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _subdirectory: template
 
+_tasks:
+  - command: "uv lock"
+    working_directory: "{{ _copier_conf.dst_path }}"
+
 _exclude:
   - .git
   - .git/**

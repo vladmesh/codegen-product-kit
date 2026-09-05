@@ -372,7 +372,6 @@ def _is_shell_entrypoint(path: Path) -> bool:
 
 def _project_files(root: Path) -> Iterable[Path]:
     ignored_parts = {
-        ".framework",
         ".git",
         ".mypy_cache",
         ".pytest_cache",

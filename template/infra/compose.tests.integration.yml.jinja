@@ -7,8 +7,7 @@ services:
     build:
       context: ..
       dockerfile: services/backend/Dockerfile
-      args:
-        INSTALL_DEV_DEPS: "true"
+      target: dev
     user: "${HOST_UID:?set HOST_UID to the checkout owner UID}:${HOST_GID:?set HOST_GID to the checkout owner GID}"
     env_file:
       - ../.env
@@ -49,8 +48,7 @@ services:
     build:
       context: ..
       dockerfile: services/backend/Dockerfile
-      args:
-        INSTALL_DEV_DEPS: "true"
+      target: dev
     user: "${HOST_UID:?set HOST_UID to the checkout owner UID}:${HOST_GID:?set HOST_GID to the checkout owner GID}"
     command: sh -c "python -m framework.generate && pytest -q tests/integration"
     working_dir: /workspace

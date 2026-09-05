@@ -36,7 +36,7 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(
         prefix="/users",
-        tags=['users'],
+        tags=["users"],
     )
 
     @router.post(

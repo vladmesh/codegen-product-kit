@@ -27,14 +27,12 @@ echo "[pre-push] Changed files:"
 echo "$changed_files" | head -20
 [ "$(echo "$changed_files" | wc -l)" -gt 20 ] && echo "  ... and more"
 
-run_check_sync=false
 run_lint=false
 run_test=false
 run_test_copier=false
 
 # Analyze what changed
 if echo "$changed_files" | grep -qE '^framework/'; then
-  run_check_sync=true
   run_lint=true
   run_test=true
 fi
@@ -50,7 +48,6 @@ fi
 
 # Makefile/infra/scripts affect everything
 if echo "$changed_files" | grep -qE '^(Makefile$|infra/|scripts/)'; then
-  run_check_sync=true
   run_lint=true
   run_test=true
   run_test_copier=true
@@ -58,7 +55,6 @@ fi
 
 # .github workflows should trigger full check
 if echo "$changed_files" | grep -qE '^\.github/'; then
-  run_check_sync=true
   run_lint=true
   run_test=true
   run_test_copier=true
@@ -66,13 +62,6 @@ fi
 
 # Execute only necessary checks
 checks_run=0
-
-if $run_check_sync; then
-  echo ""
-  echo "[pre-push] Checking framework synchronization..."
-  make check-sync
-  ((checks_run++)) || true
-fi
 
 if $run_lint; then
   echo ""

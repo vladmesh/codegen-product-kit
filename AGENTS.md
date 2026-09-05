@@ -25,6 +25,7 @@ uvx copier copy gh:vladmesh/codegen-product-kit . \
   --data project_name="my-project" \
   --data modules="tg_bot" \
   --defaults \
+  --trust \
   --vcs-ref=HEAD \
   --overwrite
 ```

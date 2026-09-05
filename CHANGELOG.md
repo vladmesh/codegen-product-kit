@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Generated products now install `codegen-kit-tooling` from an exact Git commit
+  recorded in the root `uv.lock`; the copied framework source and synchronization workflow are
+  removed. The import name remains `framework`, and production service images exclude generators
+  and validators.
+
 - Recast the repository as the independent `codegen-product-kit`, documenting its origin and the
   planned service/container/package vocabulary without claiming an implemented package runtime.
 

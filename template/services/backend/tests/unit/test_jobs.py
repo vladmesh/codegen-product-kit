@@ -97,9 +97,9 @@ async def test_fire_rejects_missing_duplicate_and_invalid_capabilities_before_re
         "/jobs/fire", headers=[(JOBS_CAPABILITY_HEADER.encode(), b"\xff")], json=payload
     )
 
-    assert [
-        response.status_code for response in (missing, wrong, duplicate, short, non_ascii)
-    ] == [status.HTTP_403_FORBIDDEN] * 5
+    assert [response.status_code for response in (missing, wrong, duplicate, short, non_ascii)] == [
+        status.HTTP_403_FORBIDDEN
+    ] * 5
     assert all(
         get_settings().jobs_fire_capability not in response.text
         for response in (missing, wrong, duplicate, short, non_ascii)

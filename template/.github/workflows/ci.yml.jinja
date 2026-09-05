@@ -135,8 +135,7 @@ jobs:
 
       - name: Generate code from specs
         run: |
-          uv venv
-          uv pip install -e .framework/ ruff
+          uv sync --frozen
           make generate-from-spec
 {% endif %}
       - name: Set up Docker Buildx

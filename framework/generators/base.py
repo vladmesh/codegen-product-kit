@@ -30,8 +30,8 @@ class BaseGenerator(ABC):
 
         # Resolve templates dir relative to this file to support both dev and prod structures
         # framework/generators/base.py -> framework/
-        self.framework_dir = Path(__file__).resolve().parent.parent
-        self.templates_dir = self.framework_dir / "templates" / "codegen"
+        self.tooling_dir = Path(__file__).resolve().parent.parent
+        self.templates_dir = self.tooling_dir / "templates" / "codegen"
 
     @abstractmethod
     def generate(self) -> list[Path]:

@@ -148,6 +148,7 @@ class TestBackendAccess:
         from unittest.mock import patch
 
         from telegram.ext import ApplicationHandlerStop
+
         from shared.generated.schemas import UserAccess
 
         revoked = UserAccess(
@@ -212,7 +213,6 @@ class TestBackendAccess:
 
         group_zero_handler.assert_not_awaited()
 {% endif %}
-
 
 class TestHandleStart:
     @pytest.mark.asyncio

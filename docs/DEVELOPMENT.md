@@ -10,7 +10,6 @@ make setup
 make lint
 make test
 make test-copier
-make check-sync
 ```
 
 See `docs/TESTING.md` for when the slow Copier suite is required.
@@ -26,17 +25,11 @@ See `docs/TESTING.md` for when the slow Copier suite is required.
 | `tests/unit/`, `tests/tooling/` | Framework behavior |
 | `tests/copier/` | Generated-project behavior |
 
-## Framework mirror
+## Tooling distribution
 
-Generated projects embed the framework under `template/.framework/framework/`. After changing
-`framework/`, run:
-
-```bash
-make sync-framework
-make check-sync
-```
-
-Do not edit only the embedded copy. `make sync-framework-preview` shows the pending mirror change.
+`framework/` is the sole source of the installable `codegen-kit-tooling` distribution. Generated
+products import it as `framework` through the exact Git requirement and root lock produced by
+Copier. Update packaging metadata and generated-product coverage with any dependency change.
 
 ## Current generators
 
@@ -64,7 +57,7 @@ generator and service scaffold are not supported extension points.
 3. Reuse the shared operation context and type renderers.
 4. Put emitted boilerplate in `framework/templates/codegen/`.
 5. Add focused unit/tooling tests and output-level Copier coverage.
-6. Sync the embedded framework mirror.
+6. Verify a generated product against the installed tooling.
 
 Generated files should be atomically written, deterministic, and carry the standard warning unless
 they are intentionally write-once user files.
@@ -80,7 +73,7 @@ For a manual render:
 uvx copier copy . /tmp/codegen-product-kit-smoke \
   --data project_name=smoke \
   --data modules=backend,tg_bot \
-  --defaults --vcs-ref=HEAD --overwrite
+  --defaults --trust --vcs-ref=HEAD --overwrite
 ```
 
 Then run the generated project's `make setup`, `make lint`, `make typecheck`, and `make tests`.

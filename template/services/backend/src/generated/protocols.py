@@ -7,6 +7,7 @@
 """
 Protocols for service controllers.
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -25,35 +26,34 @@ from shared.generated.schemas import (
     UserRevoke,
 )
 
+
 class JobsControllerProtocol(Protocol):
     async def fire(
         self,
         session: AsyncSession,
         payload: JobFire,
-    ) -> JobCommand:
-        ...
+    ) -> JobCommand: ...
 
     async def evidence(
         self,
         session: AsyncSession,
         payload: JobCommandRef,
-    ) -> JobCommand:
-        ...
+    ) -> JobCommand: ...
+
 
 class SettingsControllerProtocol(Protocol):
     async def get(
         self,
         session: AsyncSession,
         payload: SettingGet,
-    ) -> SettingValue:
-        ...
+    ) -> SettingValue: ...
 
     async def set(
         self,
         session: AsyncSession,
         payload: SettingSet,
-    ) -> SettingValue:
-        ...
+    ) -> SettingValue: ...
+
 
 class UsersControllerProtocol(Protocol):
     # Dual transport: REST + Events
@@ -61,20 +61,17 @@ class UsersControllerProtocol(Protocol):
         self,
         session: AsyncSession,
         payload: UserGrant,
-    ) -> UserAccess:
-        ...
+    ) -> UserAccess: ...
 
     async def revoke(
         self,
         session: AsyncSession,
         payload: UserRevoke,
-    ) -> UserAccess:
-        ...
+    ) -> UserAccess: ...
 
     async def resolve(
         self,
         session: AsyncSession,
         channel: str,
         external_id: str,
-    ) -> UserAccess:
-        ...
+    ) -> UserAccess: ...

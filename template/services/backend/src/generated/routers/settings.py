@@ -33,7 +33,7 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(
         prefix="/settings",
-        tags=['settings'],
+        tags=["settings"],
     )
 
     @router.post(

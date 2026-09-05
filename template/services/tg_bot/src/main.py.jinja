@@ -36,12 +36,11 @@ from shared.logging import configure_logging
 configure_logging(service_name="tg_bot")
 LOGGER = structlog.stdlib.get_logger()
 
-DEFAULT_GREETING: Final[str] = (
-    "Привет! Этот бот помогает подключиться к нашему сервису."
-)
+DEFAULT_GREETING: Final[str] = "Привет! Этот бот помогает подключиться к нашему сервису."
 PLACEHOLDER_TELEGRAM_BOT_TOKEN: Final[str] = "your-telegram-bot-token"  # noqa: S105
 ALLOW_PLACEHOLDER_TOKEN_ENV: Final[str] = "TG_BOT_ALLOW_PLACEHOLDER_TOKEN"  # noqa: S105
 {% if 'backend' in modules %}
+
 class BackendClient(ServiceClient):
     """Typed HTTP client for the backend service."""
 
@@ -145,7 +144,6 @@ async def enforce_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     from reaching any of them, so access does not depend on each handler
     remembering to check.
     """
-
 {% if 'backend' in modules %}
     try:
         user = update.effective_user
@@ -165,7 +163,6 @@ async def enforce_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def build_application() -> Application:
     """Create the telegram bot application with all handlers wired in."""
     from services.tg_bot.src.middleware import install_update_logging
-
 {% if 'backend' in modules %}
     application = (
         ApplicationBuilder()

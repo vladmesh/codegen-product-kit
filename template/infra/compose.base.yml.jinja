@@ -17,8 +17,6 @@ services:
     build:
       context: ..
       dockerfile: services/backend/Dockerfile
-      args:
-        INSTALL_DEV_DEPS: ${BACKEND_INSTALL_DEV_DEPS:-false}
     env_file:
       - ../.env
     environment:

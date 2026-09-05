@@ -15,10 +15,6 @@ echo "[pre-push-full] Running FULL verification for ${remote_name:-unknown}..."
 export DOCKER_BUILDKIT=1
 
 echo ""
-echo "[pre-push-full] Checking framework synchronization..."
-make check-sync
-
-echo ""
 echo "[pre-push-full] Running linters..."
 make lint
 

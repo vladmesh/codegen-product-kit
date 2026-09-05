@@ -2,7 +2,7 @@
 # This Makefile is for developing codegen-product-kit itself.
 # For product development commands, see the generated project's Makefile.
 
-.PHONY: setup lint format test test-copier test-copier-slow test-all help sync-framework sync-framework-preview check-sync
+.PHONY: setup lint format test test-copier test-copier-slow test-all help
 
 VENV := .venv/bin
 
@@ -15,9 +15,6 @@ help:
 	@echo "  make test                  - Run framework unit tests"
 	@echo "  make test-copier           - Run copier template tests"
 	@echo "  make test-all              - Run all tests"
-	@echo "  make sync-framework        - Sync framework/ to template/.framework/"
-	@echo "  make sync-framework-preview - Preview sync changes (dry-run)"
-	@echo "  make check-sync            - Check if framework/ and template/.framework/ are in sync"
 
 setup:
 	uv venv
@@ -43,12 +40,3 @@ test-copier-slow:
 	$(VENV)/pytest -v -m slow tests/copier/
 
 test-all: test test-copier
-
-sync-framework:
-	@./scripts/sync-framework-to-template.sh
-
-sync-framework-preview:
-	@./scripts/sync-framework-to-template.sh --dry-run
-
-check-sync:
-	@./scripts/check-framework-sync.sh
