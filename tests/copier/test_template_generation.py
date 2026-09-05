@@ -927,12 +927,18 @@ class TestIntegrationCompose:
         compose = yaml.safe_load(
             (project_backend / "infra" / "compose.tests.integration.yml").read_text()
         )
-        command = compose["services"]["integration-tests"]["command"]
+        integration_tests = compose["services"]["integration-tests"]
+        command = integration_tests["command"]
         assert "python -m framework.generate" in command
         assert (
-            compose["services"]["integration-tests"]["environment"]["SERVICE_TEMPLATE_ROOT"]
+            integration_tests["environment"]["SERVICE_TEMPLATE_ROOT"]
             == "/workspace"
         )
+        assert integration_tests["build"] == {
+            "context": "..",
+            "dockerfile": "services/backend/Dockerfile",
+            "target": "dev",
+        }
         dockerfile = (project_backend / "services" / "backend" / "Dockerfile").read_text()
         runtime = dockerfile.split("\nFROM base AS runtime\n", maxsplit=1)[1]
         assert "framework" not in runtime
