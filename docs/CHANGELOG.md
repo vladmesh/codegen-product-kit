@@ -2,6 +2,10 @@
 
 ## 2026-09-05
 
+- Package protocol v1 now provides the generated `codegen_kit` public façade, validated
+  `package.yaml` declarations, real entry-point discovery, product allowlisting, router and lifecycle
+  activation, named compatibility failures, and package import linting. Package database and merged
+  settings, jobs, and events machinery remains explicitly deferred.
 - Product events now use Redis Streams with per-service consumer groups, automatic pending-message
   reclamation, generated versioned envelopes, and a PostgreSQL-backed idempotent-consumer helper.
 - The kit's template workflow now builds the generated backend development image and runs the real

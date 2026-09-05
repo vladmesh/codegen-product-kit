@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     cd services/backend \
     && uv sync --frozen --no-install-project --no-dev
 COPY shared/shared ./shared/shared
+COPY codegen_kit ./codegen_kit
 
 FROM runtime-deps AS dev-deps
 RUN apt-get update \
@@ -36,6 +37,7 @@ ENV PATH="/app/services/backend/.venv/bin:${PATH}"
 COPY services/backend ./services/backend
 COPY services/backend/README.md ./README.md
 COPY shared ./shared
+COPY codegen_kit ./codegen_kit
 
 RUN chown -R 1000:1000 /app
 USER 1000
@@ -50,6 +52,7 @@ ENV PATH="/app/services/backend/.venv/bin:${PATH}"
 COPY services/backend ./services/backend
 COPY services/backend/README.md ./README.md
 COPY shared ./shared
+COPY codegen_kit ./codegen_kit
 
 RUN chown -R 1000:1000 /app
 USER 1000

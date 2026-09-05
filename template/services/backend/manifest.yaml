@@ -25,3 +25,5 @@ jobs_schema:
   properties: {}
   additionalProperties: false
 provides: []
+# Installed package entry-point names allowed to activate in this product.
+packages: []

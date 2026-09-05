@@ -1,0 +1,255 @@
+"""Package protocol v1 public API and activation runtime."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from importlib import metadata
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+import yaml
+
+PACKAGE_PROTOCOL_VERSION = 1
+CORE_VERSION = "1.0.0"
+ENTRY_POINT_GROUP = "codegen_kit.packages"
+
+
+class PackageActivationError(RuntimeError):
+    """Base class for a named package startup failure."""
+
+
+class PackageManifestError(PackageActivationError):
+    """An installed package carries an invalid package.yaml."""
+
+
+class UnknownPackageManifestFieldError(PackageManifestError):
+    """The package manifest contains an unknown field."""
+
+
+class MissingPackageIdentityError(PackageManifestError):
+    """The package manifest omits its name or version."""
+
+
+class MalformedPackagePrefixError(PackageManifestError):
+    """The package HTTP prefix is malformed."""
+
+
+class InstalledPackageNotListedError(PackageActivationError):
+    """An installed package was not allowlisted by the product."""
+
+
+class ListedPackageNotInstalledError(PackageActivationError):
+    """An allowlisted package has no installed entry point."""
+
+
+class IncompatiblePackageProtocolError(PackageActivationError):
+    """A package declares a protocol version unsupported by this core."""
+
+
+class IncompatibleCoreVersionError(PackageActivationError):
+    """A package's core version constraint excludes this core."""
+
+
+@dataclass(frozen=True)
+class PackageManifest:
+    """The activation subset of a validated package.yaml."""
+
+    protocol_version: int
+    name: str
+    version: str
+    requires_core: str
+    http_prefix: str
+
+
+@runtime_checkable
+class Package(Protocol):
+    """Runtime object loaded from a ``codegen_kit.packages`` entry point."""
+
+    router: Any
+
+    def startup(self, application: Any) -> Awaitable[None]:
+        """Start package resources after core resources are connected."""
+
+    def shutdown(self, application: Any) -> Awaitable[None]:
+        """Stop package resources before core resources are disconnected."""
+
+
+@dataclass(frozen=True)
+class ActivatedPackage:
+    """One validated installed package and its loaded runtime object."""
+
+    manifest: PackageManifest
+    runtime: Package
+
+
+def _manifest_path(entry_point: metadata.EntryPoint) -> Path:
+    distribution = entry_point.dist
+    if distribution is None:
+        raise PackageManifestError(f"entry point {entry_point.name!r} has no distribution")
+    candidates = [file for file in distribution.files or () if file.name == "package.yaml"]
+    if len(candidates) != 1:
+        raise PackageManifestError(
+            f"package {entry_point.name!r} must install exactly one package.yaml"
+        )
+    return Path(distribution.locate_file(candidates[0]))
+
+
+def _parse_manifest(path: Path) -> PackageManifest:
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError) as error:
+        raise PackageManifestError(f"cannot read {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise PackageManifestError("package.yaml must contain an object")
+    known = {
+        "protocol_version",
+        "name",
+        "version",
+        "requires_core",
+        "provides",
+        "requires",
+        "package_dependencies",
+        "http",
+        "database",
+        "events",
+        "settings_schema",
+        "jobs_schema",
+        "environment",
+        "resources",
+    }
+    unknown = sorted(set(data) - known)
+    if unknown:
+        raise UnknownPackageManifestFieldError(
+            f"package.yaml contains unknown field {unknown[0]!r}"
+        )
+    for field in ("name", "version"):
+        if not data.get(field):
+            raise MissingPackageIdentityError(
+                f"package.yaml is missing required identity field {field!r}"
+            )
+    http = data.get("http")
+    prefix = http.get("prefix") if isinstance(http, dict) else None
+    if (
+        not isinstance(prefix, str)
+        or not prefix.startswith("/")
+        or prefix == "/"
+        or prefix.endswith("/")
+        or "//" in prefix
+        or "{" in prefix
+        or "}" in prefix
+    ):
+        raise MalformedPackagePrefixError("package.yaml has malformed HTTP prefix")
+    required = ("protocol_version", "requires_core")
+    missing = [field for field in required if field not in data]
+    if missing:
+        raise PackageManifestError(f"package.yaml is missing required field {missing[0]!r}")
+    return PackageManifest(
+        protocol_version=data["protocol_version"],
+        name=data["name"],
+        version=data["version"],
+        requires_core=data["requires_core"],
+        http_prefix=prefix,
+    )
+
+
+def _entry_points() -> Sequence[metadata.EntryPoint]:
+    return tuple(metadata.entry_points(group=ENTRY_POINT_GROUP))
+
+
+def discover_packages(
+    listed: Sequence[str],
+    *,
+    entry_points: Callable[[], Sequence[metadata.EntryPoint]] = _entry_points,
+) -> list[ActivatedPackage]:
+    """Resolve and validate the product's complete package allowlist."""
+
+    listed_set = set(listed)
+    discovered = {entry_point.name: entry_point for entry_point in entry_points()}
+    not_listed = sorted(set(discovered) - listed_set)
+    if not_listed:
+        raise InstalledPackageNotListedError(
+            f"installed package {not_listed[0]!r} is not listed in the product manifest"
+        )
+    not_installed = sorted(listed_set - set(discovered))
+    if not_installed:
+        raise ListedPackageNotInstalledError(
+            f"listed package {not_installed[0]!r} is not installed"
+        )
+
+    activated: list[ActivatedPackage] = []
+    for name in listed:
+        entry_point = discovered[name]
+        manifest = _parse_manifest(_manifest_path(entry_point))
+        if manifest.name != name:
+            raise PackageManifestError(
+                f"entry point {name!r} does not match package manifest name {manifest.name!r}"
+            )
+        if manifest.protocol_version != PACKAGE_PROTOCOL_VERSION:
+            raise IncompatiblePackageProtocolError(
+                f"package {name!r} requires protocol {manifest.protocol_version}; "
+                f"core provides {PACKAGE_PROTOCOL_VERSION}"
+            )
+        try:
+            compatible = Version(CORE_VERSION) in SpecifierSet(manifest.requires_core)
+        except (InvalidSpecifier, InvalidVersion, TypeError) as error:
+            raise IncompatibleCoreVersionError(
+                f"package {name!r} has invalid core requirement {manifest.requires_core!r}"
+            ) from error
+        if not compatible:
+            raise IncompatibleCoreVersionError(
+                f"package {name!r} requires core {manifest.requires_core}; core is {CORE_VERSION}"
+            )
+        if entry_point.dist is not None and manifest.version != entry_point.dist.version:
+            raise PackageManifestError(
+                f"package {name!r} manifest version {manifest.version!r} does not match "
+                f"distribution version {entry_point.dist.version!r}"
+            )
+        runtime = entry_point.load()
+        if not isinstance(runtime, Package):
+            raise PackageActivationError(
+                f"package {name!r} entry point does not implement the Package protocol"
+            )
+        activated.append(ActivatedPackage(manifest=manifest, runtime=runtime))
+    return activated
+
+
+def configure_packages(application: Any, listed: Sequence[str]) -> None:
+    """Validate packages and mount their routers on an application."""
+
+    activated = discover_packages(listed)
+    application.state.codegen_packages = activated
+    for package in activated:
+        application.include_router(package.runtime.router, prefix=package.manifest.http_prefix)
+
+
+async def startup_packages(application: Any) -> None:
+    """Start packages in product-manifest order."""
+
+    for package in application.state.codegen_packages:
+        await package.runtime.startup(application)
+
+
+async def shutdown_packages(application: Any) -> None:
+    """Stop packages in reverse activation order."""
+
+    for package in reversed(application.state.codegen_packages):
+        await package.runtime.shutdown(application)
+
+
+def product_packages(manifest_path: Path | None = None) -> list[str]:
+    """Read the explicit package allowlist from the backend service manifest."""
+
+    path = (
+        manifest_path or Path(__file__).resolve().parent.parent / "services/backend/manifest.yaml"
+    )
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError) as error:
+        raise PackageActivationError(f"cannot read product manifest {path}: {error}") from error
+    packages = data.get("packages", []) if isinstance(data, dict) else []
+    if not isinstance(packages, list) or any(not isinstance(name, str) for name in packages):
+        raise PackageActivationError("product manifest packages must be a list of names")
+    return packages

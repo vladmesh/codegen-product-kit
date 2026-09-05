@@ -49,6 +49,7 @@ class ServiceManifest(BaseModel):
         alias="jobs_schema", default_factory=empty_declaration_schema
     )
     provides: list[str] = Field(default_factory=list)
+    packages: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "forbid", "populate_by_name": True}
 
@@ -85,6 +86,18 @@ class ServiceManifest(BaseModel):
             )
             raise ValueError(msg)
         return provided
+
+    @field_validator("packages")
+    @classmethod
+    def validate_packages(cls, packages: list[str]) -> list[str]:
+        if len(set(packages)) != len(packages):
+            msg = "packages must not repeat a package name"
+            raise ValueError(msg)
+        for name in packages:
+            if not name or not name.replace("-", "_").isidentifier():
+                msg = f"packages contains malformed package name {name!r}"
+                raise ValueError(msg)
+        return packages
 
 
 def _validate_declaration_schema(schema: dict[str, Any], field: str) -> dict[str, Any]:

@@ -181,6 +181,30 @@ operations:
 
         assert specs.manifests["backend"].jobs_schema["properties"] == {}
         assert specs.manifests["backend"].provides == []
+        assert specs.manifests["backend"].packages == []
+
+    def test_manifest_loads_explicit_package_allowlist(self, temp_repo: Path) -> None:
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n"
+            "packages: [weather-package]\n"
+        )
+
+        specs = load_specs(temp_repo)
+
+        assert specs.manifests["backend"].packages == ["weather-package"]
+
+    def test_manifest_rejects_duplicate_package_names(self, temp_repo: Path) -> None:
+        (temp_repo / "services" / "backend" / "manifest.yaml").write_text(
+            "version: 1\nsettings_schema:\n"
+            "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+            "  type: object\n  properties: {}\n  additionalProperties: false\n"
+            "packages: [weather, weather]\n"
+        )
+
+        with pytest.raises(SpecValidationError, match="must not repeat"):
+            load_specs(temp_repo)
 
     def test_declared_jobs_and_provided_capabilities_are_loaded(self, temp_repo: Path) -> None:
         (temp_repo / "services" / "backend" / "manifest.yaml").write_text(

@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 
+from codegen_kit.packages import configure_packages, product_packages
 from services.backend.src.core.settings import get_settings
 
 from .api.router import api_router
@@ -31,4 +32,5 @@ def create_app() -> FastAPI:
     )
     application.add_middleware(RequestLoggingMiddleware)
     application.include_router(api_router)
+    configure_packages(application, product_packages())
     return application
