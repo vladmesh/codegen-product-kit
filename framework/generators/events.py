@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from framework.generators.base import BaseGenerator
+from framework.spec.events import event_identifier
 
 
 class EventsGenerator(BaseGenerator):
@@ -25,6 +26,7 @@ class EventsGenerator(BaseGenerator):
         for event in self.specs.events.events:
             event_ctx = {
                 "name": event.name,
+                "identifier": event_identifier(event.name),
                 "message_model": event.message,
                 "subject": event.name.replace("_", "."),  # user_created -> user.created
             }

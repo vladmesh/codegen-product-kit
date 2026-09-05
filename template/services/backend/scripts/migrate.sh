@@ -13,3 +13,4 @@ if [ -z "${DATABASE_URL-}" ]; then
 fi
 
 alembic -c services/backend/migrations/alembic.ini upgrade head
+python -m codegen_kit.migrations

@@ -1,5 +1,6 @@
 """Package protocol v1 manifest and import-boundary tests."""
 
+import ast
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import pytest
 import yaml
 
 from framework.lint import package_imports
+from framework.spec.package_resolution import CORE_VERSION
 from framework.spec.packages import (
     MalformedPackagePrefixError,
     MissingPackageIdentityError,
@@ -17,6 +19,25 @@ from framework.spec.packages import (
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package/synthetic_package/package.yaml"
+
+
+def test_build_time_and_runtime_core_versions_stay_equal() -> None:
+    """A one-sided façade bump must fail before generation and runtime diverge."""
+
+    runtime_source = Path(__file__).parents[2] / "template/codegen_kit/packages.py"
+    module = ast.parse(runtime_source.read_text())
+    runtime_version = next(
+        statement.value.value
+        for statement in module.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "CORE_VERSION"
+            for target in statement.targets
+        )
+        and isinstance(statement.value, ast.Constant)
+    )
+
+    assert runtime_version == CORE_VERSION
 
 
 def test_synthetic_package_manifest_is_valid() -> None:

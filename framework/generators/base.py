@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from functools import cached_property
 from pathlib import Path
+import shutil
 import subprocess  # noqa: S404
 from typing import Any
 
@@ -70,7 +71,10 @@ class BaseGenerator(ABC):
         """Format generated file with ruff."""
         ruff = self.repo_root / ".venv" / "bin" / "ruff"
         if not ruff.exists():
-            return
+            executable = shutil.which("ruff")
+            if executable is None:
+                return
+            ruff = Path(executable)
         ruff_str = str(ruff)
         ruff_format_cmd = [ruff_str, "format", "--no-cache", str(path)]
         ruff_check_cmd = [ruff_str, "check", "--no-cache", "--fix", str(path)]

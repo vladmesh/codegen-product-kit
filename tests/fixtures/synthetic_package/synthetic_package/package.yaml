@@ -1,27 +1,50 @@
 protocol_version: 1
 name: synthetic
-version: 1.2.3
+version: 1.2.4
 requires_core: ">=1,<2"
 provides: [synthetic.status]
 requires: []
-package_dependencies: [fastapi]
+package_dependencies: [alembic, fastapi, sqlalchemy]
 http:
   prefix: /synthetic
 database:
   schema: synthetic
   migrations: synthetic_package:migrations
 events:
-  publishes: [synthetic.ready]
-  consumes: []
+  publishes: [synthetic.ready, synthetic.requested]
+  consumes: [synthetic.requested]
+  messages:
+    synthetic.ready:
+      model: SyntheticReady
+      schema:
+        type: object
+        properties:
+          package_id: {type: string}
+        required: [package_id]
+        additionalProperties: false
+    synthetic.requested:
+      model: SyntheticRequested
+      schema:
+        type: object
+        properties:
+          request_id: {type: string}
+        required: [request_id]
+        additionalProperties: false
 settings_schema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
-  properties: {}
+  properties:
+    enabled: {type: boolean}
   additionalProperties: false
 jobs_schema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
-  properties: {}
+  properties:
+    refresh:
+      type: object
+      properties:
+        force: {type: boolean}
+      additionalProperties: false
   additionalProperties: false
 environment:
   - name: SYNTHETIC_TOKEN

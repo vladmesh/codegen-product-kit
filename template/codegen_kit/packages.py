@@ -5,8 +5,10 @@ from __future__ import annotations
 from asyncio import CancelledError
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from hashlib import sha256
 from importlib import metadata
 from pathlib import Path
+import re
 from typing import Any, Protocol, runtime_checkable
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -14,7 +16,7 @@ from packaging.version import InvalidVersion, Version
 import yaml
 
 PACKAGE_PROTOCOL_VERSION = 1
-CORE_VERSION = "1.0.0"
+CORE_VERSION = "1.1.0"
 ENTRY_POINT_GROUP = "codegen_kit.packages"
 
 
@@ -71,6 +73,8 @@ class PackageManifest:
     version: str
     requires_core: str
     http_prefix: str
+    database_schema: str | None = None
+    database_migrations: str | None = None
 
 
 @runtime_checkable
@@ -92,6 +96,8 @@ class ActivatedPackage:
 
     manifest: PackageManifest
     runtime: Package
+    package_root: Path
+    manifest_sha256: str
 
 
 def _package_root(entry_point: metadata.EntryPoint) -> tuple[Path, Path]:
@@ -195,15 +201,49 @@ def _http_prefix(data: dict[str, Any]) -> str:
     return prefix
 
 
+def _valid_database_schema(schema: object) -> bool:
+    return (
+        isinstance(schema, str)
+        and schema != "public"
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema) is not None
+    )
+
+
+def _valid_migration_resource(declaration: object) -> bool:
+    if not isinstance(declaration, str):
+        return False
+    module, separator, relative = declaration.partition(":")
+    return bool(separator and module and relative and ".." not in Path(relative).parts)
+
+
+def _database_declaration(data: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return a fail-closed package schema and migration resource pair."""
+
+    database = data.get("database")
+    if database is None:
+        return None, None
+    if not isinstance(database, dict):
+        raise PackageManifestError("package.yaml has malformed database declaration")
+    schema = database.get("schema")
+    migrations = database.get("migrations")
+    if not _valid_database_schema(schema) or not _valid_migration_resource(migrations):
+        raise PackageManifestError("package.yaml has malformed database declaration")
+    assert isinstance(schema, str) and isinstance(migrations, str)
+    return schema, migrations
+
+
 def _parse_manifest(path: Path) -> PackageManifest:
     data = _load_manifest_data(path)
     _validate_manifest_fields(data)
+    database_schema, database_migrations = _database_declaration(data)
     return PackageManifest(
         protocol_version=data["protocol_version"],
         name=data["name"],
         version=data["version"],
         requires_core=data["requires_core"],
         http_prefix=_http_prefix(data),
+        database_schema=database_schema,
+        database_migrations=database_migrations,
     )
 
 
@@ -250,7 +290,8 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
     """Validate and load one allowlisted entry point."""
 
     package_root, _ = _package_root(entry_point)
-    manifest = _parse_manifest(_manifest_path(entry_point, package_root))
+    manifest_path = _manifest_path(entry_point, package_root)
+    manifest = _parse_manifest(manifest_path)
     if manifest.name != name:
         raise PackageManifestError(
             f"entry point {name!r} does not match package manifest name {manifest.name!r}"
@@ -266,7 +307,12 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
         raise PackageActivationError(
             f"package {name!r} entry point does not implement the Package protocol"
         )
-    return ActivatedPackage(manifest=manifest, runtime=runtime)
+    return ActivatedPackage(
+        manifest=manifest,
+        runtime=runtime,
+        package_root=package_root,
+        manifest_sha256=sha256(manifest_path.read_bytes()).hexdigest(),
+    )
 
 
 def _validate_http_prefixes(packages: Sequence[ActivatedPackage]) -> None:
@@ -303,6 +349,54 @@ def configure_packages(application: Any, listed: Sequence[str]) -> None:
     """Validate packages and mount their routers on an application."""
 
     activated = discover_packages(listed)
+    application.state.codegen_packages = activated
+    for package in activated:
+        application.include_router(package.runtime.router, prefix=package.manifest.http_prefix)
+
+
+def generated_packages(manifest_path: Path | None = None) -> list[str]:
+    """Return the generated active set after refusing a stale product manifest."""
+
+    from ._active_packages import ACTIVE_PACKAGES
+
+    generated = [identity["name"] for identity in ACTIVE_PACKAGES]
+    listed = product_packages(manifest_path)
+    if generated != listed:
+        raise PackageActivationError(
+            "generated package contract is stale; run make generate-from-spec"
+        )
+    return generated
+
+
+def discover_generated_packages(
+    manifest_path: Path | None = None,
+) -> list[ActivatedPackage]:
+    """Resolve the generated set and refuse a wheel changed since generation."""
+
+    from ._active_packages import ACTIVE_PACKAGES
+
+    activated = discover_packages(generated_packages(manifest_path))
+    expected = {item["name"]: item for item in ACTIVE_PACKAGES}
+    for package in activated:
+        identity = expected[package.manifest.name]
+        if package.manifest.version != identity["version"]:
+            raise PackageActivationError(
+                f"package {package.manifest.name!r} changed from generated version "
+                f"{identity['version']!r} to installed version {package.manifest.version!r}; "
+                "run make generate-from-spec"
+            )
+        if package.manifest_sha256 != identity["manifest_sha256"]:
+            raise PackageActivationError(
+                f"package {package.manifest.name!r} manifest changed since generation; "
+                "run make generate-from-spec"
+            )
+    return activated
+
+
+def configure_generated_packages(application: Any) -> None:
+    """Mount exactly the packages whose contracts were generated into the product."""
+
+    activated = discover_generated_packages()
     application.state.codegen_packages = activated
     for package in activated:
         application.include_router(package.runtime.router, prefix=package.manifest.http_prefix)

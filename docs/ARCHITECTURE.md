@@ -104,9 +104,9 @@ runtime boundary heuristically.
 
 Package protocol v1 implements the in-process package boundary through the generated `codegen_kit`
 façade, installed `codegen_kit.packages` entry points, and an explicit product-manifest allowlist.
-It activates HTTP routers and package lifecycle hooks. Package database ownership and contract merge
-remain future work, and there is still no component catalog or deterministic installer; `backend`
-and `tg_bot` remain Copier selections.
+It activates HTTP routers and lifecycle hooks, runs package-owned Alembic revisions, and merges
+package settings, jobs, and event/message declarations during generation. There is still no
+component catalog or deterministic installer; `backend` and `tg_bot` remain Copier selections.
 
 ## Tooling and runtime
 

@@ -2,6 +2,15 @@
 
 ## 2026-09-05
 
+- Package protocol v1 now runs package Alembic revisions in exclusive PostgreSQL schemas and version
+  tables, merges prefixed settings and jobs plus event/message schemas from the installed active set,
+  and pins runtime activation to the package identities used by generation. The façade is `1.1.0`
+  after adding compatible ORM, session, and event-publication seams.
+- Package event consumers now bind to an existing product or package publisher, orphaned and
+  schema-conflicting subscriptions fail generation, and normalized publisher identifiers have named
+  collision refusal. Settings and jobs render the loader's single merged ownership registry, the
+  build-time/runtime core versions are pinned by a regression test, and generated Python files are
+  again covered by the product's Ruff format check.
 - Package protocol v1 now provides the generated `codegen_kit` public façade, validated
   `package.yaml` declarations, real entry-point discovery, product allowlisting, router and lifecycle
   activation, named compatibility failures, and package import linting. Package database and merged

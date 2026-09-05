@@ -26,12 +26,16 @@ any generated product that installs it. The boundary is a generated in-product `
 not a separately released runtime distribution. This avoids making the whole product core a public
 runtime dependency. `CORE_VERSION` is the kit-declared semantic version of this façade and its
 activation semantics; it is rendered into each product and is deliberately independent of the exact
-Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface is `1.0.0`. Backward-compatible
-public additions require a minor bump, breaking changes require a major bump, and fixes that preserve
-the promised surface require a patch bump. The package protocol version remains `1` across compatible
-next-card additions. A package imports only `Package`, `CORE_VERSION`, and
-`PACKAGE_PROTOCOL_VERSION` from `codegen_kit`; product-specific `services.*`, generated contracts,
-database objects, and application settings are not public API. The unchanged wheel can therefore be
+Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface was `1.0.0`; package database,
+session, and event-publication seams raise it to `1.1.0`. Backward-compatible public additions require
+a minor bump, breaking changes require a major bump, and fixes that preserve the promised surface
+require a patch bump. The package protocol version remains `1` across compatible additions. A
+package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_base`,
+`package_session`, and `publish_event` from `codegen_kit`; product-specific `services.*`, generated
+contracts, and application settings are not public API. `package_base(schema)` creates an independent
+SQLAlchemy metadata registry, `package_session(schema)` exposes a transaction with a schema-local
+search path through the core session factory, and
+`publish_event()` uses the generated product transport. The unchanged wheel can therefore be
 installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
@@ -48,14 +52,14 @@ rejects unknown fields. Its fields are:
 | `protocol_version` | Integer package protocol version, exactly `1` | Enforced |
 | `name`, `version` | Entry-point identity and package release identity | Enforced; missing identity has `MissingPackageIdentityError` |
 | `requires_core` | PEP 440 specifier matched against `codegen_kit.CORE_VERSION` | Enforced |
-| `provides`, `requires` | Provided and required logical interfaces | Declared only; resolution is next-card work |
+| `provides`, `requires` | Provided and required logical interfaces | Enforced across the active set with named duplicate and missing-provider refusal |
 | `package_dependencies` | Top-level Python imports allowed in addition to stdlib and `codegen_kit` | Enforced by the kit import lint |
 | `http.prefix` | Absolute non-root mount prefix with no trailing slash, `//`, or path parameters | Enforced; malformed values have `MalformedPackagePrefixError` |
-| `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and migration resource | Declared only; schema creation and migrations are next-card work |
-| `events.publishes`, `events.consumes` | Package event interface names | Declared only; event contract merge is next-card work |
-| `settings_schema`, `jobs_schema` | Draft 2020-12 schemas to merge under the package prefix | Declared and structurally validated; merge, prefixing, and duplicate refusal are next-card work |
-| `environment` | Named environment requirements and whether each is required | Declared only; generated environment merge is next-card work |
-| `resources` | Named distribution resource paths | Declared only; consumers resolve resources with distribution APIs |
+| `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and `module:path` Alembic revision resource | Enforced; migrated by the core |
+| `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
+| `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
+| `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
+| `resources` | Named distribution resource paths | Enforced as existing, non-traversing distribution resources |
 
 The tooling API is `framework.spec.packages.load_package_manifest(path)`. Unknown fields raise
 `UnknownPackageManifestFieldError`; invalid syntax and other schema errors raise
@@ -83,7 +87,8 @@ dependency, keep it in the backend lock, and add its entry-point name to
 `services/backend/manifest.yaml`:
 
 ```bash
-uv add --project services/backend ./dist/weather_package-1.0.0-py3-none-any.whl
+uv add --project services/backend \
+  ./services/backend/packages/weather_package-1.0.0-py3-none-any.whl
 ```
 
 ```yaml
@@ -99,6 +104,46 @@ unlisted package raises `InstalledPackageNotListedError`; a listed but absent en
 `IncompatibleCoreVersionError`. Two activated packages with the same `http.prefix` raise
 `DuplicatePackageHttpPrefixError` before any package router is mounted. All abort application
 startup. With `packages: []`, existing settings, jobs, events, and environment behavior is unchanged.
+
+Generation and runtime activation are pinned to one active set: entry points installed in the
+backend package environment and names listed in the backend manifest. Generation resolves that set
+once, feeds it to every contract generator, and records package names, versions, and manifest
+digests in
+`codegen_kit._active_packages`; runtime refuses a changed manifest or wheel until generation is run
+again. Installing or changing a package is therefore incomplete until the product contract is
+regenerated. The backend site-packages path is explicit across the root-tooling/backend-environment
+split.
+
+Package settings and jobs are emitted as `<normalized-package-name>.<local-name>`, where hyphens are
+normalized to underscores. The loader's shared ownership registry is the single duplicate-refusal
+mechanism for service and package declarations; generators render its already-merged settings and
+jobs registries. Collisions between a package and a service, or between normalized package prefixes,
+name both declarers. Package event names remain their declared stream names, while their generated
+Python publisher identifiers are normalized and claimed separately so names such as `order_placed`
+and `order.placed` cannot silently produce the same function. Each published or consumed event has
+one `events.messages` entry containing its generated model name and inline JSON Schema. A published
+event is a declaration; a consumed event is a reference that must bind to an existing declaration in
+`shared/spec/events.yaml` or an active package with the same message schema. Conflicting bindings and
+consumed events with no publisher are refused with both relevant package or product sides named. A
+service domain may subscribe to the package event and refer to its model without editing
+`shared/spec/events.yaml` or `shared/spec/models.yaml`.
+
+The generated product's `make lint` deliberately overrides Ruff's configured exclusions for its
+format check, so generated Python files are checked for canonical formatting as rendered while
+virtual environments and migration revisions remain excluded. Generated directories remain excluded
+from Ruff's diagnostic lint rules.
+
+Package-provided interfaces must have one owner in the active set, and every required interface must
+already have an active provider. Package environment requirements are merged into
+`services/backend/packages/env.contract.yaml` as backend-consumed user-supplied secrets for local
+and production. Repeated environment names are refused with both package owners named. Declared
+resources must exist at their non-traversing distribution-relative paths.
+
+`services/backend/scripts/migrate.sh` runs the core Alembic head first, then active packages in
+manifest order. Each package gets its declared schema as the connection search path and its own
+schema-local `alembic_version` table. Re-running the command is a no-op at every head. A product-local
+wheel can be kept under `services/backend/packages/`, which is copied before dependency installation
+in backend images.
 
 The factory mounts each activated router under `http.prefix`. Once core connectivity is ready, the
 backend lifespan calls package `startup` in manifest order. It calls package `shutdown` in reverse
@@ -127,6 +172,9 @@ single-file module, missing or empty source root, misplaced, missing, or ambiguo
 nonexistent explicit site-packages path fail the lint rather than producing a vacuous pass. This is
 a source boundary, not a dependency resolver; normal Python packaging metadata still owns
 installation of dependencies.
+An editable install normally leaves sources outside site-packages, so if its distribution metadata
+cannot locate the protocol directory there, import lint reports "sources could not be located" and
+fails closed.
 
 ## Core settings v1
 

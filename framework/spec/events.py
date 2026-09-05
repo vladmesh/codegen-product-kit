@@ -7,9 +7,17 @@ Defines the structure of events.yaml:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+
+def event_identifier(name: str) -> str:
+    """Return the generated Python identifier owned by an event name."""
+
+    identifier = re.sub(r"\W", "_", name)
+    return identifier if identifier.isidentifier() else f"_{identifier}"
 
 
 class EventSpec(BaseModel):
