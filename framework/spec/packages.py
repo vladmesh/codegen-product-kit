@@ -33,6 +33,10 @@ class MalformedPackagePrefixError(PackageManifestError):
     """The package HTTP prefix is not an absolute, unambiguous path."""
 
 
+class UnimplementedDeploymentModeError(PackageManifestError):
+    """The manifest declares a delivery form no generated product implements."""
+
+
 class HttpDeclaration(BaseModel):
     """HTTP routes contributed by a package."""
 
@@ -180,6 +184,8 @@ class DeploymentDeclaration(BaseModel):
             raise ValueError("must declare at least one deployment mode")
         if len(set(modes)) != len(modes):
             raise ValueError("must not repeat a deployment mode")
+        if "container" in modes:
+            raise ValueError("declares 'container', which no generated product implements")
         return modes
 
 
@@ -245,6 +251,13 @@ def parse_package_manifest(data: object) -> PackageManifest:
     if unknown:
         raise UnknownPackageManifestFieldError(
             f"package.yaml contains unknown field {unknown[0]!r}"
+        )
+    deployment = data.get("deployment")
+    modes = deployment.get("modes") if isinstance(deployment, dict) else None
+    if isinstance(modes, list) and "container" in modes:
+        raise UnimplementedDeploymentModeError(
+            "package.yaml declares deployment mode 'container', which is refused until a "
+            "generated product implements container delivery"
         )
     missing_identity = [field for field in ("name", "version") if not data.get(field)]
     if missing_identity:

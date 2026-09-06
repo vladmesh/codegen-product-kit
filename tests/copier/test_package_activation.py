@@ -435,6 +435,11 @@ def test_activation_rejects_misplaced_manifest(
         (["synthetic", "missing"], None, "ListedPackageNotInstalledError"),
         (["synthetic"], {"protocol_version": 2}, "IncompatiblePackageProtocolError"),
         (["synthetic"], {"requires_core": ">=2"}, "IncompatibleCoreVersionError"),
+        (
+            ["synthetic"],
+            {"deployment": {"modes": ["in_process", "container"]}},
+            "UnimplementedDeploymentModeError",
+        ),
     ],
 )
 def test_named_activation_failures_use_real_entry_point(

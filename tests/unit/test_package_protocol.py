@@ -14,6 +14,7 @@ from framework.spec.package_resolution import CORE_VERSION
 from framework.spec.packages import (
     MalformedPackagePrefixError,
     MissingPackageIdentityError,
+    UnimplementedDeploymentModeError,
     UnknownPackageManifestFieldError,
     lint_package_imports,
     load_package_manifest,
@@ -51,12 +52,12 @@ def test_synthetic_package_manifest_is_valid() -> None:
     assert manifest.http.prefix == "/synthetic"
 
 
-def test_reminders_package_manifest_declares_both_deployment_modes() -> None:
+def test_reminders_package_manifest_declares_only_the_implemented_deployment_mode() -> None:
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
     assert manifest.version == "0.1.0"
-    assert manifest.deployment.modes == ["in_process", "container"]
+    assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
     assert [(item.name, item.required) for item in manifest.environment] == [("REDIS_URL", True)]
@@ -76,6 +77,17 @@ def test_package_deployment_declaration_is_fail_closed(deployment: object) -> No
     data["deployment"] = deployment
 
     with pytest.raises(ValueError):
+        parse_package_manifest(data)
+
+
+@pytest.mark.parametrize("modes", [["container"], ["in_process", "container"]])
+def test_package_deployment_refuses_unimplemented_container_mode(modes: list[str]) -> None:
+    """A manifest must not promise a delivery form the runtime does not implement."""
+
+    data = yaml.safe_load(FIXTURE.read_text())
+    data["deployment"] = {"modes": modes}
+
+    with pytest.raises(UnimplementedDeploymentModeError):
         parse_package_manifest(data)
 
 

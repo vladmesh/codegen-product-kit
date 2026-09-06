@@ -40,6 +40,10 @@ class MalformedPackagePrefixError(PackageManifestError):
     """The package HTTP prefix is malformed."""
 
 
+class UnimplementedDeploymentModeError(PackageManifestError):
+    """The package declares a delivery form this core does not implement."""
+
+
 class InvalidPackageModuleRootError(PackageActivationError):
     """The entry-point module does not resolve to a package directory."""
 
@@ -249,6 +253,11 @@ def _deployment_modes(data: dict[str, Any]) -> tuple[str, ...]:
         or len(set(modes)) != len(modes)
     ):
         raise PackageManifestError("package.yaml has malformed deployment declaration")
+    if "container" in modes:
+        raise UnimplementedDeploymentModeError(
+            "package.yaml declares deployment mode 'container', which is refused until this "
+            "core implements container delivery"
+        )
     return tuple(modes)
 
 

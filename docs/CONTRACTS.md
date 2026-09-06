@@ -58,7 +58,7 @@ rejects unknown fields. Its fields are:
 | `package_dependencies` | Top-level Python imports allowed in addition to stdlib and `codegen_kit` | Enforced by the kit import lint |
 | `http.prefix` | Absolute non-root mount prefix with no trailing slash, `//`, or path parameters | Enforced; malformed values have `MalformedPackagePrefixError` |
 | `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and `module:path` Alembic revision resource | Enforced; migrated by the core |
-| `deployment.modes` | Optional non-empty set of `in_process` and `container` deployability declarations; defaults to `in_process` | Shape enforced; only `in_process` activation is implemented |
+| `deployment.modes` | Optional non-empty set of deployability declarations; `in_process` is the only accepted value and the default | Enforced; a declared `container` mode has `UnimplementedDeploymentModeError` |
 | `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
@@ -150,11 +150,13 @@ Draft 2020-12 definition is authoritative after removing only its generated top-
 that title equals the declared model name. Package consumers must serialize their inline schema to
 that representation; no looser validation-equivalence or `$ref` resolution is inferred.
 
-The `deployment` declaration records package-author intent without changing activation. Generated
-products currently implement only `in_process`; declaring `container` makes the package eligible for
-a future delivery mechanism but does not create a service, image, Compose entry, or runtime today.
-Package protocol version `1` is unchanged because the declaration is optional and defaults to the
-already implemented in-process form.
+The `deployment` declaration records the delivery form a package is activated in. Generated products
+implement only `in_process`, so a manifest declaring `container` is refused fail-closed with
+`UnimplementedDeploymentModeError` at manifest validation time, in generation and at runtime alike:
+a manifest must never promise a delivery form that creates no service, image, or Compose entry. The
+field is kept so that a future container implementation can lift the refusal. Package protocol
+version `1` is unchanged because the declaration is optional and defaults to the already implemented
+in-process form.
 
 The generated product's `make lint` deliberately overrides Ruff's configured exclusions for its
 format check, so generated Python files are checked for canonical formatting as rendered while
