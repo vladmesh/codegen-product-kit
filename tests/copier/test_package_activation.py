@@ -435,6 +435,11 @@ def test_activation_rejects_misplaced_manifest(
         (["synthetic", "missing"], None, "ListedPackageNotInstalledError"),
         (["synthetic"], {"protocol_version": 2}, "IncompatiblePackageProtocolError"),
         (["synthetic"], {"requires_core": ">=2"}, "IncompatibleCoreVersionError"),
+        (
+            ["synthetic"],
+            {"deployment": {"modes": ["in_process", "container"]}},
+            "UnimplementedDeploymentModeError",
+        ),
     ],
 )
 def test_named_activation_failures_use_real_entry_point(
@@ -592,6 +597,7 @@ def test_package_contract_and_migrations_against_real_postgres(
 
             import asyncpg
             from faststream.redis import RedisBroker, StreamSub
+            from faststream.redis.parser import BinaryMessageFormatV1
             from httpx import AsyncClient
             import pytest
             from redis.asyncio import Redis
@@ -872,6 +878,94 @@ def test_package_contract_and_migrations_against_real_postgres(
                 assert await redis.xlen("reminders.due") == 2
                 await restart_reader.stop()
                 await redis.aclose()
+
+
+            @pytest.mark.asyncio
+            async def test_concurrent_ticks_emit_one_logical_due_per_reminder() -> None:
+                # Two overlapping ticks race over the same due rows while no tick
+                # holds a row lock across publication. The stream is read with
+                # xrange because a grouped faststream subscriber answers exactly
+                # one `get_one`, which cannot count an unknown number of entries.
+                redis = Redis.from_url(os.environ["REDIS_URL"])
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    reminder_ids = []
+                    for index in (1, 2):
+                        created = await client.post(
+                            "/reminders",
+                            json={
+                                "user_ref": f"opaque:concurrent/{index}",
+                                "text": f"concurrent {index}",
+                                "remind_at": "2060-01-01T00:00:00Z",
+                            },
+                        )
+                        assert created.status_code == 201, created.text
+                        reminder_ids.append(created.json()["id"])
+
+                concurrent = textwrap.dedent(
+                    '''
+                    import asyncio
+                    import codegen_kit_reminders.runtime as runtime
+                    from services.backend.src.app.factory import create_app
+
+                    async def main():
+                        application = create_app()
+                        async with application.router.lifespan_context(application):
+                            envelope = {
+                                "payload": {
+                                    "name": "reminders.tick",
+                                    "arguments": {"at": "2060-01-01T00:00:00Z"},
+                                }
+                            }
+                            await asyncio.gather(
+                                runtime.handle_job_fired(envelope),
+                                runtime.handle_job_fired(envelope),
+                            )
+
+                    asyncio.run(main())
+                    '''
+                )
+                ticked = subprocess.run(
+                    [sys.executable, "-c", concurrent], capture_output=True, text=True
+                )
+                assert ticked.returncode == 0, ticked.stdout + ticked.stderr
+
+                connection = await asyncpg.connect(
+                    os.environ["ASYNC_DATABASE_URL"].replace(
+                        "postgresql+asyncpg://", "postgresql://"
+                    )
+                )
+                try:
+                    for reminder_id in reminder_ids:
+                        rows = await connection.fetch(
+                            "SELECT r.state, e.event_id, e.emitted_at "
+                            "FROM reminders.reminders AS r "
+                            "JOIN reminders.due_emissions AS e ON e.reminder_id = r.id "
+                            "WHERE r.id = $1",
+                            UUID(reminder_id),
+                        )
+                        assert len(rows) == 1
+                        assert rows[0]["state"] == "emitted"
+                        assert rows[0]["event_id"] == due_event_id(UUID(reminder_id))
+                        assert rows[0]["emitted_at"] is not None
+                finally:
+                    await connection.close()
+
+                published = {}
+                for _entry_id, fields in await redis.xrange("reminders.due"):
+                    body, _headers = BinaryMessageFormatV1.parse(fields[b"__data__"])
+                    envelope = EventEnvelope[ReminderDue].model_validate_json(body)
+                    published.setdefault(
+                        str(envelope.payload.reminder_id), set()
+                    ).add(envelope.event_id)
+                await redis.aclose()
+
+                assert {
+                    reminder_id: published.get(reminder_id)
+                    for reminder_id in reminder_ids
+                } == {
+                    reminder_id: {due_event_id(UUID(reminder_id))}
+                    for reminder_id in reminder_ids
+                }
             """
         )
     )

@@ -11,7 +11,7 @@ database:
   schema: reminders
   migrations: codegen_kit_reminders:migrations
 deployment:
-  modes: [in_process, container]
+  modes: [in_process]
 events:
   publishes: [reminders.due]
   consumes: [job_fired]

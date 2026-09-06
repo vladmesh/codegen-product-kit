@@ -58,7 +58,7 @@ rejects unknown fields. Its fields are:
 | `package_dependencies` | Top-level Python imports allowed in addition to stdlib and `codegen_kit` | Enforced by the kit import lint |
 | `http.prefix` | Absolute non-root mount prefix with no trailing slash, `//`, or path parameters | Enforced; malformed values have `MalformedPackagePrefixError` |
 | `database.schema`, `database.migrations` | Package-owned PostgreSQL schema and `module:path` Alembic revision resource | Enforced; migrated by the core |
-| `deployment.modes` | Optional non-empty set of `in_process` and `container` deployability declarations; defaults to `in_process` | Shape enforced; only `in_process` activation is implemented |
+| `deployment.modes` | Optional non-empty set of deployability declarations; `in_process` is the only accepted value and the default | Enforced; a declared `container` mode has `UnimplementedDeploymentModeError` |
 | `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
@@ -150,11 +150,13 @@ Draft 2020-12 definition is authoritative after removing only its generated top-
 that title equals the declared model name. Package consumers must serialize their inline schema to
 that representation; no looser validation-equivalence or `$ref` resolution is inferred.
 
-The `deployment` declaration records package-author intent without changing activation. Generated
-products currently implement only `in_process`; declaring `container` makes the package eligible for
-a future delivery mechanism but does not create a service, image, Compose entry, or runtime today.
-Package protocol version `1` is unchanged because the declaration is optional and defaults to the
-already implemented in-process form.
+The `deployment` declaration records the delivery form a package is activated in. Generated products
+implement only `in_process`, so a manifest declaring `container` is refused fail-closed with
+`UnimplementedDeploymentModeError` at manifest validation time, in generation and at runtime alike:
+a manifest must never promise a delivery form that creates no service, image, or Compose entry. The
+field is kept so that a future container implementation can lift the refusal. Package protocol
+version `1` is unchanged because the declaration is optional and defaults to the already implemented
+in-process form.
 
 The generated product's `make lint` deliberately overrides Ruff's configured exclusions for its
 format check, so generated Python files are checked for canonical formatting as rendered while
@@ -221,18 +223,24 @@ parsing. The core still schedules nothing. An external caller fires `reminders.t
 
 A tick locks scheduled reminders at or before that instant, changes them to due, creates one
 package-owned outbox row per reminder, and commits that transaction before publication begins.
-Cancelled rows are excluded from that transition. Pending rows are published as `reminders.due`
-and marked emitted only after the transport reports success; every later tick also retries all
-unconfirmed rows. The event UUID is derived deterministically from the reminder's one-time
-occurrence. Consequently a restart after the due transition cannot lose the notification, and a
-restart after Redis accepted it but before the emitted marker committed reuses the same UUID.
-The envelope's `occurred_at` is the caller-supplied `reminders.tick` instant, not the later emission
-time. A retry therefore republishes byte-identical event identity and occurrence metadata.
+Cancelled rows are excluded from that transition. The tick then reads the unconfirmed outbox rows
+in a second short transaction and publishes them as `reminders.due` while holding no row lock and
+no open transaction, so a stalled transport can never keep package rows locked. Each accepted
+publication is confirmed by a third short transaction that sets the emitted marker; every later
+tick retries all rows that are still unconfirmed. The event UUID is derived deterministically from
+the reminder's one-time occurrence. Consequently a restart after the due transition cannot lose the
+notification, and a restart after Redis accepted it but before the emitted marker committed reuses
+the same UUID. The envelope's `occurred_at` is the caller-supplied `reminders.tick` instant, not the
+later emission time. A retry therefore republishes byte-identical event identity and occurrence
+metadata.
 
 This is exactly one logical notification per due reminder, not exactly-once transport delivery.
-Redis Streams may contain duplicate entries after a crash. A generated downstream consumer's
-transactional `(consumer_group, event_id)` guard collapses entries carrying the stable UUID to one
-logical effect. External effects outside that transaction still need their own idempotency boundary.
+Because publication happens outside the outbox transaction, Redis Streams may contain duplicate
+entries after a crash or when two ticks overlap; both carry the same stable UUID. There is still
+exactly one outbox row per reminder, so a reminder never acquires a second logical identity. A
+generated downstream consumer's transactional `(consumer_group, event_id)` guard collapses entries
+carrying the stable UUID to one logical effect. External effects outside that transaction still need
+their own idempotency boundary.
 
 ## Core settings v1
 

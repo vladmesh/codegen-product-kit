@@ -11,10 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the separately versioned `codegen-kit-reminders` package with one-time reminder HTTP routes,
   a package-owned PostgreSQL schema, externally fired ticks, and durable stable-ID due-event
-  emission. Package manifests can now declare in-process and container deployability, while only
-  in-process activation is currently implemented.
+  emission. Package manifests can now declare `deployment.modes`, whose only implemented and
+  accepted value is `in_process`.
 
 ### Changed
+
+- Package manifests declaring the `container` deployment mode are now refused with
+  `UnimplementedDeploymentModeError` during generation and activation, because no generated product
+  implements container delivery; `in_process` stays the only accepted value and the default.
 
 - **Breaking:** Generated products now install `codegen-kit-tooling` from an exact Git commit
   recorded in the root `uv.lock`; the copied framework source and synchronization workflow are
@@ -53,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grant capability.
 - Added the protected `POST /users/revoke` capability. It idempotently deactivates an existing
   identity through the same `User.status` admission gate and does not create unknown identities.
+
+### Fixed
+
+- `codegen-kit-reminders` no longer publishes `reminders.due` inside the transaction that holds the
+  `due_emissions` rows: a tick now reads the unconfirmed outbox in one short transaction, publishes
+  outside every row lock, and confirms each accepted publication in its own transaction, so a
+  stalled Redis cannot hold PostgreSQL locks. Durability, the stable per-reminder event UUID, and
+  retry of unconfirmed rows are unchanged; overlapping ticks may now add a duplicate stream entry
+  carrying that same UUID, which the generated consumer's `(consumer_group, event_id)` guard
+  collapses.
 
 ## [0.4.0] - 2026-08-30
 

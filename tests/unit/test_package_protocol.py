@@ -14,6 +14,7 @@ from framework.spec.package_resolution import CORE_VERSION
 from framework.spec.packages import (
     MalformedPackagePrefixError,
     MissingPackageIdentityError,
+    UnimplementedDeploymentModeError,
     UnknownPackageManifestFieldError,
     lint_package_imports,
     load_package_manifest,
@@ -51,12 +52,12 @@ def test_synthetic_package_manifest_is_valid() -> None:
     assert manifest.http.prefix == "/synthetic"
 
 
-def test_reminders_package_manifest_declares_both_deployment_modes() -> None:
+def test_reminders_package_manifest_declares_only_the_implemented_deployment_mode() -> None:
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
     assert manifest.version == "0.1.0"
-    assert manifest.deployment.modes == ["in_process", "container"]
+    assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
     assert [(item.name, item.required) for item in manifest.environment] == [("REDIS_URL", True)]
@@ -76,6 +77,17 @@ def test_package_deployment_declaration_is_fail_closed(deployment: object) -> No
     data["deployment"] = deployment
 
     with pytest.raises(ValueError):
+        parse_package_manifest(data)
+
+
+@pytest.mark.parametrize("modes", [["container"], ["in_process", "container"]])
+def test_package_deployment_refuses_unimplemented_container_mode(modes: list[str]) -> None:
+    """A manifest must not promise a delivery form the runtime does not implement."""
+
+    data = yaml.safe_load(FIXTURE.read_text())
+    data["deployment"] = {"modes": modes}
+
+    with pytest.raises(UnimplementedDeploymentModeError):
         parse_package_manifest(data)
 
 
@@ -189,3 +201,37 @@ def test_installed_package_lint_reports_missing_manifest_metadata(
     )
 
     assert package_imports.lint_installed_packages(tmp_path) == [f"synthetic: {message}"]
+
+
+def _publications_inside_package_transactions(source: str) -> list[str]:
+    """Name every `publish_event` await that a `package_session` block encloses."""
+
+    module = ast.parse(source)
+    enclosed: list[str] = []
+    for node in ast.walk(module):
+        if not isinstance(node, ast.AsyncWith):
+            continue
+        opens_session = any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Name)
+            and item.context_expr.func.id == "package_session"
+            for item in node.items
+        )
+        if not opens_session:
+            continue
+        enclosed.extend(
+            f"line {inner.lineno}"
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Name)
+            and inner.func.id == "publish_event"
+        )
+    return enclosed
+
+
+def test_reminders_never_publishes_inside_an_open_package_transaction() -> None:
+    """A stalled transport must never hold outbox rows locked by an open transaction."""
+
+    runtime_source = (REMINDERS.parent / "runtime.py").read_text()
+
+    assert _publications_inside_package_transactions(runtime_source) == []
