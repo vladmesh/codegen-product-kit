@@ -1,5 +1,14 @@
 # Contract changelog
 
+## 2026-09-06
+
+- `reminders.due` is now published outside every package transaction: the tick commits the due
+  transition and its outbox rows, reads the unconfirmed rows in a short transaction, publishes with
+  no row lock held, and confirms each accepted publication separately. A stalled transport no longer
+  holds PostgreSQL locks. There is still exactly one outbox row and one stable event UUID per due
+  reminder; overlapping ticks may add a duplicate stream entry carrying that UUID, which the
+  generated `(consumer_group, event_id)` consumer guard collapses.
+
 ## 2026-09-05
 
 - Added `kit add reminders --wheel <artifact>` and a two-product CI proof. The command installs the

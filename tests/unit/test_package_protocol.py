@@ -189,3 +189,37 @@ def test_installed_package_lint_reports_missing_manifest_metadata(
     )
 
     assert package_imports.lint_installed_packages(tmp_path) == [f"synthetic: {message}"]
+
+
+def _publications_inside_package_transactions(source: str) -> list[str]:
+    """Name every `publish_event` await that a `package_session` block encloses."""
+
+    module = ast.parse(source)
+    enclosed: list[str] = []
+    for node in ast.walk(module):
+        if not isinstance(node, ast.AsyncWith):
+            continue
+        opens_session = any(
+            isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Name)
+            and item.context_expr.func.id == "package_session"
+            for item in node.items
+        )
+        if not opens_session:
+            continue
+        enclosed.extend(
+            f"line {inner.lineno}"
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Name)
+            and inner.func.id == "publish_event"
+        )
+    return enclosed
+
+
+def test_reminders_never_publishes_inside_an_open_package_transaction() -> None:
+    """A stalled transport must never hold outbox rows locked by an open transaction."""
+
+    runtime_source = (REMINDERS.parent / "runtime.py").read_text()
+
+    assert _publications_inside_package_transactions(runtime_source) == []

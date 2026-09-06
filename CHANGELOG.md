@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the protected `POST /users/revoke` capability. It idempotently deactivates an existing
   identity through the same `User.status` admission gate and does not create unknown identities.
 
+### Fixed
+
+- `codegen-kit-reminders` no longer publishes `reminders.due` inside the transaction that holds the
+  `due_emissions` rows: a tick now reads the unconfirmed outbox in one short transaction, publishes
+  outside every row lock, and confirms each accepted publication in its own transaction, so a
+  stalled Redis cannot hold PostgreSQL locks. Durability, the stable per-reminder event UUID, and
+  retry of unconfirmed rows are unchanged; overlapping ticks may now add a duplicate stream entry
+  carrying that same UUID, which the generated consumer's `(consumer_group, event_id)` guard
+  collapses.
+
 ## [0.4.0] - 2026-08-30
 
 This release targets newly generated projects. Updating projects generated from earlier template
