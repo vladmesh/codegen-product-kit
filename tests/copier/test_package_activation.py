@@ -592,6 +592,7 @@ def test_package_contract_and_migrations_against_real_postgres(
 
             import asyncpg
             from faststream.redis import RedisBroker, StreamSub
+            from faststream.redis.parser import BinaryMessageFormatV1
             from httpx import AsyncClient
             import pytest
             from redis.asyncio import Redis
@@ -877,9 +878,10 @@ def test_package_contract_and_migrations_against_real_postgres(
             @pytest.mark.asyncio
             async def test_concurrent_ticks_emit_one_logical_due_per_reminder() -> None:
                 # Two overlapping ticks race over the same due rows while no tick
-                # holds a row lock across publication.
+                # holds a row lock across publication. The stream is read with
+                # xrange because a grouped faststream subscriber answers exactly
+                # one `get_one`, which cannot count an unknown number of entries.
                 redis = Redis.from_url(os.environ["REDIS_URL"])
-                reader, subscriber = await _due_reader("concurrent")
                 async with AsyncClient(base_url="http://backend:8000") as client:
                     reminder_ids = []
                     for index in (1, 2):
@@ -944,22 +946,21 @@ def test_package_contract_and_migrations_against_real_postgres(
                     await connection.close()
 
                 published = {}
-                while True:
-                    delivery = await subscriber.get_one(timeout=5)
-                    if delivery is None:
-                        break
-                    envelope = EventEnvelope[ReminderDue].model_validate(
-                        await delivery.decode()
-                    )
+                for _entry_id, fields in await redis.xrange("reminders.due"):
+                    body, _headers = BinaryMessageFormatV1.parse(fields[b"__data__"])
+                    envelope = EventEnvelope[ReminderDue].model_validate_json(body)
                     published.setdefault(
                         str(envelope.payload.reminder_id), set()
                     ).add(envelope.event_id)
-                await reader.stop()
                 await redis.aclose()
 
-                assert set(published) == set(reminder_ids)
-                for reminder_id, event_ids in published.items():
-                    assert event_ids == {due_event_id(UUID(reminder_id))}
+                assert {
+                    reminder_id: published.get(reminder_id)
+                    for reminder_id in reminder_ids
+                } == {
+                    reminder_id: {due_event_id(UUID(reminder_id))}
+                    for reminder_id in reminder_ids
+                }
             """
         )
     )
