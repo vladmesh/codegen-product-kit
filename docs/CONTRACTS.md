@@ -223,18 +223,24 @@ parsing. The core still schedules nothing. An external caller fires `reminders.t
 
 A tick locks scheduled reminders at or before that instant, changes them to due, creates one
 package-owned outbox row per reminder, and commits that transaction before publication begins.
-Cancelled rows are excluded from that transition. Pending rows are published as `reminders.due`
-and marked emitted only after the transport reports success; every later tick also retries all
-unconfirmed rows. The event UUID is derived deterministically from the reminder's one-time
-occurrence. Consequently a restart after the due transition cannot lose the notification, and a
-restart after Redis accepted it but before the emitted marker committed reuses the same UUID.
-The envelope's `occurred_at` is the caller-supplied `reminders.tick` instant, not the later emission
-time. A retry therefore republishes byte-identical event identity and occurrence metadata.
+Cancelled rows are excluded from that transition. The tick then reads the unconfirmed outbox rows
+in a second short transaction and publishes them as `reminders.due` while holding no row lock and
+no open transaction, so a stalled transport can never keep package rows locked. Each accepted
+publication is confirmed by a third short transaction that sets the emitted marker; every later
+tick retries all rows that are still unconfirmed. The event UUID is derived deterministically from
+the reminder's one-time occurrence. Consequently a restart after the due transition cannot lose the
+notification, and a restart after Redis accepted it but before the emitted marker committed reuses
+the same UUID. The envelope's `occurred_at` is the caller-supplied `reminders.tick` instant, not the
+later emission time. A retry therefore republishes byte-identical event identity and occurrence
+metadata.
 
 This is exactly one logical notification per due reminder, not exactly-once transport delivery.
-Redis Streams may contain duplicate entries after a crash. A generated downstream consumer's
-transactional `(consumer_group, event_id)` guard collapses entries carrying the stable UUID to one
-logical effect. External effects outside that transaction still need their own idempotency boundary.
+Because publication happens outside the outbox transaction, Redis Streams may contain duplicate
+entries after a crash or when two ticks overlap; both carry the same stable UUID. There is still
+exactly one outbox row per reminder, so a reminder never acquires a second logical identity. A
+generated downstream consumer's transactional `(consumer_group, event_id)` guard collapses entries
+carrying the stable UUID to one logical effect. External effects outside that transaction still need
+their own idempotency boundary.
 
 ## Core settings v1
 

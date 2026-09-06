@@ -877,6 +877,94 @@ def test_package_contract_and_migrations_against_real_postgres(
                 assert await redis.xlen("reminders.due") == 2
                 await restart_reader.stop()
                 await redis.aclose()
+
+
+            @pytest.mark.asyncio
+            async def test_concurrent_ticks_emit_one_logical_due_per_reminder() -> None:
+                # Two overlapping ticks race over the same due rows while no tick
+                # holds a row lock across publication.
+                redis = Redis.from_url(os.environ["REDIS_URL"])
+                reader, subscriber = await _due_reader("concurrent")
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    reminder_ids = []
+                    for index in (1, 2):
+                        created = await client.post(
+                            "/reminders",
+                            json={
+                                "user_ref": f"opaque:concurrent/{index}",
+                                "text": f"concurrent {index}",
+                                "remind_at": "2060-01-01T00:00:00Z",
+                            },
+                        )
+                        assert created.status_code == 201, created.text
+                        reminder_ids.append(created.json()["id"])
+
+                concurrent = textwrap.dedent(
+                    '''
+                    import asyncio
+                    import codegen_kit_reminders.runtime as runtime
+                    from services.backend.src.app.factory import create_app
+
+                    async def main():
+                        application = create_app()
+                        async with application.router.lifespan_context(application):
+                            envelope = {
+                                "payload": {
+                                    "name": "reminders.tick",
+                                    "arguments": {"at": "2060-01-01T00:00:00Z"},
+                                }
+                            }
+                            await asyncio.gather(
+                                runtime.handle_job_fired(envelope),
+                                runtime.handle_job_fired(envelope),
+                            )
+
+                    asyncio.run(main())
+                    '''
+                )
+                ticked = subprocess.run(
+                    [sys.executable, "-c", concurrent], capture_output=True, text=True
+                )
+                assert ticked.returncode == 0, ticked.stdout + ticked.stderr
+
+                connection = await asyncpg.connect(
+                    os.environ["ASYNC_DATABASE_URL"].replace(
+                        "postgresql+asyncpg://", "postgresql://"
+                    )
+                )
+                try:
+                    for reminder_id in reminder_ids:
+                        rows = await connection.fetch(
+                            "SELECT r.state, e.event_id, e.emitted_at "
+                            "FROM reminders.reminders AS r "
+                            "JOIN reminders.due_emissions AS e ON e.reminder_id = r.id "
+                            "WHERE r.id = $1",
+                            UUID(reminder_id),
+                        )
+                        assert len(rows) == 1
+                        assert rows[0]["state"] == "emitted"
+                        assert rows[0]["event_id"] == due_event_id(UUID(reminder_id))
+                        assert rows[0]["emitted_at"] is not None
+                finally:
+                    await connection.close()
+
+                published = {}
+                while True:
+                    delivery = await subscriber.get_one(timeout=5)
+                    if delivery is None:
+                        break
+                    envelope = EventEnvelope[ReminderDue].model_validate(
+                        await delivery.decode()
+                    )
+                    published.setdefault(
+                        str(envelope.payload.reminder_id), set()
+                    ).add(envelope.event_id)
+                await reader.stop()
+                await redis.aclose()
+
+                assert set(published) == set(reminder_ids)
+                for reminder_id, event_ids in published.items():
+                    assert event_ids == {due_event_id(UUID(reminder_id))}
             """
         )
     )

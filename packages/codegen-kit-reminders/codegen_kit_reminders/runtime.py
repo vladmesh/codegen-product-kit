@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 import os
 from typing import Any
+from uuid import UUID
 
 from codegen_kit import package_session, publish_event
 from faststream.redis import RedisBroker, StreamSub
@@ -60,11 +62,11 @@ async def transition_due(at: datetime) -> None:
             )
 
 
-async def emit_pending() -> None:
-    """Publish pending outbox rows and mark only confirmed publications emitted."""
+async def read_pending() -> Sequence[Any]:
+    """Read the unconfirmed outbox rows in one transaction that holds no row lock."""
 
     async with package_session(SCHEMA) as session:
-        rows = (
+        return (
             await session.execute(
                 sql(
                     "SELECT e.reminder_id, e.event_id, e.occurred_at, "
@@ -72,37 +74,49 @@ async def emit_pending() -> None:
                     "FROM due_emissions AS e "
                     "JOIN reminders AS r ON r.id = e.reminder_id "
                     "WHERE e.emitted_at IS NULL "
-                    "ORDER BY e.occurred_at, e.reminder_id FOR UPDATE OF e"
+                    "ORDER BY e.occurred_at, e.reminder_id"
                 )
             )
         ).all()
-        for row in rows:
-            emitted_at = datetime.now(row.occurred_at.tzinfo)
-            await publish_event(
-                DUE_STREAM,
-                {
-                    "reminder_id": row.reminder_id,
-                    "user_ref": row.user_ref,
-                    "text": row.text,
-                    "remind_at": row.remind_at,
-                },
-                event_id=row.event_id,
-                occurred_at=row.occurred_at,
-            )
-            await session.execute(
-                sql(
-                    "UPDATE due_emissions SET emitted_at = :emitted_at "
-                    "WHERE reminder_id = :reminder_id"
-                ),
-                {"emitted_at": emitted_at, "reminder_id": row.reminder_id},
-            )
-            await session.execute(
-                sql(
-                    "UPDATE reminders SET state = 'emitted', emitted_at = :emitted_at "
-                    "WHERE id = :reminder_id"
-                ),
-                {"emitted_at": emitted_at, "reminder_id": row.reminder_id},
-            )
+
+
+async def confirm_emission(reminder_id: UUID, emitted_at: datetime) -> None:
+    """Record one accepted publication in its own short transaction."""
+
+    async with package_session(SCHEMA) as session:
+        await session.execute(
+            sql(
+                "UPDATE due_emissions SET emitted_at = :emitted_at "
+                "WHERE reminder_id = :reminder_id AND emitted_at IS NULL"
+            ),
+            {"emitted_at": emitted_at, "reminder_id": reminder_id},
+        )
+        await session.execute(
+            sql(
+                "UPDATE reminders SET state = 'emitted', emitted_at = :emitted_at "
+                "WHERE id = :reminder_id AND state = 'due'"
+            ),
+            {"emitted_at": emitted_at, "reminder_id": reminder_id},
+        )
+
+
+async def emit_pending() -> None:
+    """Publish pending outbox rows outside any transaction and confirm each one."""
+
+    for row in await read_pending():
+        emitted_at = datetime.now(row.occurred_at.tzinfo)
+        await publish_event(
+            DUE_STREAM,
+            {
+                "reminder_id": row.reminder_id,
+                "user_ref": row.user_ref,
+                "text": row.text,
+                "remind_at": row.remind_at,
+            },
+            event_id=row.event_id,
+            occurred_at=row.occurred_at,
+        )
+        await confirm_emission(row.reminder_id, emitted_at)
 
 
 async def handle_job_fired(envelope: dict[str, Any]) -> None:
