@@ -59,9 +59,7 @@ class EventsSpec(BaseModel):
                 msg = f"Event '{name}' must be a dict"
                 raise ValueError(msg)
 
-            events.append(
-                EventSpec.model_validate({"name": name, **event_data})
-            )
+            events.append(EventSpec.model_validate({"name": name, **event_data}))
 
         return cls(events=events)
 

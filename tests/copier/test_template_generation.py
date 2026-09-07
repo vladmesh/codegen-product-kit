@@ -9,10 +9,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tomllib
 
 import pytest
+import yaml
 
 from tests.copier.conftest import (
     BASE_DATA,
@@ -77,8 +77,7 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     assert "uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a" in workflow
     assert 'version: "0.11.29"' in workflow
     assert (
-        'checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"'
-        in workflow
+        'checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"' in workflow
     )
     assert '--defaults --trust --vcs-ref="${{ github.sha }}"' in workflow
     assert "--data modules=backend" in workflow
@@ -128,9 +127,7 @@ def test_default_tooling_requirement_uses_template_commit(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 0, result.stderr
-    dependency = tomllib.loads((output / "pyproject.toml").read_text())["project"][
-        "dependencies"
-    ]
+    dependency = tomllib.loads((output / "pyproject.toml").read_text())["project"]["dependencies"]
     assert dependency == [
         "codegen-kit-tooling @ "
         f"git+https://github.com/vladmesh/codegen-product-kit.git@{expected_sha}"
@@ -169,10 +166,7 @@ class TestBackendOnlyGeneration:
         assert "event_id: UUID" in events
         assert "occurred_at: AwareDatetime" in events
         assert "schema_version: int = 1" in events
-        assert (
-            project_backend
-            / "services/backend/src/core/idempotent_consumer.py"
-        ).exists()
+        assert (project_backend / "services/backend/src/core/idempotent_consumer.py").exists()
         assert (
             project_backend
             / "services/backend/migrations/versions/d4a7b2c9e1f0_create_event_consumptions.py"
@@ -182,8 +176,21 @@ class TestBackendOnlyGeneration:
     def test_durable_event_integration_test_is_lint_clean(self, project_backend: Path):
         """Setup must not rewrite the generated durable-event integration test."""
         integration_test = project_backend / "tests/integration/test_durable_events.py"
+        subprocess.run(
+            ["uv", "sync", "--frozen"],
+            cwd=project_backend,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "ruff", "check", "--select", "I", integration_test],
+            [
+                str(project_backend / ".venv" / "bin" / "ruff"),
+                "check",
+                "--select",
+                "I",
+                integration_test,
+            ],
             cwd=project_backend,
             capture_output=True,
             text=True,
@@ -325,9 +332,7 @@ class TestBackendOnlyGeneration:
         pyproject = tomllib.loads((project_backend / "pyproject.toml").read_text())
 
         assert lock.exists()
-        assert pyproject["project"]["dependencies"][0].startswith(
-            "codegen-kit-tooling @ "
-        )
+        assert pyproject["project"]["dependencies"][0].startswith("codegen-kit-tooling @ ")
         assert 'name = "codegen-kit-tooling"' in lock.read_text()
 
 
@@ -337,7 +342,11 @@ class TestStandaloneGeneration:
     def test_tg_bot_service_exists(self, project_standalone: Path):
         """tg_bot service directory and Dockerfile should exist."""
         assert (project_standalone / "services" / "tg_bot").exists()
-        assert (project_standalone / "services" / "tg_bot" / "Dockerfile").exists()
+        dockerfile = project_standalone / "services" / "tg_bot" / "Dockerfile"
+        assert dockerfile.exists()
+        content = dockerfile.read_text()
+        assert "INSTALL_DEV_DEPS" not in content
+        assert "uv sync --frozen --no-install-project --no-dev" in content
 
     def test_no_jinja_artifacts(self, project_standalone: Path):
         """No Jinja artifacts in standalone generation."""
@@ -548,6 +557,7 @@ class TestFullStackGeneration:
             assert "pep_621_dev_dependency_groups" not in deptry_config
             assert "optional_dependencies_dev_groups" not in deptry_config
 
+
 class TestEnvExample:
     """Test .env.example generation."""
 
@@ -674,6 +684,9 @@ class TestModuleExclusion:
         assert update_result.returncode == 0, (
             f"Copier update failed:\nstdout: {update_result.stdout}\nstderr: {update_result.stderr}"
         )
+        answers = yaml.safe_load((output / ".copier-answers.yml").read_text())
+        assert answers["modules"] == "tg_bot"
+        assert 'name = "codegen-kit-tooling"' in (output / "uv.lock").read_text()
 
     def test_tg_bot_excluded_when_not_selected(self, tmp_path: Path):
         """tg_bot should not exist when not in modules."""
@@ -930,10 +943,7 @@ class TestIntegrationCompose:
         integration_tests = compose["services"]["integration-tests"]
         command = integration_tests["command"]
         assert "python -m framework.generate" in command
-        assert (
-            integration_tests["environment"]["SERVICE_TEMPLATE_ROOT"]
-            == "/workspace"
-        )
+        assert integration_tests["environment"]["SERVICE_TEMPLATE_ROOT"] == "/workspace"
         assert integration_tests["build"] == {
             "context": "..",
             "dockerfile": "services/backend/Dockerfile",
@@ -1265,6 +1275,15 @@ class TestIntegration:
         assert result.returncode == 0, (
             f"framework.generate failed:\nstderr: {result.stderr}\nstdout: {result.stdout}"
         )
+        settings_registry = (
+            project_backend / "services/backend/src/generated/settings_schemas.py"
+        ).read_text()
+        jobs_registry = (
+            project_backend / "services/backend/src/generated/jobs_schemas.py"
+        ).read_text()
+        assert "SETTINGS_SCHEMAS" in settings_registry
+        assert "JOB_SCHEMAS" in jobs_registry
+        assert "json.loads" not in settings_registry + jobs_registry
 
     def test_makefile_has_correct_targets(self, project_backend: Path):
         """Makefile should have expected targets."""
@@ -1721,9 +1740,7 @@ class TestCIWorkflowSimulation:
 
         errors = []
         compose_files = [
-            f
-            for f in (project_dir / "infra").glob("compose.*.yml")
-            if "prod" not in f.name
+            f for f in (project_dir / "infra").glob("compose.*.yml") if "prod" not in f.name
         ]
 
         for compose_path in compose_files:
@@ -1873,9 +1890,7 @@ class TestDockerReadiness:
         lifespan = project_fullstack / "services" / "backend" / "src" / "app" / "lifespan.py"
         assert lifespan.exists(), "lifespan.py not found"
         content = lifespan.read_text()
-        assert "get_broker" in content, (
-            "Combined lifespan.py should import get_broker for tg_bot."
-        )
+        assert "get_broker" in content, "Combined lifespan.py should import get_broker for tg_bot."
 
     def test_compose_prod_config_valid(self, tmp_path: Path):
         """compose.prod.yml should pass docker compose config validation."""

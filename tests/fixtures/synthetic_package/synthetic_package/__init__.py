@@ -1,23 +1,24 @@
 """Synthetic package used to prove real entry-point activation."""
 
-from codegen_kit import Package, package_base, package_session, publish_event
+from codegen_kit import Package, package_database, publish_event
 from fastapi import APIRouter
 
 from synthetic_package.status import response
 
 router = APIRouter()
+database = package_database()
 
 
 def orm_base() -> object:
     """Build the package-owned metadata registry through the public seam."""
 
-    return package_base("synthetic")
+    return database.base()
 
 
 def session() -> object:
     """Open the package transaction through the public seam."""
 
-    return package_session("synthetic")
+    return database.session()
 
 
 async def announce_ready(message: object) -> object:

@@ -23,8 +23,8 @@ The future component vocabulary is:
 - **package** — code imported and executed inside a product process;
 - **component** — the common term for all three.
 
-This repository does not yet implement a package runtime, a component catalog, or automatic
-composition across those component types. The current `modules` Copier option selects only the two
+This repository implements an in-process package runtime, but not a component catalog or automatic
+composition across component types. The current `modules` Copier option selects only the two
 built-in application shapes above.
 
 ## Generate a project
@@ -49,5 +49,6 @@ make test
 make test-copier
 ```
 
-See [architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md), and
-[testing](docs/TESTING.md) for the current contracts.
+See [architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md),
+[testing](docs/TESTING.md), and the attested [package RSS observations](docs/PACKAGE_RSS.md) for the
+current contracts and evidence.

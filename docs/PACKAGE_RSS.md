@@ -3,6 +3,10 @@
 GitHub Actions run `33996786092`, job `101388614893`, tested commit `9cfe1ce` on 2026-09-05 and
 produced these five-read ranges from the same two running containers:
 
+The measurement implementation in `tests/copier/test_two_product_package.py` is byte-identical to
+that attested `9cfe1ce` file (SHA-256
+`313c7d951259ac523ea0eef0110cf615abc7052962afaa0a9928a834877984b9`).
+
 | Product | Emitted readings (KiB) | Observed range (KiB) |
 |---|---|---|
 | Package-free | 98,856, 98,856, 98,856, 98,856, 98,856 | 98,856 to 98,856 |

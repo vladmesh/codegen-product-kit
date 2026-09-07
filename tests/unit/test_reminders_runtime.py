@@ -70,7 +70,7 @@ def _load_runtime(
             self.stop_calls += 1
 
     modules = {
-        "codegen_kit": SimpleNamespace(package_session=None, publish_event=None),
+        "codegen_kit": SimpleNamespace(publish_event=None),
         "faststream": ModuleType("faststream"),
         "faststream.redis": SimpleNamespace(
             RedisBroker=FakeBroker,
@@ -81,7 +81,7 @@ def _load_runtime(
         "redis.exceptions": SimpleNamespace(ResponseError=FakeResponseError),
         "sqlalchemy": SimpleNamespace(text=lambda statement: statement),
         "codegen_kit_reminders": ModuleType("codegen_kit_reminders"),
-        "codegen_kit_reminders.api": SimpleNamespace(SCHEMA="reminders"),
+        "codegen_kit_reminders.database": SimpleNamespace(database=SimpleNamespace()),
         "codegen_kit_reminders.identity": SimpleNamespace(due_event_id=lambda value: value),
     }
     for name, module in modules.items():

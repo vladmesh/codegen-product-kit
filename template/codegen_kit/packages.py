@@ -17,7 +17,7 @@ from packaging.version import InvalidVersion, Version
 import yaml
 
 PACKAGE_PROTOCOL_VERSION = 1
-CORE_VERSION = "1.3.0"
+CORE_VERSION = "2.0.0"
 ENTRY_POINT_GROUP = "codegen_kit.packages"
 SETTING_SEED_PARAMETER_COUNT = 3
 
@@ -72,6 +72,10 @@ class DuplicatePackageHttpPrefixError(PackageActivationError):
 
 class MissingSettingSeedCallbackError(PackageActivationError):
     """A package declares a setting seed but does not implement its callback."""
+
+
+class PackageDatabaseOwnershipError(PackageActivationError):
+    """A database capability caller is not owned by one installed package manifest."""
 
 
 @dataclass(frozen=True)
@@ -444,6 +448,42 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
         package_root=package_root,
         manifest_sha256=sha256(manifest_path.read_bytes()).hexdigest(),
     )
+
+
+def owned_database_schema(caller_path: Path) -> str:
+    """Resolve one caller path to the database schema its installed manifest owns."""
+
+    caller_path = caller_path.resolve()
+    matches: list[tuple[metadata.EntryPoint, Path]] = []
+    for entry_point in _entry_points():
+        try:
+            package_root, _ = _package_root(entry_point)
+        except PackageActivationError:
+            continue
+        if caller_path.is_relative_to(package_root.resolve()):
+            matches.append((entry_point, package_root))
+    if len(matches) != 1:
+        raise PackageDatabaseOwnershipError(
+            f"database caller {caller_path} is not owned by exactly one installed package"
+        )
+
+    entry_point, package_root = matches[0]
+    manifest = _parse_manifest(_manifest_path(entry_point, package_root))
+    if manifest.name != entry_point.name:
+        raise PackageDatabaseOwnershipError(
+            f"entry point {entry_point.name!r} does not match package manifest name "
+            f"{manifest.name!r}"
+        )
+    _validate_compatibility(entry_point.name, manifest)
+    if entry_point.dist is None or manifest.version != entry_point.dist.version:
+        raise PackageDatabaseOwnershipError(
+            f"package {entry_point.name!r} manifest version does not match its distribution"
+        )
+    if manifest.database_schema is None:
+        raise PackageDatabaseOwnershipError(
+            f"package {entry_point.name!r} does not own a database schema"
+        )
+    return manifest.database_schema
 
 
 def _validate_http_prefixes(packages: Sequence[ActivatedPackage]) -> None:

@@ -2,6 +2,14 @@
 
 ## 2026-09-07
 
+- **Breaking:** The package façade is now `2.0.0`. `package_database()` derives an ownership
+  capability from the calling installed package's validated manifest; the schema-selecting
+  `package_base(schema)` and `package_session(schema)` seams are removed. The capability creates
+  owned ORM bases and schema-local sessions, and unowned callers fail before database access.
+  `codegen-kit-reminders` 0.3.0 adopts the capability.
+- Package Alembic resources now provide a standard `env.py` and are invoked with public
+  `alembic.command.upgrade`; core migrations still run first and package order, schemas, and
+  version tables remain isolated.
 - Package protocol v1 now supports package-owned `setting_seeds` at product scope. The existing
   capability-protected settings write dispatches an exact-key callback through the already activated
   package set and shares its transaction, so callback failure rolls back the setting and package

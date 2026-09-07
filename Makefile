@@ -20,6 +20,7 @@ setup:
 	uv sync
 
 lint:
+	$(VENV)/ruff format --check framework/ packages/ tests/
 	$(VENV)/ruff check --no-cache framework/ packages/ tests/
 
 lint-template:

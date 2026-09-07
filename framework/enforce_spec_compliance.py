@@ -48,9 +48,7 @@ def check_file(
     lines = file_path.read_text(encoding="utf-8").splitlines()
 
     for node in ast.walk(tree):
-        if is_violation(
-            node, check_base_model=check_base_model, check_api_router=check_api_router
-        ):
+        if is_violation(node, check_base_model=check_base_model, check_api_router=check_api_router):
             # Check for noqa on the same line
             lineno = node.lineno
             if lineno <= len(lines):

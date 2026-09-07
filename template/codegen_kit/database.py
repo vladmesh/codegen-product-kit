@@ -4,38 +4,55 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import re
-
-from sqlalchemy import MetaData, text
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import DeclarativeBase
+from pathlib import Path
+from typing import Any
 
 
-def package_base(schema: str) -> type[DeclarativeBase]:
-    """Create an independent declarative base owned by one package schema."""
-
-    if not schema:
-        raise ValueError("package schema must not be empty")
-
-    class PackageBase(DeclarativeBase):
-        metadata = MetaData(schema=schema)
-
-    return PackageBase
+_CAPABILITY_KEY = object()
 
 
-@asynccontextmanager
-async def package_session(schema: str) -> AsyncIterator[AsyncSession]:
-    """Give a package a schema-local core transaction without exposing internals."""
+class PackageDatabase:
+    """An installed package's validated schema ownership capability."""
 
-    from services.backend.src.core.db import AsyncSessionLocal
+    def __init__(self, schema: str, key: object) -> None:
+        if key is not _CAPABILITY_KEY:
+            raise TypeError("package database capabilities are created by package_database()")
+        self._schema = schema
 
-    if schema == "public" or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema) is None:
-        raise ValueError("package schema must be a non-public PostgreSQL identifier")
-    async with AsyncSessionLocal() as session:
-        try:
-            await session.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    def base(self) -> type[Any]:
+        """Create an independent declarative base in the owned schema."""
+
+        from sqlalchemy import MetaData
+        from sqlalchemy.orm import DeclarativeBase
+
+        schema = self._schema
+
+        class PackageBase(DeclarativeBase):
+            metadata = MetaData(schema=schema)
+
+        return PackageBase
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[Any]:
+        """Open a core-owned transaction scoped to the owned schema."""
+
+        from sqlalchemy import text
+
+        from services.backend.src.core.db import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            try:
+                await session.execute(text(f'SET LOCAL search_path TO "{self._schema}", public'))
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+
+def owned_package_database(caller_path: Path) -> PackageDatabase:
+    """Create a capability after resolving the caller to its installed manifest."""
+
+    from .packages import owned_database_schema
+
+    return PackageDatabase(owned_database_schema(caller_path), _CAPABILITY_KEY)

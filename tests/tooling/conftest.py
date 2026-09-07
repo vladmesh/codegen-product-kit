@@ -9,9 +9,7 @@ import pytest
 
 
 @pytest.fixture
-def fake_repo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[Path, None, None]:
+def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None, None]:
     """Provide an isolated repo root that tooling modules will use."""
 
     root = tmp_path / "repo"

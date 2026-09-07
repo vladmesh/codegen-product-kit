@@ -42,7 +42,7 @@ def _package(
             "protocol_version": 1,
             "name": name,
             "version": "1.0.0",
-            "requires_core": ">=1,<2",
+            "requires_core": ">=2,<3",
             "environment": [{"name": f"{name.replace('-', '_').upper()}_TOKEN"}],
             "http": {"prefix": f"/{name}"},
             "events": {

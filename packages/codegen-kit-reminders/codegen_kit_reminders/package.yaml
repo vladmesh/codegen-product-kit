@@ -1,7 +1,7 @@
 protocol_version: 1
 name: reminders
-version: 0.2.0
-requires_core: ">=1.3,<2"
+version: 0.3.0
+requires_core: ">=2,<3"
 provides: []
 requires: []
 package_dependencies: [alembic, fastapi, faststream, pydantic, redis, sqlalchemy]

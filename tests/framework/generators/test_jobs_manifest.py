@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
 import pytest
 
@@ -51,9 +52,18 @@ def test_jobs_generator_emits_declared_jobs_and_declared_providers(fake_repo: Pa
     generated = (
         fake_repo / "services" / "backend" / "src" / "generated" / "jobs_schemas.py"
     ).read_text()
-    assert '"friday_digest"' in generated
-    assert '"jobs.fire"' in generated
-    assert "JOB_CAPABILITY_PROVIDERS" in generated
+    namespace = runpy.run_path(
+        str(fake_repo / "services" / "backend" / "src" / "generated" / "jobs_schemas.py")
+    )
+    assert "json.loads" not in generated
+    assert "r'''" not in generated
+    assert namespace["JOB_SCHEMAS"]["friday_digest"] == {
+        "additionalProperties": False,
+        "properties": {"week": {"type": "integer"}},
+        "type": "object",
+    }
+    assert namespace["JOB_SCHEMA_SOURCES"] == {"friday_digest": "backend"}
+    assert namespace["JOB_CAPABILITY_PROVIDERS"] == {"jobs.fire": ["backend"]}
 
 
 def test_a_manifest_without_jobs_generates_an_empty_registry(fake_repo: Path) -> None:

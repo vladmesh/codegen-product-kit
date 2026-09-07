@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Package database access is now obtained through a caller-owned `package_database()` capability
+  derived from the validated installed manifest. Callers can no longer select schemas by string.
+
+### Changed
+
+- **Breaking:** The generated package façade is now `2.0.0`; the arbitrary-string `package_base`
+  and `package_session` functions are removed. `codegen-kit-reminders` 0.3.0 and the synthetic
+  package use the owned database capability.
+- Package migrations now run through Alembic's public command/environment API while retaining
+  core-before-package order and one schema-local version table per package.
+- Root lint now checks Ruff formatting without modifying files. Generated settings and jobs
+  registries use deterministic Python literals, and generated-product lint proofs use the
+  product's pinned Ruff.
+- Package consumer groups are created idempotently before live and recovery readers start, and
+  package setting seeds run through the activated package set in the setting transaction.
+
+### Fixed
+
+- Redis drain proofs now require numeric zero lag, package migration reruns prove the version row
+  was untouched, and activation-refusal tests use the public discovery boundary.
+- Removed the unused Telegram `INSTALL_DEV_DEPS` build argument and linked the attested package RSS
+  measurement from the repository documentation index.
+
+## [0.5.0] - 2026-09-06
+
+### Added
+
 - Added the separately versioned `codegen-kit-reminders` package with one-time reminder HTTP routes,
   a package-owned PostgreSQL schema, externally fired ticks, and durable stable-ID due-event
   emission. Package manifests can now declare `deployment.modes`, whose only implemented and

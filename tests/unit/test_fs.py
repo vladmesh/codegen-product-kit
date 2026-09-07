@@ -15,9 +15,7 @@ def test_atomic_write_uses_public_read_mode(tmp_path: Path) -> None:
     assert output.stat().st_mode & 0o777 == GENERATED_FILE_MODE
 
 
-def test_atomic_rewrite_replaces_complete_file_with_final_mode(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_atomic_rewrite_replaces_complete_file_with_final_mode(tmp_path: Path, monkeypatch) -> None:
     """The destination stays complete until a ready, correctly-mode temp replaces it."""
     output = tmp_path / "generated.py"
     output.write_text("old content\n", encoding="utf-8")

@@ -130,6 +130,25 @@ def test_real_distribution_activates_route_and_lifecycle(
     assert application.state.synthetic_stopped is True
 
 
+def test_package_database_is_owned_and_unowned_callers_fail_before_database_access(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    activated = runtime.discover_packages(["synthetic"])
+    synthetic = importlib.import_module("synthetic_package")
+
+    assert activated[0].manifest.database_schema == "synthetic"
+    assert type(synthetic.database).__name__ == "PackageDatabase"
+
+    codegen_kit = importlib.import_module("codegen_kit")
+    sys.modules.pop("services.backend.src.core.db", None)
+    with pytest.raises(TypeError):
+        codegen_kit.package_database("reminders")
+    with pytest.raises(runtime.PackageDatabaseOwnershipError):
+        codegen_kit.package_database()
+    assert "services.backend.src.core.db" not in sys.modules
+
+
 def test_generated_factory_and_lifespan_activate_installed_package(
     generated_backend_runtime: tuple[Path, Path],
 ) -> None:
@@ -336,7 +355,7 @@ def test_duplicate_package_prefix_has_named_activation_error(
         protocol_version=1,
         name="first",
         version="1.0.0",
-        requires_core=">=1,<2",
+        requires_core=">=2,<3",
         http_prefix="/shared",
     )
     packages = [
@@ -346,7 +365,7 @@ def test_duplicate_package_prefix_has_named_activation_error(
                 protocol_version=1,
                 name="second",
                 version="1.0.0",
-                requires_core=">=1,<2",
+                requires_core=">=2,<3",
                 http_prefix="/shared",
             )
         ),
@@ -450,7 +469,7 @@ def test_activation_rejects_non_directory_module_roots(
     entry_point = _installed_entry_point(installed_lint_layouts, name)
 
     with pytest.raises(runtime.InvalidPackageModuleRootError):
-        runtime._activate_entry_point(name, entry_point)
+        runtime.discover_packages([name], entry_points=lambda: [entry_point])
 
 
 def test_activation_rejects_misplaced_manifest(
@@ -462,7 +481,7 @@ def test_activation_rejects_misplaced_manifest(
     entry_point = _installed_entry_point(installed_lint_layouts, "misplaced")
 
     with pytest.raises(runtime.PackageManifestError, match="must install package.yaml at"):
-        runtime._activate_entry_point("misplaced", entry_point)
+        runtime.discover_packages(["misplaced"], entry_points=lambda: [entry_point])
 
 
 @pytest.mark.parametrize(
@@ -470,7 +489,7 @@ def test_activation_rejects_misplaced_manifest(
     [
         (["synthetic", "missing"], None, "ListedPackageNotInstalledError"),
         (["synthetic"], {"protocol_version": 2}, "IncompatiblePackageProtocolError"),
-        (["synthetic"], {"requires_core": ">=2"}, "IncompatibleCoreVersionError"),
+        (["synthetic"], {"requires_core": ">=3"}, "IncompatibleCoreVersionError"),
         (
             ["synthetic"],
             {"deployment": {"modes": ["in_process", "container"]}},
@@ -735,6 +754,9 @@ def test_package_contract_and_migrations_against_real_postgres(
                     assert await connection.fetchval(
                         "SELECT version_num FROM synthetic.alembic_version"
                     ) == "synthetic_0001"
+                    version_xmin = await connection.fetchval(
+                        "SELECT xmin::text FROM synthetic.alembic_version"
+                    )
                 finally:
                     await connection.close()
 
@@ -745,6 +767,35 @@ def test_package_contract_and_migrations_against_real_postgres(
                     text=True,
                 )
                 assert second.returncode == 0, second.stdout + second.stderr
+                connection = await asyncpg.connect(database_url)
+                try:
+                    assert await connection.fetchval(
+                        "SELECT xmin::text FROM synthetic.alembic_version"
+                    ) == version_xmin
+                finally:
+                    await connection.close()
+                assert "Running upgrade" not in second.stdout + second.stderr
+
+                connection = await asyncpg.connect(database_url)
+                try:
+                    await connection.execute(
+                        "UPDATE synthetic.alembic_version SET version_num = 'missing_revision'"
+                    )
+                    missing = subprocess.run(
+                        ["services/backend/scripts/migrate.sh"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    assert missing.returncode != 0
+                    assert "Can't locate revision identified by 'missing_revision'" in (
+                        missing.stdout + missing.stderr
+                    )
+                finally:
+                    await connection.execute(
+                        "UPDATE synthetic.alembic_version SET version_num = 'synthetic_0001'"
+                    )
+                    await connection.close()
                 assert orm_base().metadata.schema == "synthetic"
                 await async_engine.dispose()
                 async with session() as package_db:
@@ -815,7 +866,7 @@ def test_package_contract_and_migrations_against_real_postgres(
                             if item["name"] in (group, group.encode())
                         )
                         lag = state.get("lag")
-                        if state["pending"] == 0 and lag in (0, None):
+                        if state["pending"] == 0 and lag == 0:
                             return
                         await __import__("asyncio").sleep(0.01)
 
