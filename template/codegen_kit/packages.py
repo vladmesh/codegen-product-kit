@@ -277,29 +277,37 @@ def _deployment_modes(data: dict[str, Any]) -> tuple[str, ...]:
     return tuple(modes)
 
 
+def _setting_seed_binding(declaration: object, properties: dict[str, Any]) -> tuple[str, str]:
+    """Validate one product-setting callback binding."""
+
+    if not isinstance(declaration, dict):
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    if set(declaration) != {"key", "scope"}:
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    key = declaration["key"]
+    scope = declaration["scope"]
+    if not isinstance(key, str):
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    if not key or key.strip() != key:
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    if scope != "product" or key not in properties:
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    return scope, key
+
+
 def _setting_seeds(data: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     """Return validated product-setting callback bindings."""
 
     declarations = data.get("setting_seeds", [])
     settings_schema = data.get("settings_schema", {})
-    properties = settings_schema.get("properties") if isinstance(settings_schema, dict) else None
-    if not isinstance(properties, dict) or not isinstance(declarations, list):
+    if not isinstance(declarations, list) or not isinstance(settings_schema, dict):
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    properties = settings_schema.get("properties")
+    if not isinstance(properties, dict):
         raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
     bindings: list[tuple[str, str]] = []
     for declaration in declarations:
-        if not isinstance(declaration, dict) or set(declaration) != {"key", "scope"}:
-            raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
-        key = declaration["key"]
-        scope = declaration["scope"]
-        if (
-            not isinstance(key, str)
-            or not key
-            or key.strip() != key
-            or scope != "product"
-            or key not in properties
-        ):
-            raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
-        binding = (scope, key)
+        binding = _setting_seed_binding(declaration, properties)
         if binding in bindings:
             raise PackageManifestError("package.yaml has duplicate setting_seeds declaration")
         bindings.append(binding)
@@ -362,6 +370,48 @@ def _validate_compatibility(name: str, manifest: PackageManifest) -> None:
         )
 
 
+def _setting_seed_parameters(name: str, callback: Any) -> tuple[inspect.Parameter, ...]:
+    """Read a seed callback signature as a named activation error."""
+
+    try:
+        return tuple(inspect.signature(callback).parameters.values())
+    except (TypeError, ValueError) as error:
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} seed_setting must be async (session, key, value)"
+        ) from error
+
+
+def _validate_setting_seed_callback(name: str, manifest: PackageManifest, runtime: Package) -> None:
+    """Require the exact optional callback contract when seeds are declared."""
+
+    if not manifest.setting_seeds:
+        return
+    if not isinstance(runtime, SettingSeedPackage):
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} declares setting_seeds but does not implement seed_setting"
+        )
+    callback = runtime.seed_setting
+    parameters = _setting_seed_parameters(name, callback)
+    parameter_names = tuple(parameter.name for parameter in parameters)
+    positional_kinds = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    if not inspect.iscoroutinefunction(callback):
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} seed_setting must be async (session, key, value)"
+        )
+    if len(parameters) != SETTING_SEED_PARAMETER_COUNT or parameter_names != (
+        "session",
+        "key",
+        "value",
+    ):
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} seed_setting must be async (session, key, value)"
+        )
+    if any(parameter.kind not in positional_kinds for parameter in parameters):
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} seed_setting must be async (session, key, value)"
+        )
+
+
 def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> ActivatedPackage:
     """Validate and load one allowlisted entry point."""
 
@@ -383,30 +433,7 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
         raise PackageActivationError(
             f"package {name!r} entry point does not implement the Package protocol"
         )
-    if manifest.setting_seeds and not isinstance(runtime, SettingSeedPackage):
-        raise MissingSettingSeedCallbackError(
-            f"package {name!r} declares setting_seeds but does not implement seed_setting"
-        )
-    if manifest.setting_seeds:
-        callback = runtime.seed_setting
-        try:
-            parameters = tuple(inspect.signature(callback).parameters.values())
-        except (TypeError, ValueError) as error:
-            raise MissingSettingSeedCallbackError(
-                f"package {name!r} seed_setting must be async (session, key, value)"
-            ) from error
-        if (
-            not inspect.iscoroutinefunction(callback)
-            or len(parameters) != SETTING_SEED_PARAMETER_COUNT
-            or tuple(parameter.name for parameter in parameters) != ("session", "key", "value")
-            or any(
-                parameter.kind not in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
-                for parameter in parameters
-            )
-        ):
-            raise MissingSettingSeedCallbackError(
-                f"package {name!r} seed_setting must be async (session, key, value)"
-            )
+    _validate_setting_seed_callback(name, manifest, runtime)
     return ActivatedPackage(
         manifest=manifest,
         runtime=runtime,
