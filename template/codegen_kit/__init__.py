@@ -10,6 +10,7 @@ from .packages import (
     CORE_VERSION,
     PACKAGE_PROTOCOL_VERSION,
     Package,
+    SettingSeedPackage,
 )
 
 
@@ -56,6 +57,7 @@ __all__ = [
     "CORE_VERSION",
     "PACKAGE_PROTOCOL_VERSION",
     "Package",
+    "SettingSeedPackage",
     "package_base",
     "package_session",
     "publish_event",

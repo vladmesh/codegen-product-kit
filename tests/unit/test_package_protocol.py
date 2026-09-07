@@ -56,10 +56,17 @@ def test_reminders_package_manifest_declares_only_the_implemented_deployment_mod
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
-    assert manifest.version == "0.1.0"
+    assert manifest.version == "0.2.0"
     assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
+    assert manifest.settings_schema["properties"]["reminder_owner_ref"] == {
+        "type": "string",
+        "minLength": 1,
+    }
+    assert [(seed.key, seed.scope) for seed in manifest.setting_seeds] == [
+        ("reminder_owner_ref", "product")
+    ]
     assert [(item.name, item.required) for item in manifest.environment] == [("REDIS_URL", True)]
 
 
@@ -96,6 +103,33 @@ def test_package_deployment_defaults_to_implemented_in_process_mode() -> None:
     data.pop("deployment")
 
     assert parse_package_manifest(data).deployment.modes == ["in_process"]
+
+
+@pytest.mark.parametrize(
+    "setting_seeds",
+    [
+        [{"key": "missing", "scope": "product"}],
+        [{"key": "enabled", "scope": "user"}],
+        [{"key": "", "scope": "product"}],
+        [{"key": "enabled", "scope": "product", "unknown": True}],
+        [
+            {"key": "enabled", "scope": "product"},
+            {"key": "enabled", "scope": "product"},
+        ],
+    ],
+)
+def test_package_setting_seed_declaration_is_fail_closed(setting_seeds: object) -> None:
+    data = yaml.safe_load(FIXTURE.read_text())
+    data["setting_seeds"] = setting_seeds
+
+    with pytest.raises(ValueError):
+        parse_package_manifest(data)
+
+
+def test_package_without_setting_seed_declaration_remains_valid() -> None:
+    data = yaml.safe_load(FIXTURE.read_text())
+
+    assert parse_package_manifest(data).setting_seeds == []
 
 
 @pytest.mark.parametrize(

@@ -2,6 +2,11 @@
 
 ## 2026-09-07
 
+- Package protocol v1 now supports package-owned `setting_seeds` at product scope. The existing
+  capability-protected settings write dispatches an exact-key callback through the already activated
+  package set and shares its transaction, so callback failure rolls back the setting and package
+  state together. The façade is `1.3.0`. `codegen-kit-reminders` 0.2.0 uses the contract to create
+  one deterministic past-due reminder idempotently from `reminders.reminder_owner_ref`.
 - Consuming packages now own establishment of their declared fixed Redis Stream groups before live
   or recovery consumption begins. The reminders package creates `job_fired` and its
   `events:package:reminders` group with idempotent `MKSTREAM` semantics, preserving an existing

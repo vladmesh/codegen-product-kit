@@ -37,6 +37,8 @@ SQLAlchemy metadata registry, `package_session(schema)` exposes a transaction wi
 search path through the core session factory, and
 `publish_event()` uses the generated product transport. Version `1.2.0` adds optional stable
 `event_id`, `occurred_at`, and `schema_version` publication metadata for durable package outboxes.
+Version `1.3.0` adds the optional `SettingSeedPackage.seed_setting(session, key, value)` callback,
+activated only by an owned `setting_seeds` declaration.
 The unchanged wheel can therefore be
 installed into another generated product with the same compatible core without rebuilding it.
 
@@ -61,6 +63,7 @@ rejects unknown fields. Its fields are:
 | `deployment.modes` | Optional non-empty set of deployability declarations; `in_process` is the only accepted value and the default | Enforced; a declared `container` mode has `UnimplementedDeploymentModeError` |
 | `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
+| `setting_seeds` | Optional ordered `{key, scope: product}` bindings to package-owned local setting names | Enforced against `settings_schema`; duplicate, unknown-key, unsupported-scope, malformed, and unknown nested fields are refused |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
 | `resources` | Named distribution resource paths | Enforced as existing, non-traversing distribution resources |
 
@@ -103,7 +106,7 @@ For the bundled reminders package, one tooling command performs every product mu
 wheel has been built:
 
 ```bash
-kit add reminders --wheel /path/to/codegen_kit_reminders-0.1.0-py3-none-any.whl
+kit add reminders --wheel /path/to/codegen_kit_reminders-0.2.0-py3-none-any.whl
 ```
 
 It copies that exact artifact under `services/backend/packages/`, adds the backend dependency and
@@ -118,7 +121,11 @@ unlisted package raises `InstalledPackageNotListedError`; a listed but absent en
 `IncompatiblePackageProtocolError`; and a `requires_core` mismatch raises
 `IncompatibleCoreVersionError`. Two activated packages with the same `http.prefix` raise
 `DuplicatePackageHttpPrefixError` before any package router is mounted. All abort application
-startup. With `packages: []`, existing settings, jobs, events, and environment behavior is unchanged.
+startup. A package with any `setting_seeds` binding must expose an async method with the exact bound
+signature `seed_setting(session, key, value)`; activation raises
+`MissingSettingSeedCallbackError` before routing requests when the callback is absent or malformed.
+A package with no binding need not expose the callback. With `packages: []`, existing settings,
+jobs, events, and environment behavior is unchanged.
 
 Generation and runtime activation are pinned to one active set: entry points installed in the
 backend package environment and names listed in the backend manifest. Generation resolves that set
@@ -221,6 +228,14 @@ timezone-aware instant. It performs no recurrence, snooze, media, calendar, or n
 parsing. The core still schedules nothing. An external caller fires `reminders.tick` through
 `POST /jobs/fire` and supplies the evaluation instant as the declared `at` argument.
 
+The package declares the non-empty product setting `reminders.reminder_owner_ref` and binds it to
+its setting seed. The first successful settings write inserts one reminder under a deterministic
+UUID with a fixed past instant and `scheduled` state. The opaque setting string becomes its
+`user_ref`. Conflict handling on that UUID is deliberately a no-op: replaying the same write,
+recreating the application, or writing again after the reminder advanced never creates another row
+and never resets its owner, timestamps, or state. The normal `reminders.tick` path, not the seed,
+moves it through due, outbox, and emitted state.
+
 A tick locks scheduled reminders at or before that instant, changes them to due, creates one
 package-owned outbox row per reminder, and commits that transaction before publication begins.
 Cancelled rows are excluded from that transition. The tick then reads the unconfirmed outbox rows
@@ -261,6 +276,18 @@ manifest has a Draft 2020-12 `settings_schema` object with named `properties` an
 legacy `services/*/spec/manifest.yaml` remains ignored. The supported schema form deliberately has
 no top-level `required` or `$ref`: each setting is independently written and no schema source may be
 resolved indirectly. Duplicate keys across service manifests are invalid.
+
+An active package may bind one of its own local `settings_schema` keys in `setting_seeds`, currently
+only at `product` scope. After the endpoint has schema-validated the value and flushed the core
+setting row, it invokes the one activated package callback for the exact normalized key. The
+callback receives the validated Python value and the request's existing `AsyncSession`; callbacks
+are not discovered again and manifests are not reread per request. User-scoped writes, unrelated
+keys, and packages without bindings do nothing beyond the existing setting write. Since ownership
+makes the matching callback unique, declaration order has no cross-package ambiguity. Within a
+write the order is core upsert, package callback, then the dependency-owned commit. Any callback
+exception propagates unchanged and the request dependency rolls back both core and package state.
+Package callbacks must make retries idempotent because every successful replay of the declared
+setting invokes the callback again.
 
 `POST /settings/set` requires exactly one `X-Settings-Capability` value matching the generated
 `SETTINGS_WRITE_CAPABILITY` secret. The header is intentionally absent from generated schemas and

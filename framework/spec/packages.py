@@ -189,6 +189,21 @@ class DeploymentDeclaration(BaseModel):
         return modes
 
 
+class SettingSeedDeclaration(BaseModel):
+    """A package callback bound to one package-owned product setting."""
+
+    key: str
+    scope: Literal["product"]
+    model_config = {"extra": "forbid"}
+
+    @field_validator("key")
+    @classmethod
+    def validate_key(cls, key: str) -> str:
+        if not key or key.strip() != key:
+            raise ValueError("must name a non-empty package setting key")
+        return key
+
+
 class PackageManifest(BaseModel):
     """Fail-closed declaration carried by a package distribution."""
 
@@ -203,6 +218,7 @@ class PackageManifest(BaseModel):
     database: DatabaseDeclaration | None = None
     events: EventsDeclaration = Field(default_factory=EventsDeclaration)
     settings_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
+    setting_seeds: list[SettingSeedDeclaration] = Field(default_factory=list)
     jobs_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
     deployment: DeploymentDeclaration = Field(default_factory=DeploymentDeclaration)
     environment: list[EnvironmentDeclaration] = Field(default_factory=list)
@@ -220,6 +236,15 @@ class PackageManifest(BaseModel):
         ):
             if len(set(values)) != len(values):
                 raise ValueError(f"{field_name} must not repeat a name")
+        seed_keys = [(seed.scope, seed.key) for seed in self.setting_seeds]
+        if len(set(seed_keys)) != len(seed_keys):
+            raise ValueError("setting_seeds must not repeat a scope/key binding")
+        owned_settings = set(self.settings_schema["properties"])
+        for seed in self.setting_seeds:
+            if seed.key not in owned_settings:
+                raise ValueError(
+                    f"setting_seeds key {seed.key!r} is not declared by settings_schema"
+                )
         return self
 
     @field_validator("settings_schema")

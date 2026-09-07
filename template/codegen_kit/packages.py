@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import metadata
+import inspect
 from pathlib import Path
 import re
 from typing import Any, Protocol, runtime_checkable
@@ -16,8 +17,9 @@ from packaging.version import InvalidVersion, Version
 import yaml
 
 PACKAGE_PROTOCOL_VERSION = 1
-CORE_VERSION = "1.2.0"
+CORE_VERSION = "1.3.0"
 ENTRY_POINT_GROUP = "codegen_kit.packages"
+SETTING_SEED_PARAMETER_COUNT = 3
 
 
 class PackageActivationError(RuntimeError):
@@ -68,6 +70,10 @@ class DuplicatePackageHttpPrefixError(PackageActivationError):
     """Two activated packages declare the same HTTP mount prefix."""
 
 
+class MissingSettingSeedCallbackError(PackageActivationError):
+    """A package declares a setting seed but does not implement its callback."""
+
+
 @dataclass(frozen=True)
 class PackageManifest:
     """The activation subset of a validated package.yaml."""
@@ -80,6 +86,7 @@ class PackageManifest:
     deployment_modes: tuple[str, ...] = ("in_process",)
     database_schema: str | None = None
     database_migrations: str | None = None
+    setting_seeds: tuple[tuple[str, str], ...] = ()
 
 
 @runtime_checkable
@@ -93,6 +100,14 @@ class Package(Protocol):
 
     def shutdown(self, application: Any) -> Awaitable[None]:
         """Stop package resources before core resources are disconnected."""
+
+
+@runtime_checkable
+class SettingSeedPackage(Protocol):
+    """Optional runtime callback required by a declared setting seed."""
+
+    def seed_setting(self, session: Any, key: str, value: Any) -> Awaitable[None]:
+        """Seed package state inside the core setting transaction."""
 
 
 @dataclass(frozen=True)
@@ -169,6 +184,7 @@ def _validate_manifest_fields(data: dict[str, Any]) -> None:
         "database",
         "events",
         "settings_schema",
+        "setting_seeds",
         "jobs_schema",
         "deployment",
         "environment",
@@ -261,6 +277,35 @@ def _deployment_modes(data: dict[str, Any]) -> tuple[str, ...]:
     return tuple(modes)
 
 
+def _setting_seeds(data: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Return validated product-setting callback bindings."""
+
+    declarations = data.get("setting_seeds", [])
+    settings_schema = data.get("settings_schema", {})
+    properties = settings_schema.get("properties") if isinstance(settings_schema, dict) else None
+    if not isinstance(properties, dict) or not isinstance(declarations, list):
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    bindings: list[tuple[str, str]] = []
+    for declaration in declarations:
+        if not isinstance(declaration, dict) or set(declaration) != {"key", "scope"}:
+            raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+        key = declaration["key"]
+        scope = declaration["scope"]
+        if (
+            not isinstance(key, str)
+            or not key
+            or key.strip() != key
+            or scope != "product"
+            or key not in properties
+        ):
+            raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+        binding = (scope, key)
+        if binding in bindings:
+            raise PackageManifestError("package.yaml has duplicate setting_seeds declaration")
+        bindings.append(binding)
+    return tuple(bindings)
+
+
 def _parse_manifest(path: Path) -> PackageManifest:
     data = _load_manifest_data(path)
     _validate_manifest_fields(data)
@@ -274,6 +319,7 @@ def _parse_manifest(path: Path) -> PackageManifest:
         deployment_modes=_deployment_modes(data),
         database_schema=database_schema,
         database_migrations=database_migrations,
+        setting_seeds=_setting_seeds(data),
     )
 
 
@@ -337,6 +383,30 @@ def _activate_entry_point(name: str, entry_point: metadata.EntryPoint) -> Activa
         raise PackageActivationError(
             f"package {name!r} entry point does not implement the Package protocol"
         )
+    if manifest.setting_seeds and not isinstance(runtime, SettingSeedPackage):
+        raise MissingSettingSeedCallbackError(
+            f"package {name!r} declares setting_seeds but does not implement seed_setting"
+        )
+    if manifest.setting_seeds:
+        callback = runtime.seed_setting
+        try:
+            parameters = tuple(inspect.signature(callback).parameters.values())
+        except (TypeError, ValueError) as error:
+            raise MissingSettingSeedCallbackError(
+                f"package {name!r} seed_setting must be async (session, key, value)"
+            ) from error
+        if (
+            not inspect.iscoroutinefunction(callback)
+            or len(parameters) != SETTING_SEED_PARAMETER_COUNT
+            or tuple(parameter.name for parameter in parameters) != ("session", "key", "value")
+            or any(
+                parameter.kind not in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+                for parameter in parameters
+            )
+        ):
+            raise MissingSettingSeedCallbackError(
+                f"package {name!r} seed_setting must be async (session, key, value)"
+            )
     return ActivatedPackage(
         manifest=manifest,
         runtime=runtime,

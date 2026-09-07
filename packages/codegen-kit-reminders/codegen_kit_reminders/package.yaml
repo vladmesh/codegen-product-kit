@@ -1,7 +1,7 @@
 protocol_version: 1
 name: reminders
-version: 0.1.0
-requires_core: ">=1.2,<2"
+version: 0.2.0
+requires_core: ">=1.3,<2"
 provides: []
 requires: []
 package_dependencies: [alembic, fastapi, faststream, pydantic, redis, sqlalchemy]
@@ -46,8 +46,12 @@ events:
 settings_schema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
-  properties: {}
+  properties:
+    reminder_owner_ref: {type: string, minLength: 1}
   additionalProperties: false
+setting_seeds:
+  - key: reminder_owner_ref
+    scope: product
 jobs_schema:
   $schema: https://json-schema.org/draft/2020-12/schema
   type: object
