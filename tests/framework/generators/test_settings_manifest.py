@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
 import pytest
 
@@ -37,9 +38,16 @@ def test_manifest_generator_emits_declared_settings(fake_repo: Path) -> None:
 
     generate_all(fake_repo)
 
-    generated = (fake_repo / "services" / "backend" / "src" / "generated" / "settings_schemas.py")
-    assert "SETTINGS_SCHEMAS" in generated.read_text()
-    assert '"languages"' in generated.read_text()
+    generated = fake_repo / "services" / "backend" / "src" / "generated" / "settings_schemas.py"
+    source = generated.read_text()
+    namespace = runpy.run_path(str(generated))
+    assert "json.loads" not in source
+    assert "r'''" not in source
+    assert namespace["SETTINGS_SCHEMAS"]["languages"] == {
+        "items": {"type": "string"},
+        "type": "array",
+    }
+    assert namespace["SETTINGS_SCHEMA_SOURCES"] == {"languages": "backend"}
 
 
 def test_manifest_generator_never_accepts_duplicate_keys(fake_repo: Path) -> None:

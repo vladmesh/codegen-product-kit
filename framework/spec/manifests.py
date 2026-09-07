@@ -81,8 +81,7 @@ class ServiceManifest(BaseModel):
         if unknown:
             known = ", ".join(sorted(CORE_CAPABILITIES))
             msg = (
-                f"provides declares unknown capability {unknown[0]!r}; "
-                f"known capabilities: {known}"
+                f"provides declares unknown capability {unknown[0]!r}; known capabilities: {known}"
             )
             raise ValueError(msg)
         return provided

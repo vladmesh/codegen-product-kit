@@ -255,10 +255,7 @@ operations:
         content = generated[0].read_text()
 
         # Both dependencies are required, so generated adapters have no unguarded path.
-        assert (
-            "get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]]"
-            in content
-        )
+        assert "get_session: Callable[[], AbstractAsyncContextManager[AsyncSession]]" in content
         assert "consume_once: IdempotentConsumer," in content
         assert "if get_session is None:" not in content
         assert "if consume_once is None:" not in content

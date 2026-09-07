@@ -9,14 +9,14 @@ import os
 from typing import Any
 from uuid import UUID
 
-from codegen_kit import package_session, publish_event
+from codegen_kit import publish_event
 from faststream.redis import RedisBroker, StreamSub
 from faststream.redis.parser import BinaryMessageFormatV1
 from pydantic import AwareDatetime, BaseModel
 from redis.exceptions import ResponseError
 from sqlalchemy import text as sql
 
-from codegen_kit_reminders.api import SCHEMA
+from codegen_kit_reminders.database import database
 from codegen_kit_reminders.identity import due_event_id
 
 CONSUMER_GROUP = "events:package:reminders"
@@ -33,7 +33,7 @@ class TickArguments(BaseModel):
 async def transition_due(at: datetime) -> None:
     """Commit due state and an outbox row before any external publication."""
 
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         rows = (
             await session.execute(
                 sql(
@@ -67,7 +67,7 @@ async def transition_due(at: datetime) -> None:
 async def read_pending() -> Sequence[Any]:
     """Read the unconfirmed outbox rows in one transaction that holds no row lock."""
 
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         return (
             await session.execute(
                 sql(
@@ -85,7 +85,7 @@ async def read_pending() -> Sequence[Any]:
 async def confirm_emission(reminder_id: UUID, emitted_at: datetime) -> None:
     """Record one accepted publication in its own short transaction."""
 
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         await session.execute(
             sql(
                 "UPDATE due_emissions SET emitted_at = :emitted_at "

@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from codegen_kit import package_session
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import AwareDatetime, BaseModel, Field
 from sqlalchemy import text as sql
 
-SCHEMA = "reminders"
+from codegen_kit_reminders.database import database
+
 router = APIRouter()
 
 
@@ -47,7 +47,7 @@ async def create_reminder(payload: ReminderCreate) -> ReminderView:
 
     reminder_id = uuid4()
     created_at = datetime.now(UTC)
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         row = (
             await session.execute(
                 sql(
@@ -72,7 +72,7 @@ async def create_reminder(payload: ReminderCreate) -> ReminderView:
 async def list_reminders(user_ref: str = Query(min_length=1)) -> list[ReminderView]:
     """List one opaque user's reminders without interpreting its identifier."""
 
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         rows = (
             await session.execute(
                 sql(
@@ -89,7 +89,7 @@ async def list_reminders(user_ref: str = Query(min_length=1)) -> list[ReminderVi
 async def cancel_reminder(reminder_id: UUID, user_ref: str = Query(min_length=1)) -> ReminderView:
     """Cancel a reminder only while it is still scheduled."""
 
-    async with package_session(SCHEMA) as session:
+    async with database.session() as session:
         row = (
             await session.execute(
                 sql(

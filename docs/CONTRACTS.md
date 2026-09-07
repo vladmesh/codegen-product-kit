@@ -27,17 +27,21 @@ not a separately released runtime distribution. This avoids making the whole pro
 runtime dependency. `CORE_VERSION` is the kit-declared semantic version of this façade and its
 activation semantics; it is rendered into each product and is deliberately independent of the exact
 Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface was `1.0.0`; package database,
-session, and event-publication seams raise it to `1.1.0`. Backward-compatible public additions require
+session, and event-publication seams raised it to `1.1.0`. Backward-compatible public additions require
 a minor bump, breaking changes require a major bump, and fixes that preserve the promised surface
 require a patch bump. The package protocol version remains `1` across compatible additions. A
-package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_base`,
-`package_session`, and `publish_event` from `codegen_kit`; product-specific `services.*`, generated
-contracts, and application settings are not public API. `package_base(schema)` creates an independent
-SQLAlchemy metadata registry, `package_session(schema)` exposes a transaction with a schema-local
-search path through the core session factory, and
-`publish_event()` uses the generated product transport. Version `1.2.0` adds optional stable
+package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_database`, and
+`publish_event` from `codegen_kit`; product-specific `services.*`, generated contracts, and
+application settings are not public API. Version `2.0.0` removes the unowned
+`package_base(schema)` and `package_session(schema)` selectors. `package_database()` takes no
+identity argument: it resolves the caller to exactly one installed entry-point package directory,
+revalidates that directory's manifest identity, distribution version, core compatibility, and
+database declaration, then returns the only supported capability for creating an independent ORM
+base or opening a schema-local transaction. An unowned caller, ambiguous installed ownership,
+missing database declaration, or changed identity fails before the backend session factory is
+imported. `publish_event()` uses the generated product transport. Version `1.2.0` added stable
 `event_id`, `occurred_at`, and `schema_version` publication metadata for durable package outboxes.
-Version `1.3.0` adds the optional `SettingSeedPackage.seed_setting(session, key, value)` callback,
+Version `1.3.0` added the optional `SettingSeedPackage.seed_setting(session, key, value)` callback,
 activated only by an owned `setting_seeds` declaration.
 The unchanged wheel can therefore be
 installed into another generated product with the same compatible core without rebuilding it.
@@ -106,7 +110,7 @@ For the bundled reminders package, one tooling command performs every product mu
 wheel has been built:
 
 ```bash
-kit add reminders --wheel /path/to/codegen_kit_reminders-0.2.0-py3-none-any.whl
+kit add reminders --wheel /path/to/codegen_kit_reminders-0.3.0-py3-none-any.whl
 ```
 
 It copies that exact artifact under `services/backend/packages/`, adds the backend dependency and
@@ -177,10 +181,13 @@ and production. Repeated environment names are refused with both package owners 
 resources must exist at their non-traversing distribution-relative paths.
 
 `services/backend/scripts/migrate.sh` runs the core Alembic head first, then active packages in
-manifest order. Each package gets its declared schema as the connection search path and its own
-schema-local `alembic_version` table. Re-running the command is a no-op at every head. A product-local
-wheel can be kept under `services/backend/packages/`, which is copied before dependency installation
-in backend images.
+manifest order. Each package migration resource is a standard Alembic script directory with an
+`env.py`; the core passes its existing connection and owned version-table schema through Alembic's
+public configuration attributes and invokes public `alembic.command.upgrade`. Each package gets its
+declared schema as the connection search path and its own schema-local `alembic_version` table.
+Alembic therefore reports divergent or missing revisions through its normal explicit command
+failure. Re-running the command is a no-op at every head. A product-local wheel can be kept under
+`services/backend/packages/`, which is copied before dependency installation in backend images.
 
 The factory mounts each activated router under `http.prefix`. Once core connectivity is ready, the
 backend lifespan calls package `startup` in manifest order. It calls package `shutdown` in reverse
@@ -327,6 +334,12 @@ and five-second polling interval by default. Reclaim is based only on idle time:
 distinguish a dead owner from a live handler that has run longer than the threshold. The transactional
 idempotency guard, not the reclaim window, therefore guarantees that live and reclaimed deliveries
 cannot both execute the effect.
+
+There is one recovery reader, and therefore one bounded `XAUTOCLAIM` poll, per declared event per
+consuming service. Empty recovery polls occur no more often than the configured interval. Combining
+those polls would be performance hardening only: the current reader cannot lose an event, and a
+concurrent or reclaimed duplicate is rejected by the database claim before its effect. That
+optimization is outside the current release-safety sprint.
 
 The backend core provides `consume_once(session, consumer_group, event_id, effect)`. It records the
 group and event UUID in the core-owned `event_consumptions` table before running the effect. The

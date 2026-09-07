@@ -27,6 +27,7 @@ def controller_path(repo_root: Path, domain: DomainSpec) -> Path:
         repo_root / "services" / domain.service_name / "src" / "controllers" / f"{domain.name}.py"
     )
 
+
 # Param types that need explicit imports in generated code
 _PARAM_TYPE_IMPORTS: dict[str, str] = {
     "uuid": "from uuid import UUID",

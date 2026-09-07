@@ -56,7 +56,7 @@ def test_reminders_package_manifest_declares_only_the_implemented_deployment_mod
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
-    assert manifest.version == "0.2.0"
+    assert manifest.version == "0.3.0"
     assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
@@ -238,7 +238,7 @@ def test_installed_package_lint_reports_missing_manifest_metadata(
 
 
 def _publications_inside_package_transactions(source: str) -> list[str]:
-    """Name every `publish_event` await that a `package_session` block encloses."""
+    """Name every `publish_event` await that a database session block encloses."""
 
     module = ast.parse(source)
     enclosed: list[str] = []
@@ -247,8 +247,10 @@ def _publications_inside_package_transactions(source: str) -> list[str]:
             continue
         opens_session = any(
             isinstance(item.context_expr, ast.Call)
-            and isinstance(item.context_expr.func, ast.Name)
-            and item.context_expr.func.id == "package_session"
+            and isinstance(item.context_expr.func, ast.Attribute)
+            and isinstance(item.context_expr.func.value, ast.Name)
+            and item.context_expr.func.value.id == "database"
+            and item.context_expr.func.attr == "session"
             for item in node.items
         )
         if not opens_session:
@@ -269,3 +271,28 @@ def test_reminders_never_publishes_inside_an_open_package_transaction() -> None:
     runtime_source = (REMINDERS.parent / "runtime.py").read_text()
 
     assert _publications_inside_package_transactions(runtime_source) == []
+
+
+def test_package_migrations_use_only_public_alembic_command_surface() -> None:
+    source = (Path(__file__).parents[2] / "template/codegen_kit/migrations.py").read_text()
+
+    assert 'command.upgrade(config, "head")' in source
+    assert "._upgrade_revs" not in source
+    assert "ScriptDirectory" not in source
+    assert (REMINDERS.parent / "migrations/env.py").is_file()
+
+
+def test_core_migration_precedes_package_migrations() -> None:
+    script = (
+        Path(__file__).parents[2] / "template/services/backend/scripts/migrate.sh"
+    ).read_text()
+
+    assert script.index("alembic -c") < script.index("python -m codegen_kit.migrations")
+
+
+def test_root_lint_checks_format_without_mutating_files() -> None:
+    makefile = (Path(__file__).parents[2] / "Makefile").read_text()
+    lint_recipe = makefile.split("lint:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+
+    assert "ruff format --check framework/ packages/ tests/" in lint_recipe
+    assert "ruff check --no-cache framework/ packages/ tests/" in lint_recipe
