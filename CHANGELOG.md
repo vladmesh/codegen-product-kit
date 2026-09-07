@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-07
+
+### Fixed
+
+- Package environment requirements now reuse compatible product-owned typed declarations and fail
+  early with the variable and unmet invariant named when an overlap is incompatible. Undeclared
+  requirements retain the user-secret fallback, while repeated package requirements compose
+  deterministically at the strictest requiredness.
+- Package environment acceptance coverage now lives in the CI-collected `tests/unit` tree.
+
 ## [0.6.0] - 2026-09-07
 
 ### Added
