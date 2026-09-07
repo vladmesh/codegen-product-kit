@@ -10,6 +10,7 @@ import subprocess
 import textwrap
 
 import pytest
+import yaml
 
 from tests.copier.conftest import run_copier
 
@@ -203,7 +204,7 @@ def two_products(
     (root / "product-a").mkdir()
     (root / "product-b").mkdir()
     product_a = run_copier(root / "product-a", "backend")
-    product_b = run_copier(root / "product-b", "backend")
+    product_b = run_copier(root / "product-b", "backend,tg_bot")
     _make_tooling_docker_buildable(product_a, root / "tooling-a")
     _make_tooling_docker_buildable(product_b, root / "tooling-b")
 
@@ -239,6 +240,28 @@ def test_two_products_install_one_unchanged_wheel_without_authored_source(
         installed = product / "services/backend/packages" / wheel.name
         assert sha256(installed.read_bytes()).hexdigest() == artifact_hash
         _run(["make", "lint"], product)
+        contract_artifact = product.parent / "package-proof-env-contract.json"
+        _run(
+            [
+                str(product / ".venv/bin/python"),
+                "-m",
+                "framework.contracts.env_usage",
+                "--root",
+                ".",
+                "--artifact",
+                str(contract_artifact),
+                "--commit-sha",
+                "package-proof",
+            ],
+            product,
+        )
+        assert contract_artifact.is_file()
+
+        package_fragment = yaml.safe_load(
+            (product / "services/backend/packages/env.contract.yaml").read_text()
+        )
+        infra_fragment = yaml.safe_load((product / "infra/env.contract.yaml").read_text())
+        assert package_fragment["entries"]["REDIS_URL"] == infra_fragment["entries"]["REDIS_URL"]
 
     changed = set(_run(["git", "status", "--porcelain"], product_a).stdout.splitlines())
     paths = {line[3:] for line in changed}

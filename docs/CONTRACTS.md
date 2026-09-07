@@ -174,10 +174,22 @@ virtual environments and migration revisions remain excluded. Generated director
 from Ruff's diagnostic lint rules.
 
 Package-provided interfaces must have one owner in the active set, and every required interface must
-already have an active provider. Package environment requirements are merged into
-`services/backend/packages/env.contract.yaml` as backend-consumed user-supplied secrets for local
-and production. Repeated environment names are refused with both package owners named. Declared
-resources must exist at their non-traversing distribution-relative paths.
+already have an active provider. A package environment entry declares only that the named value is
+needed; the product owns how that value is obtained. Generation validates and deterministically
+merges all product-owned `env.contract.yaml` fragments except its own stale generated package
+fragment. If the product already declares the name, the package fragment reuses that exact typed
+declaration only when it covers `local` and `production`, includes the `backend` consumer, and is at
+least as required as every package requirement for the name. Its source may remain a literal,
+allocation, derived value, or secret. An invalid or conflicting product fragment, a missing required
+environment or consumer, or an optional declaration for a required package value fails generation
+with the variable and unmet invariant named. There is no second declaration with different source
+ownership.
+
+When no product-owned fragment declares the name, generation retains the protocol v1 fallback: a
+non-empty backend-consumed user secret for local and production with the package description and
+sensitivity metadata. Multiple packages may require the same name; generation emits one stable
+entry and uses the strictest requiredness, independent of package order. Declared resources must
+exist at their non-traversing distribution-relative paths.
 
 `services/backend/scripts/migrate.sh` runs the core Alembic head first, then active packages in
 manifest order. Each package migration resource is a standard Alembic script directory with an
