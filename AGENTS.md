@@ -2,7 +2,8 @@
 
 This repository is an independent product kit derived from `service-template` commit
 `40b54d87dbfe64a9fa6ec379820e43137aaba04c`. It currently generates backend and Telegram product
-shapes. Package runtime and general component composition are future work, not current capability.
+shapes and implements the current in-process package runtime. Container-delivered packages and
+general component composition are not current capabilities.
 
 This file serves as the entry point for AI Agents exploring the repository. Use this map to load only the context you need.
 
