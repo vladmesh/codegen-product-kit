@@ -601,9 +601,9 @@ def test_package_contract_and_migrations_against_real_postgres(
             from httpx import AsyncClient
             import pytest
             from redis.asyncio import Redis
-            from redis.exceptions import ResponseError
 
             from codegen_kit_reminders.runtime import CONSUMER_GROUP, due_event_id
+            from services.backend.src.app.factory import create_app
             from services.backend.src.core.db import async_engine
             from shared.generated.events import (
                 EventEnvelope,
@@ -701,15 +701,6 @@ def test_package_contract_and_migrations_against_real_postgres(
                 return broker, subscriber
 
 
-            async def _reset_group(redis: Redis, stream: str, group: str) -> None:
-                try:
-                    await redis.xgroup_destroy(stream, group)
-                except ResponseError as error:
-                    if "no such key" not in str(error).lower():
-                        raise
-                await redis.xgroup_create(stream, group, id="$", mkstream=True)
-
-
             async def _wait_group_idle(redis: Redis, stream: str, group: str) -> None:
                 async with __import__("asyncio").timeout(10):
                     while True:
@@ -728,9 +719,23 @@ def test_package_contract_and_migrations_against_real_postgres(
             @pytest.mark.asyncio
             async def test_reminder_http_tick_cancel_and_restart_outbox() -> None:
                 redis = Redis.from_url(os.environ["REDIS_URL"])
-                # test_durable_events.py deliberately flushes Redis after the backend
-                # starts, so restore this installed package's declared consumer group.
-                await _reset_group(redis, "job_fired", CONSUMER_GROUP)
+                await redis.flushdb()
+                assert not await redis.exists("job_fired")
+
+                # Start and restart the generated backend lifecycle against empty Redis.
+                # The installed package, rather than product seed code, owns its group.
+                first_application = create_app()
+                first_lifespan = first_application.router.lifespan_context(first_application)
+                await first_lifespan.__aenter__()
+                groups = await redis.xinfo_groups("job_fired")
+                assert [group["name"] for group in groups] == [CONSUMER_GROUP.encode()]
+                await first_lifespan.__aexit__(None, None, None)
+
+                application = create_app()
+                lifespan = application.router.lifespan_context(application)
+                await lifespan.__aenter__()
+                groups = await redis.xinfo_groups("job_fired")
+                assert [group["name"] for group in groups] == [CONSUMER_GROUP.encode()]
                 reader, subscriber = await _due_reader("main")
                 headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
                 async with AsyncClient(base_url="http://backend:8000") as client:
@@ -877,6 +882,7 @@ def test_package_contract_and_migrations_against_real_postgres(
                 assert recovered_envelope.event_id == due_event_id(UUID(restart_id))
                 assert await redis.xlen("reminders.due") == 2
                 await restart_reader.stop()
+                await lifespan.__aexit__(None, None, None)
                 await redis.aclose()
 
 

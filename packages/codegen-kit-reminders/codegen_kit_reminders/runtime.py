@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import datetime
 import os
 from typing import Any
@@ -12,6 +13,7 @@ from codegen_kit import package_session, publish_event
 from faststream.redis import RedisBroker, StreamSub
 from faststream.redis.parser import BinaryMessageFormatV1
 from pydantic import AwareDatetime, BaseModel
+from redis.exceptions import ResponseError
 from sqlalchemy import text as sql
 
 from codegen_kit_reminders.api import SCHEMA
@@ -141,18 +143,34 @@ class ReminderConsumer:
         if not redis_url:
             raise RuntimeError("REDIS_URL is not set; please add it to your environment variables")
         broker = RedisBroker(redis_url, message_format=BinaryMessageFormatV1)
-        for role, idle_time in (("live", None), ("reclaim", 300_000)):
-            subscriber = broker.subscriber(
-                stream=StreamSub(
+        try:
+            redis = await broker.connect()
+            try:
+                await redis.xgroup_create(
                     JOB_STREAM,
-                    group=CONSUMER_GROUP,
-                    consumer=f"reminders.{role}:{os.getpid()}",
-                    min_idle_time=idle_time,
-                    polling_interval=5_000,
+                    CONSUMER_GROUP,
+                    id="$",
+                    mkstream=True,
                 )
-            )
-            subscriber(handle_job_fired)
-        await broker.start()
+            except ResponseError as error:
+                if str(error).partition(" ")[0] != "BUSYGROUP":
+                    raise
+            for role, idle_time in (("live", None), ("reclaim", 300_000)):
+                subscriber = broker.subscriber(
+                    stream=StreamSub(
+                        JOB_STREAM,
+                        group=CONSUMER_GROUP,
+                        consumer=f"reminders.{role}:{os.getpid()}",
+                        min_idle_time=idle_time,
+                        polling_interval=5_000,
+                    )
+                )
+                subscriber(handle_job_fired)
+            await broker.start()
+        except BaseException:
+            with suppress(BaseException):
+                await broker.stop()
+            raise
         self.broker = broker
 
     async def stop(self) -> None:
