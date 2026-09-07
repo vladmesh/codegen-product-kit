@@ -32,19 +32,18 @@ a minor bump, breaking changes require a major bump, and fixes that preserve the
 require a patch bump. The package protocol version remains `1` across compatible additions. A
 package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_database`, and
 `publish_event` from `codegen_kit`; product-specific `services.*`, generated contracts, and
-application settings are not public API. Version `2.0.0` removes the unowned
+application settings are not public API. Version `1.2.0` added stable `event_id`, `occurred_at`, and
+`schema_version` publication metadata for durable package outboxes. Version `1.3.0` added the
+optional `SettingSeedPackage.seed_setting(session, key, value)` callback, activated only by an owned
+`setting_seeds` declaration. Version `2.0.0` removes the unowned
 `package_base(schema)` and `package_session(schema)` selectors. `package_database()` takes no
 identity argument: it resolves the caller to exactly one installed entry-point package directory,
 revalidates that directory's manifest identity, distribution version, core compatibility, and
 database declaration, then returns the only supported capability for creating an independent ORM
 base or opening a schema-local transaction. An unowned caller, ambiguous installed ownership,
 missing database declaration, or changed identity fails before the backend session factory is
-imported. `publish_event()` uses the generated product transport. Version `1.2.0` added stable
-`event_id`, `occurred_at`, and `schema_version` publication metadata for durable package outboxes.
-Version `1.3.0` added the optional `SettingSeedPackage.seed_setting(session, key, value)` callback,
-activated only by an owned `setting_seeds` declaration.
-The unchanged wheel can therefore be
-installed into another generated product with the same compatible core without rebuilding it.
+imported. `publish_event()` uses the generated product transport. The unchanged wheel can therefore
+be installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
 
