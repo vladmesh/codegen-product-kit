@@ -649,6 +649,8 @@ def test_package_contract_and_migrations_against_real_postgres(
                     assert await package_db.scalar(
                         __import__("sqlalchemy").text("SELECT count(*) FROM synthetic_records")
                     ) == 0
+                # Do not carry this loop's pooled connection into the next async test.
+                await async_engine.dispose()
 
                 async with AsyncClient(base_url="http://backend:8000") as client:
                     headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
