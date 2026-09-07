@@ -299,8 +299,12 @@ def _setting_seeds(data: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     """Return validated product-setting callback bindings."""
 
     declarations = data.get("setting_seeds", [])
-    settings_schema = data.get("settings_schema", {})
-    if not isinstance(declarations, list) or not isinstance(settings_schema, dict):
+    if not isinstance(declarations, list):
+        raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
+    if not declarations:
+        return ()
+    settings_schema = data.get("settings_schema")
+    if not isinstance(settings_schema, dict):
         raise PackageManifestError("package.yaml has malformed setting_seeds declaration")
     properties = settings_schema.get("properties")
     if not isinstance(properties, dict):

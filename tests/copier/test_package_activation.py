@@ -547,6 +547,25 @@ def test_runtime_refuses_invalid_setting_seed_declarations(
         installed_manifest.write_text(original)
 
 
+def test_runtime_activates_package_with_setting_fields_omitted(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data.pop("settings_schema")
+        data.pop("setting_seeds", None)
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+
+        activated = runtime.discover_packages(["synthetic"])
+
+        assert activated[0].manifest.setting_seeds == ()
+    finally:
+        installed_manifest.write_text(original)
+
+
 def test_runtime_requires_callback_for_declared_setting_seed(
     project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
