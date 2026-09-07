@@ -2,6 +2,10 @@
 
 ## 2026-09-07
 
+- Package environment requirements now reuse compatible product-owned typed declarations, preserving
+  the product's literal, allocation, derived-value, or secret source. Generation and `kit add` fail
+  early with a named invariant for incompatible overlaps, while undeclared requirements retain the
+  user-secret fallback and repeated package requirements collapse to the strictest requiredness.
 - **Breaking:** The package façade is now `2.0.0`. `package_database()` derives an ownership
   capability from the calling installed package's validated manifest; the schema-selecting
   `package_base(schema)` and `package_session(schema)` seams are removed. The capability creates

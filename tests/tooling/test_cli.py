@@ -62,3 +62,33 @@ def test_add_rejects_an_unknown_or_wrong_artifact(tmp_path: Path) -> None:
         cli.add_package("other", wrong, tmp_path)
     with pytest.raises(ValueError, match="not codegen-kit-reminders"):
         cli.add_package("reminders", wrong, tmp_path)
+
+
+def test_add_reports_package_environment_incompatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _product(tmp_path)
+    artifact = tmp_path / "codegen_kit_reminders-0.1.0-py3-none-any.whl"
+    artifact.write_bytes(b"wheel")
+    monkeypatch.setattr(cli, "_run", lambda *_args: None)
+
+    def refuse_generation(_root: Path) -> None:
+        raise ValueError(
+            "Package environment requirement 'REDIS_URL' cannot reuse the product "
+            "declaration: missing required consumer 'backend'"
+        )
+
+    monkeypatch.setattr(cli, "generate_all", refuse_generation)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["kit", "add", "reminders", "--wheel", str(artifact), "--product-root", str(tmp_path)],
+    )
+
+    with pytest.raises(SystemExit, match="1"):
+        cli.main()
+
+    error = capsys.readouterr().err
+    assert "kit: Package environment requirement 'REDIS_URL'" in error
+    assert "missing required consumer 'backend'" in error

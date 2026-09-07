@@ -328,7 +328,6 @@ def _merge_package_names(
     setting_owners: dict[str, str],
     job_owners: dict[str, str],
     database_owners: dict[str, str],
-    environment_owners: dict[str, str],
     capability_owners: dict[str, str],
     errors: list[str],
 ) -> None:
@@ -342,14 +341,6 @@ def _merge_package_names(
     for requirement in package.manifest.requires:
         if requirement not in capability_owners:
             errors.append(f"{owner!r} requires unprovided capability {requirement!r}")
-    for requirement in package.manifest.environment:
-        _claim_name(
-            "Environment variable",
-            requirement.name,
-            owner,
-            environment_owners,
-            errors,
-        )
     for label, schema, owners in (
         ("Setting", package.manifest.settings_schema, setting_owners),
         ("Job", package.manifest.jobs_schema, job_owners),
@@ -409,8 +400,6 @@ def _validate_and_merge_packages(
         for service, manifest in specs.manifests.items()
         for capability in manifest.provides
     }
-    environment_owners: dict[str, str] = {}
-
     for package in specs.packages:
         owner = f"package:{package.name}"
         for capability in package.manifest.provides:
@@ -423,7 +412,6 @@ def _validate_and_merge_packages(
             setting_owners,
             job_owners,
             database_owners,
-            environment_owners,
             capability_owners,
             errors,
         )
