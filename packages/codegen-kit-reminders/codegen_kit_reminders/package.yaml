@@ -4,7 +4,7 @@ version: 0.1.0
 requires_core: ">=1.2,<2"
 provides: []
 requires: []
-package_dependencies: [alembic, fastapi, faststream, pydantic, sqlalchemy]
+package_dependencies: [alembic, fastapi, faststream, pydantic, redis, sqlalchemy]
 http:
   prefix: /reminders
 database:

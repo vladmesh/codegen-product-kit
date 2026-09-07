@@ -288,6 +288,12 @@ and ready a new consuming service before allowing any event it must receive to b
 published before the group's first creation are deliberately not replayed. Once the group exists,
 later downtime does not lose its backlog.
 
+A consuming package owns establishment of every fixed consumer group declared by its runtime. Its
+startup creates the stream and group with `MKSTREAM` semantics before any live or recovery reader
+starts. Repeated startup accepts the existing group without resetting its cursor or pending entries;
+only Redis's `BUSYGROUP` already-exists response is accepted, and every other Redis failure aborts
+package startup.
+
 Every generated subscription has a live reader and a recovery reader in the same group. The recovery
 reader uses FastStream's Redis `XAUTOCLAIM` support, with a configurable five-minute idle threshold
 and five-second polling interval by default. Reclaim is based only on idle time: Redis cannot

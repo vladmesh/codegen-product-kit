@@ -1,5 +1,12 @@
 # Contract changelog
 
+## 2026-09-07
+
+- Consuming packages now own establishment of their declared fixed Redis Stream groups before live
+  or recovery consumption begins. The reminders package creates `job_fired` and its
+  `events:package:reminders` group with idempotent `MKSTREAM` semantics, preserving an existing
+  cursor and pending entries while allowing connection and protocol failures to abort startup.
+
 ## 2026-09-06
 
 - `deployment.modes` now refuses a declared `container` mode with `UnimplementedDeploymentModeError`
