@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-
 _CAPABILITY_KEY = object()
 
 
