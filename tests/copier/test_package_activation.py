@@ -187,6 +187,42 @@ def test_generated_factory_and_lifespan_activate_installed_package(
         product_manifest.write_text(original_product)
 
 
+def test_generated_settings_seed_transaction_and_routing(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    """Run the generated product's focused settings seed contract tests."""
+
+    runtime_project, python = generated_backend_runtime
+    product_manifest = runtime_project / "services/backend/manifest.yaml"
+    original_product = product_manifest.read_text()
+    product = yaml.safe_load(original_product)
+    product["packages"] = ["synthetic"]
+    product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
+    try:
+        generated = subprocess.run(
+            [sys.executable, "-m", "framework.generate"],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert generated.returncode == 0, generated.stdout + generated.stderr
+        result = subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pytest",
+                "-q",
+                "services/backend/tests/unit/test_product_settings.py",
+            ],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        product_manifest.write_text(original_product)
+
+
 def test_generated_lifespan_cleans_up_partial_package_startup(
     generated_backend_runtime: tuple[Path, Path],
 ) -> None:
@@ -480,6 +516,72 @@ def test_runtime_rejects_malformed_deployment_declaration(
         installed_manifest.write_text(original)
 
 
+@pytest.mark.parametrize(
+    "setting_seeds",
+    [
+        [{"key": "missing", "scope": "product"}],
+        [{"key": "enabled", "scope": "user"}],
+        [{"key": "enabled", "scope": "product", "unknown": True}],
+        [
+            {"key": "enabled", "scope": "product"},
+            {"key": "enabled", "scope": "product"},
+        ],
+    ],
+)
+def test_runtime_refuses_invalid_setting_seed_declarations(
+    project_backend: Path,
+    installed_synthetic: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting_seeds: object,
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data["setting_seeds"] = setting_seeds
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+        with pytest.raises(runtime.PackageManifestError, match="setting_seeds"):
+            runtime.discover_packages(["synthetic"])
+    finally:
+        installed_manifest.write_text(original)
+
+
+def test_runtime_activates_package_with_setting_fields_omitted(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data.pop("settings_schema")
+        data.pop("setting_seeds", None)
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+
+        activated = runtime.discover_packages(["synthetic"])
+
+        assert activated[0].manifest.setting_seeds == ()
+    finally:
+        installed_manifest.write_text(original)
+
+
+def test_runtime_requires_callback_for_declared_setting_seed(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data["setting_seeds"] = [{"key": "enabled", "scope": "product"}]
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+        with pytest.raises(runtime.MissingSettingSeedCallbackError, match="seed_setting"):
+            runtime.discover_packages(["synthetic"])
+    finally:
+        installed_manifest.write_text(original)
+
+
 @pytest.mark.slow
 def test_package_contract_and_migrations_against_real_postgres(
     project_backend: Path,
@@ -738,9 +840,56 @@ def test_package_contract_and_migrations_against_real_postgres(
                 await lifespan.__aenter__()
                 groups = await redis.xinfo_groups("job_fired")
                 assert [group["name"] for group in groups] == [CONSUMER_GROUP.encode()]
-                reader, subscriber = await _due_reader("main")
                 headers = {"X-Jobs-Capability": os.environ["JOBS_FIRE_CAPABILITY"]}
                 async with AsyncClient(base_url="http://backend:8000") as client:
+                    settings_headers = {
+                        "X-Settings-Capability": os.environ["SETTINGS_WRITE_CAPABILITY"]
+                    }
+                    seed_payload = {
+                        "key": "reminders.reminder_owner_ref",
+                        "scope": "product",
+                        "value": "opaque:seed-owner",
+                    }
+                    seeded = await client.post(
+                        "/settings/set", headers=settings_headers, json=seed_payload
+                    )
+                    retried = await client.post(
+                        "/settings/set", headers=settings_headers, json=seed_payload
+                    )
+                    assert seeded.status_code == retried.status_code == 200
+                    # Factory recreation reuses activation and does not seed at startup.
+                    assert len(create_app().state.codegen_packages) == 2
+                    seed_tick = await client.post(
+                        "/jobs/fire",
+                        headers=headers,
+                        json={
+                            "command_id": "seed-tick",
+                            "name": "reminders.tick",
+                            "arguments": {"at": "2001-01-01T00:00:00Z"},
+                            "fired_by_product": "reminders-proof",
+                            "fired_by_run": "run-1",
+                        },
+                    )
+                    assert seed_tick.status_code == 200, seed_tick.text
+                    await _wait_group_idle(redis, "job_fired", CONSUMER_GROUP)
+                    seeded_list = await client.get(
+                        "/reminders", params={"user_ref": "opaque:seed-owner"}
+                    )
+                    assert len(seeded_list.json()) == 1
+                    assert seeded_list.json()[0]["state"] == "emitted"
+                    advanced_retry = await client.post(
+                        "/settings/set", headers=settings_headers, json=seed_payload
+                    )
+                    assert advanced_retry.status_code == 200
+                    preserved = await client.get(
+                        "/reminders", params={"user_ref": "opaque:seed-owner"}
+                    )
+                    assert len(preserved.json()) == 1
+                    assert preserved.json()[0]["state"] == "emitted"
+
+                    # Isolate the existing manual HTTP/outbox proof from the seed event.
+                    await redis.delete("reminders.due")
+                    reader, subscriber = await _due_reader("main")
                     created = await client.post(
                         "/reminders",
                         json={
