@@ -117,6 +117,13 @@ lock entry, adds `reminders` to the manifest allowlist, synchronizes the backend
 regenerates the active-package contract. The command deliberately accepts an artifact path rather
 than resolving a catalog; package publication and catalog resolution are outside protocol v1.
 
+On a main push, generated image CI repeats the committed installation boundary before generation:
+it performs a frozen root tooling sync followed by a frozen `services/backend` sync, then runs
+`make generate-from-spec`. The backend sync consumes only its committed project, lockfile, and
+repository-local package wheels. Generation continues to resolve the allowlisted active set solely
+from `services/backend/.venv`; CI does not expose runtime packages through the root environment or
+provide a fallback when an entry point is absent.
+
 Discovery uses installed distribution metadata, never module scanning or a catalog. The core
 activates the package only when the entry point is installed and its name is listed. An installed but
 unlisted package raises `InstalledPackageNotListedError`; a listed but absent entry point raises

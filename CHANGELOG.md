@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Generated main-push image jobs now install the committed locked backend environment before
+  generation, so allowlisted package entry points are available without weakening package
+  resolution or requiring a product-side CI repair.
+
 ## [0.6.1] - 2026-09-07
 
 ### Fixed

@@ -136,6 +136,7 @@ jobs:
       - name: Generate code from specs
         run: |
           uv sync --frozen
+          uv sync --project services/backend --frozen
           make generate-from-spec
 {% endif %}
       - name: Set up Docker Buildx

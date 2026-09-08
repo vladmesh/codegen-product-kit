@@ -99,6 +99,51 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     assert "generated/" not in Path("template/mypy.ini.jinja").read_text()
 
 
+def test_main_push_generation_syncs_the_locked_backend_environment(
+    project_backend: Path,
+    project_backend_tg_bot: Path,
+    project_standalone: Path,
+) -> None:
+    """Backend main-push generation must install package entry points before generation."""
+    expected_commands = [
+        "uv sync --frozen",
+        "uv sync --project services/backend --frozen",
+        "make generate-from-spec",
+    ]
+
+    for project in (project_backend, project_backend_tg_bot):
+        workflow = yaml.safe_load((project / ".github/workflows/ci.yml").read_text())
+        steps = workflow["jobs"]["build-and-push"]["steps"]
+        generation_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Generate code from specs"
+        )
+        commands = steps[generation_index]["run"].splitlines()
+        build_index = next(
+            index
+            for index, step in enumerate(steps)
+            if str(step.get("uses", "")).startswith("docker/build-push-action")
+        )
+
+        assert commands == expected_commands
+        assert generation_index < build_index
+        assert "reminders" not in steps[generation_index]["run"]
+        assert (
+            yaml.safe_load((project / "services/backend/manifest.yaml").read_text())["packages"]
+            == []
+        )
+
+    standalone_workflow = yaml.safe_load(
+        (project_standalone / ".github/workflows/ci.yml").read_text()
+    )
+    standalone_steps = standalone_workflow["jobs"]["build-and-push"]["steps"]
+    assert all(step.get("name") != "Generate code from specs" for step in standalone_steps)
+    assert all(
+        "uv sync --project services/backend" not in step.get("run", "") for step in standalone_steps
+    )
+
+
 def test_default_tooling_requirement_uses_template_commit(tmp_path: Path) -> None:
     """The normal generated requirement is an immutable Git commit, not a branch."""
     source = template_source()
