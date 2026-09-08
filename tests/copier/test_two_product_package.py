@@ -195,6 +195,81 @@ def reminders_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return next(output.glob("codegen_kit_reminders-*.whl"))
 
 
+@pytest.mark.slow
+def test_main_push_commands_restore_real_package_entry_point_before_generation(
+    reminders_wheel: Path,
+    tmp_path: Path,
+) -> None:
+    """Reproduce the package-carrying product boundary from the failed main-push job."""
+    product = run_copier(tmp_path, "backend")
+    _run(["uv", "sync", "--frozen"], product)
+    _run(
+        [
+            str(product / ".venv/bin/kit"),
+            "add",
+            "reminders",
+            "--wheel",
+            str(reminders_wheel),
+        ],
+        product,
+    )
+    _commit_baseline(product)
+
+    workflow = yaml.safe_load((product / ".github/workflows/ci.yml").read_text())
+    main_push_commands = next(
+        step["run"].splitlines()
+        for step in workflow["jobs"]["build-and-push"]["steps"]
+        if step.get("name") == "Generate code from specs"
+    )
+    assert main_push_commands == [
+        "uv sync --frozen",
+        "uv sync --project services/backend --frozen",
+        "make generate-from-spec",
+    ]
+
+    shutil.rmtree(product / "services/backend/.venv")
+    _run(main_push_commands[0].split(), product)
+    missing_entry_point = subprocess.run(  # noqa: S603
+        main_push_commands[2].split(),
+        cwd=product,
+        capture_output=True,
+        text=True,
+        env={key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"},
+    )
+    assert missing_entry_point.returncode != 0
+    assert "reminders: listed package has no installed entry point" in (
+        missing_entry_point.stdout + missing_entry_point.stderr
+    )
+
+    _run(main_push_commands[1].split(), product)
+    _run(main_push_commands[2].split(), product)
+    resolved = _run(
+        [
+            str(product / "services/backend/.venv/bin/python"),
+            "-c",
+            "from importlib import metadata; "
+            "print(next(ep.value for ep in metadata.entry_points(group='codegen_kit.packages') "
+            "if ep.name == 'reminders'))",
+        ],
+        product,
+    )
+    assert resolved.stdout.strip() == "codegen_kit_reminders:package"
+    assert '"name": "reminders"' in (product / "codegen_kit/_active_packages.py").read_text()
+    _run(
+        [
+            "git",
+            "diff",
+            "--exit-code",
+            "--",
+            "codegen_kit/_active_packages.py",
+            "services/backend/packages/env.contract.yaml",
+            "services/backend/src/generated/",
+            "shared/shared/generated/",
+        ],
+        product,
+    )
+
+
 @pytest.fixture(scope="module")
 def two_products(
     reminders_wheel: Path,

@@ -1,5 +1,13 @@
 # Contract changelog
 
+## 2026-09-08
+
+- Generated main-push image jobs now run the root frozen tooling sync and the backend frozen runtime
+  sync before generation. A generated-product CI proof builds the real reminders wheel, installs it
+  through `kit add reminders`, removes the populated backend environment, reproduces the retained
+  `listed package has no installed entry point` failure without the backend sync, then proves the
+  rendered locked preparation restores the real entry point and leaves package artifacts current.
+
 ## 2026-09-07
 
 - Package environment requirements now reuse compatible product-owned typed declarations, preserving
