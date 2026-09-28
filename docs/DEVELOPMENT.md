@@ -87,5 +87,10 @@ There is no supported command to add a previously excluded module to an existing
 
 ## Release
 
-Update the Copier version and `CHANGELOG.md`, run the full validation matrix, then create and push the
-release tag. Copier uses the latest tag for remote sources unless the caller selects `HEAD`.
+The kit release version is its Git tag, such as `0.6.2`; prepare `CHANGELOG.md` and release notes,
+run the full validation matrix, then create and push the tag from reviewed merged main in the
+release operation. `_min_copier_version` is the minimum Copier tool version, not the kit version.
+The tooling and generated application package versions are separate and need not change for a
+template patch. Copier uses the latest tag for remote sources unless the caller selects `HEAD`.
+
+See [0.6.3 upgrade and release notes](releases/0.6.3.md) for the pending patch.

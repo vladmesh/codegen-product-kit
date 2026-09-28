@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - Unreleased
+
+### Fixed
+
+- Generated backends persist 64-bit user IDs in `users.id`, `user_channels.user_id`, and
+  `settings.subject_id`. A forward Alembic revision preserves the released 0.6.2 schema and
+  widens the user sequence; downgrade refuses values or sequence state outside int32.
+- Shared logging suppresses HTTP request diagnostics below WARNING and redacts Telegram token
+  paths in rendered messages and exceptions, including application DEBUG and console output.
+- PostgreSQL integration and generated backend/Telegram logging regressions execute in template
+  CI. See [0.6.3 upgrade and release notes](docs/releases/0.6.3.md).
+
+## [0.6.2] - 2026-09-08
+
 ### Fixed
 
 - Generated main-push image jobs now install the committed locked backend environment before
