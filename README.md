@@ -52,3 +52,6 @@ make test-copier
 See [architecture](docs/ARCHITECTURE.md), [development](docs/DEVELOPMENT.md),
 [testing](docs/TESTING.md), and the attested [package RSS observations](docs/PACKAGE_RSS.md) for the
 current contracts and evidence.
+
+See [0.6.4 release and upgrade notes](docs/releases/0.6.4.md) for the prepared native IPv6
+deployment fix and the explicit Copier update required for existing products.

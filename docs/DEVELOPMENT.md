@@ -93,4 +93,5 @@ release operation. `_min_copier_version` is the minimum Copier tool version, not
 The tooling and generated application package versions are separate and need not change for a
 template patch. Copier uses the latest tag for remote sources unless the caller selects `HEAD`.
 
-See [0.6.3 upgrade and release notes](releases/0.6.3.md) for the pending patch.
+See [0.6.4 release and upgrade notes](releases/0.6.4.md) for the prepared transport patch,
+including real Copier update commands and workflow conflict review.

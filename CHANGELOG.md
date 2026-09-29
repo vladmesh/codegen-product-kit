@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.3] - Unreleased
+## [0.6.4] - 2026-09-29 (prepared, not published)
+
+### Fixed
+
+- Generated deployment keeps raw IPv4/IPv6 hosts for native SSH and ssh-action, and brackets IPv6
+  only in native SCP destinations. Missing copy configuration and bracketed host secrets fail
+  clearly; compose sources, target directory and three-attempt retry policy are preserved.
+- Generated deployment pins `ubuntu-24.04`. Job names and action versions are unchanged.
+- Rendered-shell and nonconnecting OpenSSH regressions cover all supported product shapes.
+  Real Copier updates from exact 0.6.3 retain owned data and report workflow conflicts.
+  See [0.6.4 release and upgrade notes](docs/releases/0.6.4.md); existing repositories need an
+  explicit reviewed update, in addition to any orchestrator scaffolding pin change.
+
+## [0.6.3] - 2026-09-28
 
 ### Fixed
 
