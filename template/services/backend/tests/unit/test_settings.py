@@ -24,6 +24,7 @@ def test_documented_local_environment_constructs_the_application(
         "USERS_GRANT_CAPABILITY",
         "SETTINGS_WRITE_CAPABILITY",
         "JOBS_FIRE_CAPABILITY",
+        "USER_IDENTITY_CAPABILITY",
         "DEBUG",
         "ENABLED_MODULES",
         "POSTGRES_HOST",
@@ -48,5 +49,6 @@ def test_documented_local_environment_constructs_the_application(
     assert settings.users_grant_capability == "local-grant-capability-not-for-production"
     assert settings.settings_write_capability == "local-settings-capability-not-for-production"
     assert settings.jobs_fire_capability == "local-jobs-capability-not-for-production"
+    assert settings.user_identity_capability == "local-identity-capability-not-for-production"
     assert entrypoint.app.title == settings.app_name
     get_settings.cache_clear()

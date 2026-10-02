@@ -29,7 +29,11 @@ class RemindersPackage:
         await self.consumer.stop()
 
     async def seed_setting(self, session: Any, key: str, value: Any) -> None:
-        """Create the stable first-deploy reminder without replaying its state."""
+        """Create the stable first-deploy reminder without replaying its state.
+
+        The value is stored as an opaque owner. Only a canonical caller identity such as
+        ``telegram:<id>`` lets that user see the seeded reminder through the HTTP API.
+        """
 
         if key != "reminders.reminder_owner_ref" or not isinstance(value, str) or not value:
             raise ValueError("unsupported reminders setting seed")

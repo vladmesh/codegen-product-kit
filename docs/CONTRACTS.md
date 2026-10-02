@@ -30,8 +30,8 @@ Git SHA used to deliver `codegen-kit-tooling`. The initial v1 surface was `1.0.0
 session, and event-publication seams raised it to `1.1.0`. Backward-compatible public additions require
 a minor bump, breaking changes require a major bump, and fixes that preserve the promised surface
 require a patch bump. The package protocol version remains `1` across compatible additions. A
-package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_database`, and
-`publish_event` from `codegen_kit`; product-specific `services.*`, generated contracts, and
+package imports `Package`, `CORE_VERSION`, `PACKAGE_PROTOCOL_VERSION`, `package_database`,
+`publish_event`, and `caller_identity` from `codegen_kit`; product-specific `services.*`, generated contracts, and
 application settings are not public API. Version `1.2.0` added stable `event_id`, `occurred_at`, and
 `schema_version` publication metadata for durable package outboxes. Version `1.3.0` added the
 optional `SettingSeedPackage.seed_setting(session, key, value)` callback, activated only by an owned
@@ -43,8 +43,10 @@ database declaration, then returns the only supported capability for creating an
 base or opening a schema-local transaction. An unowned caller, ambiguous installed ownership,
 missing database declaration, or changed identity fails before the backend session factory is
 imported. `publish_event()` uses the generated product transport. Version `2.1.0` adds the optional
-`timers` manifest field, fired by the [core timer loop](#core-timer-loop); a package that declares
-timers requires `>=2.1`, and a package without them is unchanged. The unchanged wheel can therefore
+`timers` manifest field, fired by the [core timer loop](#core-timer-loop), and the
+`caller_identity` request dependency of the [core caller identity](#core-caller-identity-v1); a
+package that declares timers or depends on the caller identity requires `>=2.1`, and a package
+without them is unchanged. The unchanged wheel can therefore
 be installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
@@ -262,8 +264,8 @@ adds the `/reminders` create/list/cancel API, the package-owned `reminders` Post
 Alembic head, the declared `reminders.tick` job, and the `reminders.due` message and publisher. No
 product-owned Python or schema file is authored for the installation.
 
-The package supports only one-time text reminders for an opaque `user_ref` and an explicit
-timezone-aware instant. It performs no recurrence, snooze, media, calendar, or natural-language
+The package supports only one-time text reminders owned by one user and an explicit timezone-aware
+instant. It performs no recurrence, snooze, media, calendar, or natural-language
 parsing. From `0.4.0` the package declares `timers: [{job: tick, every_seconds: 60}]`, so the
 [core timer loop](#core-timer-loop) fires `reminders.tick` once a minute with the slot instant as
 `at`, and a due reminder is emitted in production without any external caller; `0.4.0` therefore
@@ -271,10 +273,30 @@ requires core `>=2.1,<3`. An explicit caller, such as central QA, can still fire
 through `POST /jobs/fire` with its own `at`; both fires take the same path and the tick is
 idempotent over its rows. Products on core `2.0.0` keep `0.3.0`, which declares no timer.
 
+From `0.4.0` the owner of a reminder is the [verified caller](#core-caller-identity-v1), never a
+request value. Every route depends on `codegen_kit.caller_identity` and nothing else establishes
+the owner:
+
+| Route | Input | Acts on |
+|---|---|---|
+| `POST /reminders` | body `{text, remind_at}`; any other field is refused with 422 | creates a reminder owned by the caller |
+| `GET /reminders` | none | the caller's reminders only |
+| `DELETE /reminders/{id}` | the reminder id | the caller's reminder only; another user's reminder answers 404, the same as a missing one |
+
+A request without a verified identity is refused by the dependency with 401 or 403 before the route
+runs. There is no `user_ref` in a body, query or path. The stored `user_ref` column and the
+`reminders.due` payload's `user_ref` keep their names and now carry the canonical caller form
+`"<channel>:<external_id>"`, for example `telegram:123456`, so a product's bot can deliver a due
+message to that chat. This is a breaking change for callers of `0.3.0`: central QA, existing bots
+and any other client must send the identity headers instead of `user_ref`. Stored values are not
+migrated; no product carries `0.4.0` data yet.
+
 The package declares the non-empty product setting `reminders.reminder_owner_ref` and binds it to
 its setting seed. The first successful settings write inserts one reminder under a deterministic
-UUID with a fixed past instant and `scheduled` state. The opaque setting string becomes its
-`user_ref`. Conflict handling on that UUID is deliberately a no-op: replaying the same write,
+UUID with a fixed past instant and `scheduled` state. The setting string becomes its `user_ref`
+unchanged. The package never interprets it, but only the canonical caller form, for example
+`telegram:<id>`, lets that user see the seeded reminder through `GET /reminders`; any other value
+seeds a reminder no caller can list or cancel. Conflict handling on that UUID is deliberately a no-op: replaying the same write,
 recreating the application, or writing again after the reminder advanced never creates another row
 and never resets its owner, timestamps, or state. The normal `reminders.tick` path, not the seed,
 moves it through due, outbox, and emitted state.
@@ -374,6 +396,41 @@ Neither step creates a kit core tag or moves the orchestrator's kit pin
 (`scheduler.service_template_ref`): every product whose tooling has catalog `kit add` resolves the
 new version from the live catalog. Tooling at kit core `0.6.4` and earlier has only the `--wheel`
 form; catalog resolution reaches products from the first kit core release that contains it. A published package tag is never moved or replaced; a fix is a new version.
+
+## Core caller identity v1
+
+The backend core establishes the calling user's identity once, at the request boundary, for every
+package route that asks for it. This is service-level trust inside the product: the trusted caller
+is an in-product service, today the generated tg_bot, which holds a capability and names the user it
+acts for from that user's real Telegram update. There is no end-user authentication, such as web
+login or per-user tokens; a request without the capability is not trusted because of where it comes
+from.
+
+A package route depends on `codegen_kit.caller_identity`, a FastAPI dependency. It is the only
+enforcement place: a package adds no identity check of its own, and no global middleware changes
+the product's own routes. The dependency, in order:
+
+1. Requires exactly one `X-Identity-Capability` header, non-empty printable ASCII, equal to the
+   generated `USER_IDENTITY_CAPABILITY` secret under `compare_digest`. Otherwise **401**.
+2. Requires exactly one `X-User-Channel` (at most 64 characters, no `:`) and exactly one
+   `X-User-External-Id` (at most 256 characters), each non-empty printable ASCII. Otherwise
+   **401**.
+3. Resolves `(channel, external_id)` in `user_channels`. An unknown identity is **403**.
+4. Requires that identity's user to be `active`. An inactive user is **403**.
+5. Returns the canonical `user_ref`, `"<channel>:<external_id>"`, for example `telegram:123456`.
+
+The resolution reads the request's core database session; the users model and its admission
+decision are unchanged, so `POST /users/grant` and `POST /users/revoke` decide who may act. The
+headers are intentionally absent from generated schemas and OpenAPI, like the other capabilities.
+The capability must never be logged, placed in LLM-facing data, or carried in a URL, an event
+payload or an error body.
+
+`USER_IDENTITY_CAPABILITY` is a backend `generated_secret` whose consumers are `backend` and, when
+the product has one, `tg_bot`. The deployment secret resolver generates and persists it like every
+other `generated_secret`; local `.env` files carry `local-identity-capability-not-for-production`.
+The generated tg_bot calls package routes through
+`BackendClient.request_as_telegram_user(method, path, telegram_id, ...)`, which adds the three
+headers with the capability read from its environment and fails closed without it.
 
 ## Core settings v1
 

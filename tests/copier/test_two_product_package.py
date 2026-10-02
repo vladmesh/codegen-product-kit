@@ -54,6 +54,21 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
         from codegen_kit_reminders import RemindersPackage
 
 
+        async def as_user(client: AsyncClient, external_id: str) -> dict[str, str]:
+            # Grant one Telegram identity and return the headers the bot sends for it.
+            granted = await client.post(
+                "/users/grant",
+                headers={"X-Grant-Capability": os.environ["USERS_GRANT_CAPABILITY"]},
+                json={"channel": "telegram", "external_id": external_id},
+            )
+            assert granted.status_code == 200, granted.text
+            return {
+                "X-Identity-Capability": os.environ["USER_IDENTITY_CAPABILITY"],
+                "X-User-Channel": "telegram",
+                "X-User-External-Id": external_id,
+            }
+
+
         @pytest.mark.asyncio
         async def test_real_package_route_entry_point_and_lifecycle(monkeypatch) -> None:
             entry_point = next(
@@ -76,15 +91,14 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
             await package.shutdown(object())
             assert lifecycle_calls == ["startup", "shutdown"]
             async with AsyncClient(base_url="http://backend:8000") as client:
+                body = {"text": "real package route", "remind_at": "2040-01-01T00:00:00Z"}
+                refused = await client.post("/reminders", json=body)
+                assert refused.status_code == 401, refused.text
                 response = await client.post(
-                    "/reminders",
-                    json={
-                        "user_ref": "acceptance-user",
-                        "text": "real package route",
-                        "remind_at": "2040-01-01T00:00:00Z",
-                    },
+                    "/reminders", headers=await as_user(client, "1001"), json=body
                 )
                 assert response.status_code == 201, response.text
+                assert response.json()["user_ref"] == "telegram:1001"
 
 
         @pytest.mark.asyncio
@@ -111,7 +125,7 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
 
             class Controller:
                 async def receive_due(self, session, *, payload: ReminderDue) -> None:
-                    if payload.user_ref == "timer-user":
+                    if payload.user_ref == "telegram:2002":
                         received.append(payload)
                         delivered.set()
 
@@ -140,11 +154,12 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
             await broker.start()
             try:
                 async with AsyncClient(base_url="http://backend:8000") as client:
+                    timer_user = await as_user(client, "2002")
                     remind_at = datetime.now(UTC) + timedelta(seconds=1)
                     created = await client.post(
                         "/reminders",
+                        headers=timer_user,
                         json={
-                            "user_ref": "timer-user",
                             "text": "fired by the core timer",
                             "remind_at": remind_at.isoformat(),
                         },
@@ -153,7 +168,7 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
                     reminder = created.json()
                     await asyncio.wait_for(delivered.wait(), timeout=150)
                     for _ in range(50):
-                        listed = await client.get("/reminders", params={"user_ref": "timer-user"})
+                        listed = await client.get("/reminders", headers=timer_user)
                         if listed.json()[0]["state"] == "emitted":
                             break
                         await asyncio.sleep(0.2)
@@ -191,7 +206,7 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
 
             class Controller:
                 async def receive_due(self, session, *, payload: ReminderDue) -> None:
-                    assert payload.user_ref == "subscriber-user"
+                    assert payload.user_ref == "telegram:3003"
                     received.set()
 
             class Session:
@@ -221,11 +236,8 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
                 async with AsyncClient(base_url="http://backend:8000") as client:
                     created = await client.post(
                         "/reminders",
-                        json={
-                            "user_ref": "subscriber-user",
-                            "text": "through the protocol",
-                            "remind_at": "2040-01-01T00:00:00Z",
-                        },
+                        headers=await as_user(client, "3003"),
+                        json={"text": "through the protocol", "remind_at": "2040-01-01T00:00:00Z"},
                     )
                     assert created.status_code == 201, created.text
                     fired = await client.post(

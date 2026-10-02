@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Products without timers run no loop. Upgrade facts and the release-tag rule:
   [0.7.0 release notes](docs/releases/0.7.0.md).
 
+### Changed
+
+- **Breaking for reminders callers.** The backend core verifies the caller of a package route once:
+  a trusted in-product service (the tg_bot) sends `X-Identity-Capability` (the new generated secret
+  `USER_IDENTITY_CAPABILITY`), `X-User-Channel` and `X-User-External-Id`, and
+  `codegen_kit.caller_identity` resolves that active user to `"<channel>:<external_id>"`.
+  `codegen-kit-reminders` 0.4.0 takes the owner from it: `user_ref` is gone from the reminders
+  request body and query, and list and cancel act on the caller's own reminders only. The generated
+  tg_bot gains `BackendClient.request_as_telegram_user`. Contract:
+  [docs/CONTRACTS.md](docs/CONTRACTS.md#core-caller-identity-v1).
+
 ## [0.6.4] - 2026-09-29 (prepared, not published)
 
 ### Fixed

@@ -42,6 +42,14 @@ per slot through the same path, and a product without timers runs no loop. Repla
 recorded evidence instead of firing again. `jobs.fire` requires the deployment-only
 `X-Jobs-Capability` header, which is intentionally not documented in OpenAPI; reading evidence back
 does not.
+
+### Caller Identity
+
+An installed package's route that acts for a user depends on `codegen_kit.caller_identity`. It
+trusts only an in-product service holding `USER_IDENTITY_CAPABILITY` (sent as the single
+`X-Identity-Capability` header{% if 'tg_bot' in modules %}; the tg_bot is that caller{% endif %}),
+which names the user through `X-User-Channel` and `X-User-External-Id`. Malformed or missing headers
+answer 401, an unknown or inactive user 403, and the route receives `"<channel>:<external_id>"`.
 {%- endif %}
 
 ## Service Modules

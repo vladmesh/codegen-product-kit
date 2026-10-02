@@ -82,6 +82,7 @@ import main                                     # bare import, не работа
 {%- if 'backend' in modules %}
 | `REDIS_URL` | Yes | Redis connection string (e.g., `redis://redis:6379`) |
 | `BACKEND_API_URL` | Yes | Backend URL for Telegram identity resolution (e.g., `http://backend:8000`) |
+| `USER_IDENTITY_CAPABILITY` | Yes | Generated secret that lets the bot call backend package routes as a Telegram user |
 {%- endif %}
 
 ## Communication Patterns
@@ -92,6 +93,26 @@ import main                                     # bare import, не работа
    response with `status=active` is admitted; grants happen through the separately held backend
    capability and are never available to Telegram handlers.
 2. **Command Events** — Direct publish to Redis Streams (события команд)
+3. **Package Routes as the User** — Routes of installed backend packages (например `/reminders`)
+   act only for the verified caller: the backend takes the owner from identity headers, never from
+   a body or query. Call them only through
+   `BackendClient.request_as_telegram_user(method, path, telegram_id, ...)` with the id from the real
+   update (`update.effective_user.id`). It sends `X-Identity-Capability` (from
+   `USER_IDENTITY_CAPABILITY`), `X-User-Channel: telegram` and `X-User-External-Id`, and fails closed
+   without a valid id or capability. Never pass `user_ref` yourself, never send an identity the
+   update did not carry, and never log the capability. A 401 means the bot is misconfigured; a 403
+   means the user is unknown or inactive. The owner in responses and in `reminders.due` is
+   `telegram:<id>`, so a due message goes to that chat.
+
+   ```python
+   async with BackendClient() as client:
+       response = await client.request_as_telegram_user(
+           "post",
+           "/reminders",
+           update.effective_user.id,
+           json={"text": text, "remind_at": remind_at.isoformat()},
+       )
+   ```
 {%- else %}
 
 1. **Fail-closed Commands** — Without a backend the bot cannot resolve identities and denies all

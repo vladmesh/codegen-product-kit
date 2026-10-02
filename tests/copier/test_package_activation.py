@@ -281,6 +281,206 @@ def test_generated_core_timer_loop_fires_through_the_jobs_core(
         product_manifest.write_text(original_product)
 
 
+REMINDERS_CALLER_IDENTITY_TEST = textwrap.dedent(
+    '''
+    """The installed reminders routes act only for the core-verified caller."""
+
+    from __future__ import annotations
+
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
+    from datetime import datetime
+    import sqlite3
+    from uuid import UUID
+
+    from fastapi import FastAPI, status
+    from httpx import AsyncClient
+    import pytest
+    import pytest_asyncio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from codegen_kit_reminders import api
+    from services.backend.src.app.repositories.user import UserRepository
+    from services.backend.src.core.settings import get_settings
+
+    # The package's SQL is PostgreSQL-shaped; these adapters let the SQLite unit database
+    # store the same values without changing what the routes send.
+    sqlite3.register_adapter(UUID, str)
+    sqlite3.register_adapter(datetime, datetime.isoformat)
+
+
+    class SessionDatabase:
+        def __init__(self, session: AsyncSession) -> None:
+            self._session = session
+
+        @asynccontextmanager
+        async def session(self) -> AsyncIterator[AsyncSession]:
+            yield self._session
+
+
+    @pytest_asyncio.fixture
+    async def reminders_app(
+        app: FastAPI, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> FastAPI:
+        await db_session.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS reminders ("
+                "id TEXT PRIMARY KEY, user_ref TEXT NOT NULL, text TEXT NOT NULL, "
+                "remind_at TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, "
+                "cancelled_at TEXT, due_at TEXT, emitted_at TEXT)"
+            )
+        )
+        # The product activated the installed package and mounted its router at /reminders;
+        # only the package's PostgreSQL schema session is replaced by the unit database.
+        monkeypatch.setattr(api, "database", SessionDatabase(db_session))
+        users = UserRepository(db_session)
+        for external_id in ("101", "202"):
+            await users.grant("telegram", external_id)
+        await users.grant("telegram", "303")
+        await users.revoke("telegram", "303")
+        return app
+
+
+    def _as(external_id: str) -> dict[str, str]:
+        return {
+            "X-Identity-Capability": get_settings().user_identity_capability,
+            "X-User-Channel": "telegram",
+            "X-User-External-Id": external_id,
+        }
+
+
+    @pytest.mark.asyncio
+    async def test_reminders_belong_to_the_verified_caller(
+        reminders_app: FastAPI, client: AsyncClient
+    ) -> None:
+        body = {"text": "water the plants", "remind_at": "2040-01-01T00:00:00Z"}
+        first = await client.post("/reminders", headers=_as("101"), json=body)
+        second = await client.post(
+            "/reminders", headers=_as("202"), json={**body, "text": "call home"}
+        )
+        assert first.status_code == status.HTTP_201_CREATED, first.text
+        assert second.status_code == status.HTTP_201_CREATED, second.text
+        assert first.json()["user_ref"] == "telegram:101"
+        assert second.json()["user_ref"] == "telegram:202"
+
+        first_list = await client.get("/reminders", headers=_as("101"))
+        second_list = await client.get("/reminders", headers=_as("202"))
+        assert [item["id"] for item in first_list.json()] == [first.json()["id"]]
+        assert [item["id"] for item in second_list.json()] == [second.json()["id"]]
+
+        foreign = await client.delete(f"/reminders/{second.json()['id']}", headers=_as("101"))
+        assert foreign.status_code == status.HTTP_404_NOT_FOUND
+        missing = await client.delete(
+            "/reminders/00000000-0000-0000-0000-000000000000", headers=_as("101")
+        )
+        assert missing.status_code == status.HTTP_404_NOT_FOUND
+        assert foreign.json() == missing.json()
+
+        own = await client.delete(f"/reminders/{second.json()['id']}", headers=_as("202"))
+        assert own.status_code == status.HTTP_200_OK
+        assert own.json()["state"] == "cancelled"
+        first_after = await client.get("/reminders", headers=_as("101"))
+        assert first_after.json()[0]["state"] == "scheduled"
+
+
+    @pytest.mark.asyncio
+    async def test_reminders_refuse_requests_without_verified_identity(
+        reminders_app: FastAPI, client: AsyncClient
+    ) -> None:
+        body = {"text": "nobody", "remind_at": "2040-01-01T00:00:00Z"}
+        created = await client.post("/reminders", headers=_as("101"), json=body)
+        reminder_id = created.json()["id"]
+
+        anonymous = [
+            await client.post("/reminders", json=body),
+            await client.get("/reminders"),
+            await client.delete(f"/reminders/{reminder_id}"),
+        ]
+        assert {response.status_code for response in anonymous} == {
+            status.HTTP_401_UNAUTHORIZED
+        }
+        inactive = await client.get("/reminders", headers=_as("303"))
+        assert inactive.status_code == status.HTTP_403_FORBIDDEN
+        unknown = await client.get("/reminders", headers=_as("404"))
+        assert unknown.status_code == status.HTTP_403_FORBIDDEN
+
+        # The owner is never an input: a body or query user_ref cannot select another owner.
+        smuggled = await client.post(
+            "/reminders", headers=_as("202"), json={**body, "user_ref": "telegram:101"}
+        )
+        assert smuggled.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        queried = await client.get(
+            "/reminders", headers=_as("202"), params={"user_ref": "telegram:101"}
+        )
+        assert queried.status_code == status.HTTP_200_OK
+        assert queried.json() == []
+        still_mine = await client.get("/reminders", headers=_as("101"))
+        assert [item["id"] for item in still_mine.json()] == [reminder_id]
+
+
+    @pytest.mark.asyncio
+    async def test_reminders_contract_has_no_owner_input(reminders_app: FastAPI) -> None:
+        operations = reminders_app.openapi()["paths"]
+        for path in ("/reminders", "/reminders/{reminder_id}"):
+            for operation in operations[path].values():
+                names = {parameter["name"] for parameter in operation.get("parameters", [])}
+                assert "user_ref" not in names
+        create = reminders_app.openapi()["components"]["schemas"]["ReminderCreate"]
+        assert set(create["properties"]) == {"text", "remind_at"}
+    '''
+)
+
+
+def test_generated_reminders_routes_act_only_for_the_verified_caller(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    """The installed reminders routes take their owner from the core caller identity."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to install the reminders package")
+    runtime_project, python = generated_backend_runtime
+    product_manifest = runtime_project / "services/backend/manifest.yaml"
+    original_product = product_manifest.read_text()
+    product = yaml.safe_load(original_product)
+    product["packages"] = ["synthetic", "reminders"]
+    product_test = runtime_project / "services/backend/tests/unit/test_reminders_identity.py"
+    installed = subprocess.run(
+        [uv, "pip", "install", "--python", str(python), str(REMINDERS)],
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    try:
+        product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
+        generated = subprocess.run(
+            [sys.executable, "-m", "framework.generate"],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert generated.returncode == 0, generated.stdout + generated.stderr
+        product_test.write_text(REMINDERS_CALLER_IDENTITY_TEST)
+        result = subprocess.run(
+            [str(python), "-m", "pytest", "-q", str(product_test.relative_to(runtime_project))],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "3 passed" in result.stdout
+    finally:
+        product_test.unlink(missing_ok=True)
+        product_manifest.write_text(original_product)
+        # Other tests in this module share the runtime and list only the synthetic package.
+        subprocess.run(
+            [uv, "pip", "uninstall", "--python", str(python), "codegen-kit-reminders"],
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+
+
 def test_generated_lifespan_cleans_up_partial_package_startup(
     generated_backend_runtime: tuple[Path, Path],
 ) -> None:
@@ -903,6 +1103,23 @@ def test_package_contract_and_migrations_against_real_postgres(
                 assert "SyntheticRequested" in adapter
 
 
+            def _as_user(external_id: str) -> dict[str, str]:
+                return {
+                    "X-Identity-Capability": os.environ["USER_IDENTITY_CAPABILITY"],
+                    "X-User-Channel": "telegram",
+                    "X-User-External-Id": external_id,
+                }
+
+
+            async def _grant(client: AsyncClient, external_id: str) -> None:
+                granted = await client.post(
+                    "/users/grant",
+                    headers={"X-Grant-Capability": os.environ["USERS_GRANT_CAPABILITY"]},
+                    json={"channel": "telegram", "external_id": external_id},
+                )
+                assert granted.status_code == 200, granted.text
+
+
             async def _due_reader(name: str):
                 broker = RedisBroker(os.environ["REDIS_URL"])
                 subscriber = broker.subscriber(
@@ -956,10 +1173,12 @@ def test_package_contract_and_migrations_against_real_postgres(
                     settings_headers = {
                         "X-Settings-Capability": os.environ["SETTINGS_WRITE_CAPABILITY"]
                     }
+                    for external_id in ("seed-owner", "4242", "cancel-owner"):
+                        await _grant(client, external_id)
                     seed_payload = {
                         "key": "reminders.reminder_owner_ref",
                         "scope": "product",
-                        "value": "opaque:seed-owner",
+                        "value": "telegram:seed-owner",
                     }
                     seeded = await client.post(
                         "/settings/set", headers=settings_headers, json=seed_payload
@@ -983,51 +1202,54 @@ def test_package_contract_and_migrations_against_real_postgres(
                     )
                     assert seed_tick.status_code == 200, seed_tick.text
                     await _wait_group_idle(redis, "job_fired", CONSUMER_GROUP)
-                    seeded_list = await client.get(
-                        "/reminders", params={"user_ref": "opaque:seed-owner"}
-                    )
+                    seeded_list = await client.get("/reminders", headers=_as_user("seed-owner"))
                     assert len(seeded_list.json()) == 1
                     assert seeded_list.json()[0]["state"] == "emitted"
                     advanced_retry = await client.post(
                         "/settings/set", headers=settings_headers, json=seed_payload
                     )
                     assert advanced_retry.status_code == 200
-                    preserved = await client.get(
-                        "/reminders", params={"user_ref": "opaque:seed-owner"}
-                    )
+                    preserved = await client.get("/reminders", headers=_as_user("seed-owner"))
                     assert len(preserved.json()) == 1
                     assert preserved.json()[0]["state"] == "emitted"
 
                     # Isolate the existing manual HTTP/outbox proof from the seed event.
                     await redis.delete("reminders.due")
                     reader, subscriber = await _due_reader("main")
+                    anonymous = await client.post(
+                        "/reminders",
+                        json={"text": "no owner", "remind_at": "2040-01-01T00:00:00Z"},
+                    )
+                    assert anonymous.status_code == 401
                     created = await client.post(
                         "/reminders",
-                        json={
-                            "user_ref": "opaque:user/42",
-                            "text": "one-time text",
-                            "remind_at": "2040-01-01T00:00:00Z",
-                        },
+                        headers=_as_user("4242"),
+                        json={"text": "one-time text", "remind_at": "2040-01-01T00:00:00Z"},
                     )
                     assert created.status_code == 201, created.text
                     reminder = created.json()
-                    listed = await client.get(
-                        "/reminders", params={"user_ref": "opaque:user/42"}
-                    )
+                    assert reminder["user_ref"] == "telegram:4242"
+                    listed = await client.get("/reminders", headers=_as_user("4242"))
                     assert [item["id"] for item in listed.json()] == [reminder["id"]]
 
                     cancelled = await client.post(
                         "/reminders",
-                        json={
-                            "user_ref": "opaque:cancelled",
-                            "text": "never publish",
-                            "remind_at": "2040-01-01T00:00:00Z",
-                        },
+                        headers=_as_user("cancel-owner"),
+                        json={"text": "never publish", "remind_at": "2040-01-01T00:00:00Z"},
                     )
                     cancelled_id = cancelled.json()["id"]
+                    others = await client.get("/reminders", headers=_as_user("cancel-owner"))
+                    assert [item["id"] for item in others.json()] == [cancelled_id]
+                    foreign = await client.delete(
+                        f"/reminders/{cancelled_id}", headers=_as_user("4242")
+                    )
+                    assert foreign.status_code == 404
+                    foreign_owned = await client.delete(
+                        f"/reminders/{reminder['id']}", headers=_as_user("cancel-owner")
+                    )
+                    assert foreign_owned.status_code == 404
                     response = await client.delete(
-                        f"/reminders/{cancelled_id}",
-                        params={"user_ref": "opaque:cancelled"},
+                        f"/reminders/{cancelled_id}", headers=_as_user("cancel-owner")
                     )
                     assert response.status_code == 200
                     assert response.json()["state"] == "cancelled"
@@ -1064,7 +1286,7 @@ def test_package_contract_and_migrations_against_real_postgres(
                 assert delivery is not None
                 envelope = EventEnvelope[ReminderDue].model_validate(await delivery.decode())
                 assert str(envelope.payload.reminder_id) == reminder["id"]
-                assert envelope.payload.user_ref == "opaque:user/42"
+                assert envelope.payload.user_ref == "telegram:4242"
                 assert envelope.event_id == due_event_id(UUID(reminder["id"]))
                 assert await redis.xlen("reminders.due") == 1
                 await reader.stop()
@@ -1073,13 +1295,11 @@ def test_package_contract_and_migrations_against_real_postgres(
                 # transition commits but before publication. A new process handles
                 # the next tick against the same package schema and recovers the row.
                 async with AsyncClient(base_url="http://backend:8000") as client:
+                    await _grant(client, "restart-owner")
                     restart = await client.post(
                         "/reminders",
-                        json={
-                            "user_ref": "opaque:restart",
-                            "text": "survive restart",
-                            "remind_at": "2050-01-01T00:00:00Z",
-                        },
+                        headers=_as_user("restart-owner"),
+                        json={"text": "survive restart", "remind_at": "2050-01-01T00:00:00Z"},
                     )
                     assert restart.status_code == 201
                     restart_id = restart.json()["id"]
@@ -1158,10 +1378,11 @@ def test_package_contract_and_migrations_against_real_postgres(
                 async with AsyncClient(base_url="http://backend:8000") as client:
                     reminder_ids = []
                     for index in (1, 2):
+                        await _grant(client, f"concurrent-{index}")
                         created = await client.post(
                             "/reminders",
+                            headers=_as_user(f"concurrent-{index}"),
                             json={
-                                "user_ref": f"opaque:concurrent/{index}",
                                 "text": f"concurrent {index}",
                                 "remind_at": "2060-01-01T00:00:00Z",
                             },
