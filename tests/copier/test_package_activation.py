@@ -242,6 +242,45 @@ def test_generated_settings_seed_transaction_and_routing(
         product_manifest.write_text(original_product)
 
 
+def test_generated_core_timer_loop_fires_through_the_jobs_core(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    """Run the generated product's timer-loop tests beside its unchanged jobs-core tests."""
+
+    runtime_project, python = generated_backend_runtime
+    product_manifest = runtime_project / "services/backend/manifest.yaml"
+    original_product = product_manifest.read_text()
+    product = yaml.safe_load(original_product)
+    product["packages"] = ["synthetic"]
+    product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
+    try:
+        generated = subprocess.run(
+            [sys.executable, "-m", "framework.generate"],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert generated.returncode == 0, generated.stdout + generated.stderr
+        jobs = (runtime_project / "services/backend/src/generated/jobs_schemas.py").read_text()
+        assert "JOB_TIMERS: dict[str, int] = {}" in jobs
+        result = subprocess.run(
+            [
+                str(python),
+                "-m",
+                "pytest",
+                "-q",
+                "services/backend/tests/unit/test_job_timers.py",
+                "services/backend/tests/unit/test_jobs.py",
+            ],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        product_manifest.write_text(original_product)
+
+
 def test_generated_lifespan_cleans_up_partial_package_startup(
     generated_backend_runtime: tuple[Path, Path],
 ) -> None:
@@ -581,6 +620,27 @@ def test_runtime_activates_package_with_setting_fields_omitted(
         activated = runtime.discover_packages(["synthetic"])
 
         assert activated[0].manifest.setting_seeds == ()
+    finally:
+        installed_manifest.write_text(original)
+
+
+def test_runtime_activates_a_package_that_declares_timers(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Timers are read from the generated contract; activation only admits the field."""
+
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    installed_manifest = installed_synthetic / "synthetic_package/package.yaml"
+    original = installed_manifest.read_text()
+    try:
+        data = yaml.safe_load(original)
+        data["timers"] = [{"job": "refresh", "every_seconds": 60}]
+        installed_manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+
+        activated = runtime.discover_packages(["synthetic"])
+
+        assert [package.manifest.name for package in activated] == ["synthetic"]
+        assert runtime.CORE_VERSION == "2.1.0"
     finally:
         installed_manifest.write_text(original)
 

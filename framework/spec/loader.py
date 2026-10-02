@@ -52,6 +52,7 @@ class AllSpecs:
     settings_schema_sources: dict[str, str] = field(default_factory=dict)
     job_schemas: dict[str, object] = field(default_factory=dict)
     job_schema_sources: dict[str, str] = field(default_factory=dict)
+    job_timers: dict[str, int] = field(default_factory=dict)
 
 
 def load_yaml_file(file_path: Path) -> dict[str, Any]:
@@ -355,6 +356,10 @@ def _merge_package_names(
             else:
                 specs.job_schemas[name] = schema["properties"][local_name]
                 specs.job_schema_sources[name] = owner
+    for timer in package.manifest.timers:
+        name = f"{prefix}.{timer.job}"
+        if job_owners.get(name) == owner:
+            specs.job_timers[name] = timer.every_seconds
 
 
 def _validate_and_merge_packages(
@@ -369,6 +374,7 @@ def _validate_and_merge_packages(
     specs.settings_schema_sources = {}
     specs.job_schemas = {}
     specs.job_schema_sources = {}
+    specs.job_timers = {}
     for service, manifest in sorted(specs.manifests.items()):
         for name, schema in sorted(manifest.settings_schema["properties"].items()):
             if _claim_name("Setting", name, service, setting_owners, errors):

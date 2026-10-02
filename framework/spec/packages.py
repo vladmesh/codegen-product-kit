@@ -37,6 +37,15 @@ class UnimplementedDeploymentModeError(PackageManifestError):
     """The manifest declares a delivery form no generated product implements."""
 
 
+class InvalidPackageTimerError(PackageManifestError):
+    """A declared timer names an unfireable job or an unsupported interval."""
+
+
+TIMER_MIN_SECONDS = 10
+TIMER_MAX_SECONDS = 86_400
+TIMER_ARGUMENT = {"type": "string", "format": "date-time"}
+
+
 class HttpDeclaration(BaseModel):
     """HTTP routes contributed by a package."""
 
@@ -204,6 +213,41 @@ class SettingSeedDeclaration(BaseModel):
         return key
 
 
+class TimerDeclaration(BaseModel):
+    """One package job the kit core fires periodically with the slot instant as ``at``."""
+
+    job: str
+    every_seconds: int = Field(strict=True)
+    model_config = {"extra": "forbid"}
+
+
+def _validate_timers(timers: list[TimerDeclaration], jobs_schema: dict[str, Any]) -> None:
+    """Refuse a timer the core could not fire with ``{"at": <slot instant>}``."""
+
+    seen: set[str] = set()
+    for timer in timers:
+        if timer.job in seen:
+            raise InvalidPackageTimerError(f"timers declares job {timer.job!r} more than once")
+        seen.add(timer.job)
+        arguments = jobs_schema["properties"].get(timer.job)
+        if arguments is None:
+            raise InvalidPackageTimerError(
+                f"timer job {timer.job!r} is not declared by jobs_schema"
+            )
+        if not TIMER_MIN_SECONDS <= timer.every_seconds <= TIMER_MAX_SECONDS:
+            raise InvalidPackageTimerError(
+                f"timer job {timer.job!r} every_seconds {timer.every_seconds} is outside "
+                f"{TIMER_MIN_SECONDS}..{TIMER_MAX_SECONDS}"
+            )
+        if arguments.get("properties") != {"at": TIMER_ARGUMENT} or arguments.get("required") != [
+            "at"
+        ]:
+            raise InvalidPackageTimerError(
+                f"timer job {timer.job!r} arguments must be an object whose only property is "
+                "a required date-time 'at'"
+            )
+
+
 class PackageManifest(BaseModel):
     """Fail-closed declaration carried by a package distribution."""
 
@@ -220,6 +264,7 @@ class PackageManifest(BaseModel):
     settings_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
     setting_seeds: list[SettingSeedDeclaration] = Field(default_factory=list)
     jobs_schema: dict[str, Any] = Field(default_factory=empty_declaration_schema)
+    timers: list[TimerDeclaration] = Field(default_factory=list)
     deployment: DeploymentDeclaration = Field(default_factory=DeploymentDeclaration)
     environment: list[EnvironmentDeclaration] = Field(default_factory=list)
     resources: list[ResourceDeclaration] = Field(default_factory=list)
@@ -245,6 +290,7 @@ class PackageManifest(BaseModel):
                 raise ValueError(
                     f"setting_seeds key {seed.key!r} is not declared by settings_schema"
                 )
+        _validate_timers(self.timers, self.jobs_schema)
         return self
 
     @field_validator("settings_schema")
@@ -292,6 +338,10 @@ def parse_package_manifest(data: object) -> PackageManifest:
     try:
         return PackageManifest.model_validate(data)
     except ValidationError as error:
+        for item in error.errors():
+            named = item.get("ctx", {}).get("error")
+            if isinstance(named, PackageManifestError):
+                raise named from error
         if any(item["type"] == "extra_forbidden" for item in error.errors()):
             raise UnknownPackageManifestFieldError(
                 "package.yaml contains an unknown nested field"

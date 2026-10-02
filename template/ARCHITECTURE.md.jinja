@@ -34,9 +34,11 @@ secret values in the environment contract. `settings.set` requires the deploymen
 
 `services/<service>/manifest.yaml` also declares, under `jobs_schema`, the named behaviours that may
 be fired, each with the JSON Schema its `arguments` must satisfy. The backend exposes typed
-`jobs.fire` and `jobs.evidence` v1 operations. The core schedules nothing: it records a fire under
-the caller-supplied `(fired_by_product, command_id)` identity and emits `job_fired`, so an optional
-module that declares `provides: ["jobs.fire"]` does the work. Replaying an identity returns the
+`jobs.fire` and `jobs.evidence` v1 operations. A fire is recorded under the caller-supplied
+`(fired_by_product, command_id)` identity and emits `job_fired`, so an optional module that declares
+`provides: ["jobs.fire"]` does the work. The only schedule the core keeps is the timers declared by
+installed packages (generated `JOB_TIMERS`): the backend's one timer loop fires each such job once
+per slot through the same path, and a product without timers runs no loop. Replaying an identity returns the
 recorded evidence instead of firing again. `jobs.fire` requires the deployment-only
 `X-Jobs-Capability` header, which is intentionally not documented in OpenAPI; reading evidence back
 does not.

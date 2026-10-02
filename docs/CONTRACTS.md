@@ -42,7 +42,9 @@ revalidates that directory's manifest identity, distribution version, core compa
 database declaration, then returns the only supported capability for creating an independent ORM
 base or opening a schema-local transaction. An unowned caller, ambiguous installed ownership,
 missing database declaration, or changed identity fails before the backend session factory is
-imported. `publish_event()` uses the generated product transport. The unchanged wheel can therefore
+imported. `publish_event()` uses the generated product transport. Version `2.1.0` adds the optional
+`timers` manifest field, fired by the [core timer loop](#core-timer-loop); a package that declares
+timers requires `>=2.1`, and a package without them is unchanged. The unchanged wheel can therefore
 be installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
@@ -66,6 +68,7 @@ rejects unknown fields. Its fields are:
 | `deployment.modes` | Optional non-empty set of deployability declarations; `in_process` is the only accepted value and the default | Enforced; a declared `container` mode has `UnimplementedDeploymentModeError` |
 | `events.publishes`, `events.consumes`, `events.messages` | Package event names and inline Draft 2020-12 message schemas | Enforced and merged during generation |
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
+| `timers` | Optional `[{job, every_seconds}]`: local `jobs_schema` jobs the core fires once per period with the slot instant as `at` (core `2.1.0`) | Enforced at the manifest model; refusals have `InvalidPackageTimerError`; recorded in the generated `JOB_TIMERS` |
 | `setting_seeds` | Optional ordered `{key, scope: product}` bindings to package-owned local setting names | Enforced against `settings_schema`; duplicate, unknown-key, unsupported-scope, malformed, and unknown nested fields are refused |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
 | `resources` | Named distribution resource paths | Enforced as existing, non-traversing distribution resources |
@@ -125,7 +128,7 @@ live. The name must be a package of the catalog shipped with the installed tooli
 file must be that package's distribution. Its version is the caller's choice:
 
 ```bash
-kit add reminders --wheel /path/to/codegen_kit_reminders-0.3.0-py3-none-any.whl
+kit add reminders --wheel /path/to/codegen_kit_reminders-0.4.0-py3-none-any.whl
 ```
 
 On a main push, generated image CI repeats the committed installation boundary before generation:
@@ -261,8 +264,12 @@ product-owned Python or schema file is authored for the installation.
 
 The package supports only one-time text reminders for an opaque `user_ref` and an explicit
 timezone-aware instant. It performs no recurrence, snooze, media, calendar, or natural-language
-parsing. The core still schedules nothing. An external caller fires `reminders.tick` through
-`POST /jobs/fire` and supplies the evaluation instant as the declared `at` argument.
+parsing. From `0.4.0` the package declares `timers: [{job: tick, every_seconds: 60}]`, so the
+[core timer loop](#core-timer-loop) fires `reminders.tick` once a minute with the slot instant as
+`at`, and a due reminder is emitted in production without any external caller; `0.4.0` therefore
+requires core `>=2.1,<3`. An explicit caller, such as central QA, can still fire `reminders.tick`
+through `POST /jobs/fire` with its own `at`; both fires take the same path and the tick is
+idempotent over its rows. Products on core `2.0.0` keep `0.3.0`, which declares no timer.
 
 The package declares the non-empty product setting `reminders.reminder_owner_ref` and binds it to
 its setting seed. The first successful settings write inserts one reminder under a deterministic
@@ -312,6 +319,7 @@ packages:
       - {name: REDIS_URL, required: true, summary: What it is used for.}
     versions:
       - {version: 0.3.0, tag: packages/reminders/v0.3.0, requires_core: ">=2,<3"}
+      - {version: 0.4.0, tag: packages/reminders/v0.4.0, requires_core: ">=2.1,<3"}
 ```
 
 The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
@@ -353,6 +361,14 @@ Releasing a package version takes two steps:
    way. The catalog-to-source test fails if either side is left behind.
 2. After it merges, a PO release operation publishes the annotated tag `packages/<name>/v<version>`
    at that merge commit. Until then `kit add <name>` refuses the version as not published yet.
+
+A kit core tag and a package tag must never be on the same commit. Copier records the template
+revision in `.copier-answers.yml` `_commit` with `git describe --tags`, and the orchestrator's
+template smoke compares that value with its pinned kit core tag; a package tag on the core's commit
+can be the one `git describe` reports. When one pull request carries both a kit core release and a
+package release, the core tag goes on the merge commit and the package tag goes on the pull
+request's head commit, whose package path is byte-identical to the merge commit's (check with
+`git diff --quiet <head> <merge> -- <package path>` before tagging).
 
 Neither step creates a kit core tag or moves the orchestrator's kit pin
 (`scheduler.service_template_ref`): every product whose tooling has catalog `kit add` resolves the
@@ -456,10 +472,11 @@ Every backend generated from this template provides the versioned core jobs cont
 
 All four generated schemas — including the `JobFired` event message — carry
 `contract_version: 1`. A caller fires a *named* behaviour: it never names a module, a queue, a
-container or a transport. The core starts no timer and runs no loop. It validates the name and the
-arguments, records the command, and emits `job_fired`; whichever optional core-module declared that
-it provides `jobs.fire` subscribes to that event and does the work. A product with no scheduled
-behaviour and no provider therefore gains no container, no worker and no always-on process.
+container or a transport. The core validates the name and the arguments, records the command, and
+emits `job_fired`; whichever optional core-module declared that it provides `jobs.fire` subscribes
+to that event and does the work. The core's only schedule is the package-declared timers of the
+[core timer loop](#core-timer-loop), which run inside the backend process. A product with no timer
+and no provider therefore gains no container, no worker and no loop.
 
 ### Declared, never inferred
 
@@ -515,6 +532,64 @@ already consumed it, run the behaviour or completed it. An established provider 
 resume from its backlog after downtime.
 Whether the behaviour actually happened is asserted by central QA against the behaviour's own
 output, never inferred from dispatch evidence.
+
+### Core timer loop
+
+Core `2.1.0` owns one timer loop. It is the only schedule in the core and it fires only what an
+installed package declared; there is no platform cron, no per-product interval setting and no cron
+expression.
+
+**Protocol.** A package declares timers in `package.yaml`:
+
+```yaml
+timers:
+  - job: tick          # a local jobs_schema job; fired as <package>.tick
+    every_seconds: 60  # 10 <= every_seconds <= 86400
+```
+
+The manifest model (`framework.spec.packages.PackageManifest`) is the single validation place. It
+refuses, with `InvalidPackageTimerError`, a timer naming a job its `jobs_schema` does not declare, a
+job named by two timers, an interval outside 10 seconds to one day, and a job whose arguments schema
+is anything but an object whose only property is a required `at` of `{type: string, format:
+date-time}`. A non-integer interval or an unknown timer field is refused by the same model. A
+package without `timers` is unchanged. Generation records the active packages' timers as
+`JOB_TIMERS: dict[str, int]` (normalized job name to period) in
+`services/backend/src/generated/jobs_schemas.py`, next to `JOB_SCHEMAS`; the runtime reads that
+generated map and never package metadata. Runtime activation only admits the field, and the
+generated manifest digest already refuses a manifest changed since generation.
+
+**Loop.** The backend lifespan starts exactly one loop after every package `startup` and stops it
+before any package `shutdown`, and only when `JOB_TIMERS` is non-empty; a product with no package,
+or with packages but no timers, starts none. Each timer has a fixed grid of slots, the multiples of
+its period since the Unix epoch. On start and then at every slot boundary the loop fires each timer
+whose current slot it has not attempted, calling `JobsController.fire` in its own database session:
+the same argument validation, `job_commands` record, commit and `_emit_once` as `POST /jobs/fire`.
+The fire is:
+
+| Field | Value |
+|---|---|
+| `name` | the timer job, such as `reminders.tick` |
+| `arguments` | `{"at": "<slot instant, UTC, e.g. 2026-10-02T19:43:00Z>"}` |
+| `command_id` | `core-timer:<job>:<slot instant>`, deterministic per job and slot |
+| `fired_by_product` | the backend's `APP_NAME` |
+| `fired_by_run` | `core-timer`, so evidence shows the core timer fired it |
+
+**Dedup.** Because the identity is deterministic, a restart inside the same slot, or a second backend
+process (a replica or an overlapping deploy) firing the same slot, finds the recorded
+`(fired_by_product, command_id)` row and emits nothing new, exactly like a replayed `POST /jobs/fire`.
+Replicas must share `APP_NAME` for this; they already share the database.
+
+**Failures.** A fire that raises, for example on a database error, is logged as
+`core_timer_fire_failed` and the loop waits for the next slot; a fire whose `job_fired` could not be
+delivered is recorded `undelivered` and logged as `core_timer_fire_undelivered`. Neither stops the
+loop or the backend. A slot missed while the process was down, or one whose fire failed, is not
+replayed one by one: the next slot's later `at` covers it, because a timer job evaluates everything
+up to `at` (the reminders tick selects `remind_at <= at`). A timer job must therefore be written so
+that a later `at` subsumes an earlier one.
+
+**Growth.** Every slot that fires records one `job_commands` row, which the core never prunes:
+`86400 / every_seconds` rows per timer per day. Reminders `0.4.0` (60 seconds) adds 1,440 rows a day,
+about 525,600 a year; the 10-second minimum would add 8,640 a day.
 
 ### The capability
 

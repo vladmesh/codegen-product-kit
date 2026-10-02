@@ -97,6 +97,92 @@ def _write_acceptance_test(product: Path, *, subscriber: bool) -> None:
         body += """
 
         @pytest.mark.asyncio
+        async def test_core_timer_fires_due_reminder_without_jobs_fire() -> None:
+            # Runs before any explicit tick in this file: nothing here calls /jobs/fire.
+            from datetime import UTC, datetime, timedelta
+
+            from services.backend.src.generated.event_adapter import create_event_adapter
+            from services.backend.src.generated.jobs_schemas import JOB_TIMERS
+            from shared.generated.schemas import ReminderDue
+
+            assert JOB_TIMERS == {"reminders.tick": 60}
+            received: list[ReminderDue] = []
+            delivered = asyncio.Event()
+
+            class Controller:
+                async def receive_due(self, session, *, payload: ReminderDue) -> None:
+                    if payload.user_ref == "timer-user":
+                        received.append(payload)
+                        delivered.set()
+
+            class Session:
+                async def commit(self) -> None:
+                    pass
+
+                async def rollback(self) -> None:
+                    pass
+
+            @asynccontextmanager
+            async def get_session():
+                yield Session()
+
+            async def consume_once(session, consumer_group, event_id, effect):
+                await effect()
+                return True
+
+            broker = RedisBroker(os.environ["REDIS_URL"])
+            create_event_adapter(
+                broker,
+                get_session=get_session,
+                consume_once=consume_once,
+                get_reminders_consumer_controller=Controller,
+            )
+            await broker.start()
+            try:
+                async with AsyncClient(base_url="http://backend:8000") as client:
+                    remind_at = datetime.now(UTC) + timedelta(seconds=1)
+                    created = await client.post(
+                        "/reminders",
+                        json={
+                            "user_ref": "timer-user",
+                            "text": "fired by the core timer",
+                            "remind_at": remind_at.isoformat(),
+                        },
+                    )
+                    assert created.status_code == 201, created.text
+                    reminder = created.json()
+                    await asyncio.wait_for(delivered.wait(), timeout=150)
+                    for _ in range(50):
+                        listed = await client.get("/reminders", params={"user_ref": "timer-user"})
+                        if listed.json()[0]["state"] == "emitted":
+                            break
+                        await asyncio.sleep(0.2)
+                    view = listed.json()[0]
+                    assert view["state"] == "emitted"
+                    slot = datetime.fromisoformat(view["due_at"]).astimezone(UTC)
+                    assert slot.timestamp() % 60 == 0
+                    assert slot >= remind_at.replace(microsecond=0)
+                    evidence = await client.post(
+                        "/jobs/evidence",
+                        json={
+                            "command_id": "core-timer:reminders.tick:"
+                            + slot.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "fired_by_product": os.environ["APP_NAME"],
+                        },
+                    )
+                    assert evidence.status_code == 200, evidence.text
+                    assert evidence.json()["fired_by_run"] == "core-timer"
+                    assert evidence.json()["dispatch_status"] == "dispatched"
+                    assert evidence.json()["arguments"] == {
+                        "at": slot.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    }
+            finally:
+                await broker.stop()
+            # One logical notification: a redelivery would carry the same event identity.
+            assert {str(item.reminder_id) for item in received} == {reminder["id"]}
+
+
+        @pytest.mark.asyncio
         async def test_product_subscriber_receives_package_event() -> None:
             from services.backend.src.generated.event_adapter import create_event_adapter
             from shared.generated.schemas import ReminderDue

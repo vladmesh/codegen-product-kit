@@ -12,6 +12,7 @@ import yaml
 from framework.lint import package_imports
 from framework.spec.package_resolution import CORE_VERSION
 from framework.spec.packages import (
+    InvalidPackageTimerError,
     MalformedPackagePrefixError,
     MissingPackageIdentityError,
     UnimplementedDeploymentModeError,
@@ -56,7 +57,9 @@ def test_reminders_package_manifest_declares_only_the_implemented_deployment_mod
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
-    assert manifest.version == "0.3.0"
+    assert manifest.version == "0.4.0"
+    assert manifest.requires_core == ">=2.1,<3"
+    assert [(timer.job, timer.every_seconds) for timer in manifest.timers] == [("tick", 60)]
     assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]
     assert manifest.events.publishes == ["reminders.due"]
@@ -68,6 +71,87 @@ def test_reminders_package_manifest_declares_only_the_implemented_deployment_mod
         ("reminder_owner_ref", "product")
     ]
     assert [(item.name, item.required) for item in manifest.environment] == [("REDIS_URL", True)]
+
+
+def _with_timer_job(arguments: dict[str, object]) -> dict[str, object]:
+    data = yaml.safe_load(REMINDERS.read_text())
+    data["jobs_schema"]["properties"]["tick"] = {
+        "type": "object",
+        **arguments,
+        "additionalProperties": False,
+    }
+    return data
+
+
+AT = {"at": {"type": "string", "format": "date-time"}}
+
+
+@pytest.mark.parametrize(
+    ("timers", "arguments", "message"),
+    [
+        ([{"job": "tock", "every_seconds": 60}], None, "'tock' is not declared by jobs_schema"),
+        ([{"job": "tick", "every_seconds": 9}], None, "every_seconds 9 is outside 10..86400"),
+        ([{"job": "tick", "every_seconds": 86_401}], None, "is outside 10..86400"),
+        ([{"job": "tick", "every_seconds": 0}], None, "is outside 10..86400"),
+        (
+            [{"job": "tick", "every_seconds": 60}, {"job": "tick", "every_seconds": 120}],
+            None,
+            "declares job 'tick' more than once",
+        ),
+        (
+            [{"job": "tick", "every_seconds": 60}],
+            {"properties": AT},
+            "only property is a required date-time 'at'",
+        ),
+        (
+            [{"job": "tick", "every_seconds": 60}],
+            {"properties": {**AT, "limit": {"type": "integer"}}, "required": ["at"]},
+            "only property is a required date-time 'at'",
+        ),
+        (
+            [{"job": "tick", "every_seconds": 60}],
+            {"properties": {"at": {"type": "string"}}, "required": ["at"]},
+            "only property is a required date-time 'at'",
+        ),
+        (
+            [{"job": "tick", "every_seconds": 60}],
+            {"properties": {}, "required": []},
+            "only property is a required date-time 'at'",
+        ),
+    ],
+    ids=[
+        "undeclared-job",
+        "interval-too-short",
+        "interval-too-long",
+        "interval-zero",
+        "job-twice",
+        "at-optional",
+        "extra-argument",
+        "at-not-date-time",
+        "no-arguments",
+    ],
+)
+def test_package_timer_refusals_are_named_at_the_manifest_model(
+    timers: list[dict[str, object]], arguments: dict[str, object] | None, message: str
+) -> None:
+    data = (
+        yaml.safe_load(REMINDERS.read_text()) if arguments is None else _with_timer_job(arguments)
+    )
+    data["timers"] = timers
+
+    with pytest.raises(InvalidPackageTimerError, match=message):
+        parse_package_manifest(data)
+
+
+def test_package_timer_bounds_are_inclusive_and_timers_are_optional() -> None:
+    data = yaml.safe_load(REMINDERS.read_text())
+    for every_seconds in (10, 86_400):
+        data["timers"] = [{"job": "tick", "every_seconds": every_seconds}]
+        assert parse_package_manifest(data).timers[0].every_seconds == every_seconds
+    data.pop("timers")
+
+    assert parse_package_manifest(data).timers == []
+    assert load_package_manifest(FIXTURE).timers == []
 
 
 @pytest.mark.parametrize(

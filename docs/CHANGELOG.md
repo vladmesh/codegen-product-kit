@@ -2,6 +2,15 @@
 
 ## 2026-10-02
 
+- The kit core owns a timer loop. Package protocol v1 gains the optional `timers` manifest field
+  (`[{job, every_seconds}]`, 10 s to 1 day, job arguments exactly a required date-time `at`), refused
+  at the manifest model with `InvalidPackageTimerError`. Generation records active timers as
+  `JOB_TIMERS` in `jobs_schemas.py`; the backend lifespan starts one loop when it is non-empty and
+  fires each timer job once per slot through `JobsController.fire` with identity
+  `core-timer:<job>:<slot>` and `fired_by_run=core-timer`. The façade is `2.1.0`.
+  `codegen-kit-reminders` 0.4.0 declares a 60-second `tick` timer and requires core `>=2.1,<3`; the
+  catalog keeps 0.3.0 for core 2.0.0. See [Core timer loop](CONTRACTS.md#core-timer-loop) and the
+  [0.7.0 notes](releases/0.7.0.md).
 - Packages are released independently of the kit core. `packages/catalog.yaml` (format version 1,
   validated by `framework/catalog.py`) lists every package with its summary, capabilities, settings,
   environment and released versions; a release is the annotated tag `packages/<name>/v<version>`.

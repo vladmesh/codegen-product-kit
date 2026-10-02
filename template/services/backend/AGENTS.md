@@ -64,9 +64,13 @@ credential in environment variables, OpenAPI, logs, or LLM-facing data.
 `POST /jobs/fire` requires exactly one `X-Jobs-Capability` matching the generated
 `JOBS_FIRE_CAPABILITY`, and fires only a name declared under `jobs_schema`. The core records the
 command under its `(fired_by_product, command_id)` identity, commits it, and only then emits
-`job_fired` from a single place holding that row's lock; it never runs a timer or a loop, and it
-never resolves which module executes the behaviour. `POST /jobs/evidence`
-reads that evidence back and carries no capability. Never put this credential, or any secret, in a
+`job_fired` from a single place holding that row's lock; it never resolves which module executes
+the behaviour. The one loop the core runs is the timer loop in `src/app/timers.py`: the lifespan
+starts it only when the generated `JOB_TIMERS` (package-declared timers) is non-empty, and it fires
+each timer job once per slot through the same `JobsController.fire` with `{"at": <slot instant>}`,
+identity `core-timer:<job>:<slot>` and `fired_by_run="core-timer"`. A failed fire is logged and the
+loop goes on to the next slot. Do not add a second dispatch path or a scheduler beside it.
+`POST /jobs/evidence` reads that evidence back and carries no capability. Never put this credential, or any secret, in a
 URL, an event payload, an error body, or a log line.
 
 ## Database and migrations
