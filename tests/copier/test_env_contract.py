@@ -127,8 +127,10 @@ def test_backend_contract_classifies_infrastructure_values(project_backend: Path
         "USERS_GRANT_CAPABILITY",
         "SETTINGS_WRITE_CAPABILITY",
         "JOBS_FIRE_CAPABILITY",
+        "USER_IDENTITY_CAPABILITY",
     ):
         assert entries[key]["source"] == "generated_secret"
+    assert entries["USER_IDENTITY_CAPABILITY"]["consumers"] == ["backend"]
     assert entries["REDIS_URL"] == {
         "source": "literal",
         "environments": ["local", "production"],
@@ -161,6 +163,12 @@ def test_required_local_contract_values_are_present_for_documented_backend_start
     assert documented["USERS_GRANT_CAPABILITY"] == "local-grant-capability-not-for-production"
     assert documented["SETTINGS_WRITE_CAPABILITY"] == "local-settings-capability-not-for-production"
     assert documented["JOBS_FIRE_CAPABILITY"] == "local-jobs-capability-not-for-production"
+    assert documented["USER_IDENTITY_CAPABILITY"] == "local-identity-capability-not-for-production"
+    assert entries["USER_IDENTITY_CAPABILITY"]["source"] == "generated_secret"
+    assert entries["USER_IDENTITY_CAPABILITY"]["consumers"] == ["backend", "tg_bot"]
+    assert env_values(project_backend_tg_bot / ".env")["USER_IDENTITY_CAPABILITY"] == (
+        "local-identity-capability-not-for-production"
+    )
 
 
 @pytest.mark.parametrize(

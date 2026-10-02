@@ -6,6 +6,10 @@ from typing import Final
 
 TELEGRAM_CHANNEL: Final[str] = "telegram"
 ACTIVE_STATUS: Final[str] = "active"
+# The backend core accepts a user identity on package routes only through these headers.
+IDENTITY_CAPABILITY_HEADER: Final[str] = "X-Identity-Capability"
+USER_CHANNEL_HEADER: Final[str] = "X-User-Channel"
+USER_EXTERNAL_ID_HEADER: Final[str] = "X-User-External-Id"
 
 
 def telegram_external_id(telegram_id: int | None) -> str | None:

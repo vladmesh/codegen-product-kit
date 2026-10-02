@@ -1,24 +1,29 @@
-"""HTTP contract for one-time reminders."""
+"""HTTP contract for one-time reminders owned by the verified caller."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import AwareDatetime, BaseModel, Field
+from codegen_kit import caller_identity
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy import text as sql
 
 from codegen_kit_reminders.database import database
 
 router = APIRouter()
 
+# The owner is always the core-verified caller, never a value from the request.
+CallerRef = Annotated[str, Depends(caller_identity)]
+
 
 class ReminderCreate(BaseModel):
     """The deliberately small one-time reminder input."""
 
-    user_ref: str = Field(min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
     text: str = Field(min_length=1)
     remind_at: AwareDatetime
 
@@ -42,8 +47,8 @@ def _view(row: object) -> ReminderView:
 
 
 @router.post("", response_model=ReminderView, status_code=status.HTTP_201_CREATED)
-async def create_reminder(payload: ReminderCreate) -> ReminderView:
-    """Create one reminder at an explicit timezone-aware instant."""
+async def create_reminder(payload: ReminderCreate, user_ref: CallerRef) -> ReminderView:
+    """Create one reminder for the caller at an explicit timezone-aware instant."""
 
     reminder_id = uuid4()
     created_at = datetime.now(UTC)
@@ -58,7 +63,7 @@ async def create_reminder(payload: ReminderCreate) -> ReminderView:
                 ),
                 {
                     "id": reminder_id,
-                    "user_ref": payload.user_ref,
+                    "user_ref": user_ref,
                     "text": payload.text,
                     "remind_at": payload.remind_at,
                     "created_at": created_at,
@@ -69,8 +74,8 @@ async def create_reminder(payload: ReminderCreate) -> ReminderView:
 
 
 @router.get("", response_model=list[ReminderView])
-async def list_reminders(user_ref: str = Query(min_length=1)) -> list[ReminderView]:
-    """List one opaque user's reminders without interpreting its identifier."""
+async def list_reminders(user_ref: CallerRef) -> list[ReminderView]:
+    """List the caller's own reminders."""
 
     async with database.session() as session:
         rows = (
@@ -86,8 +91,11 @@ async def list_reminders(user_ref: str = Query(min_length=1)) -> list[ReminderVi
 
 
 @router.delete("/{reminder_id}", response_model=ReminderView)
-async def cancel_reminder(reminder_id: UUID, user_ref: str = Query(min_length=1)) -> ReminderView:
-    """Cancel a reminder only while it is still scheduled."""
+async def cancel_reminder(reminder_id: UUID, user_ref: CallerRef) -> ReminderView:
+    """Cancel the caller's own reminder only while it is still scheduled.
+
+    Another user's reminder answers 404, exactly like a missing one.
+    """
 
     async with database.session() as session:
         row = (

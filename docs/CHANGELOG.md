@@ -2,6 +2,16 @@
 
 ## 2026-10-02
 
+- The backend core establishes a verified caller identity for package routes. The `codegen_kit`
+  façade (still `2.1.0`, unreleased) exports the FastAPI dependency `caller_identity`: it requires
+  exactly one `X-Identity-Capability` equal to the new backend `generated_secret`
+  `USER_IDENTITY_CAPABILITY` (consumers `backend` and `tg_bot`), one `X-User-Channel` and one
+  `X-User-External-Id`, answering 401 otherwise; it resolves them in `user_channels`, answers 403 for
+  an unknown or inactive user, and yields `"<channel>:<external_id>"`. Reminders 0.4.0 routes depend
+  on it and accept no `user_ref` input; `DELETE /reminders/{id}` of another user's reminder is 404.
+  The stored `user_ref` and the `reminders.due` payload carry the canonical form. The generated
+  tg_bot sends the headers through `BackendClient.request_as_telegram_user`. See
+  [Core caller identity v1](CONTRACTS.md#core-caller-identity-v1).
 - The kit core owns a timer loop. Package protocol v1 gains the optional `timers` manifest field
   (`[{job, every_seconds}]`, 10 s to 1 day, job arguments exactly a required date-time `at`), refused
   at the manifest model with `InvalidPackageTimerError`. Generation records active timers as

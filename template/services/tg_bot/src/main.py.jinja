@@ -11,8 +11,11 @@ from datetime import UTC, datetime
 {% endif -%}
 import os
 import time
-from typing import Final
+from typing import {% if 'backend' in modules %}Any, {% endif %}Final
 
+{% if 'backend' in modules -%}
+import httpx
+{% endif -%}
 import structlog
 from telegram import Update
 from telegram.ext import (
@@ -24,7 +27,14 @@ from telegram.ext import (
     TypeHandler,
 )
 {% if 'backend' in modules %}
-from services.tg_bot.src.access import TELEGRAM_CHANNEL, is_active, telegram_external_id
+from services.tg_bot.src.access import (
+    IDENTITY_CAPABILITY_HEADER,
+    TELEGRAM_CHANNEL,
+    USER_CHANNEL_HEADER,
+    USER_EXTERNAL_ID_HEADER,
+    is_active,
+    telegram_external_id,
+)
 {% else -%}{{ '\n' }}{% endif -%}
 {% if 'backend' in modules -%}
 from shared.generated.events import get_broker, publish_command_received
@@ -52,6 +62,26 @@ class BackendClient(ServiceClient):
             "get", "/users/access", params={"channel": channel, "external_id": external_id}
         )
         return UserAccess.model_validate(resp.json())
+
+    async def request_as_telegram_user(
+        self, method: str, path: str, telegram_id: int | None, **kwargs: Any
+    ) -> httpx.Response:
+        """Call a backend package route as the given Telegram user.
+
+        Package routes act for the core-verified caller only, so every such call carries
+        the bot's caller-identity capability and the user's channel identity.
+        """
+
+        external_id = telegram_external_id(telegram_id)
+        if external_id is None:
+            raise ValueError("a package route call needs a valid Telegram user id")
+        headers = {
+            **kwargs.pop("headers", {}),
+            IDENTITY_CAPABILITY_HEADER: _identity_capability(),
+            USER_CHANNEL_HEADER: TELEGRAM_CHANNEL,
+            USER_EXTERNAL_ID_HEADER: external_id,
+        }
+        return await self._request(method, path, headers=headers, **kwargs)
 {% endif %}
 
 def _get_token() -> str:
@@ -71,6 +101,16 @@ def _uses_placeholder_token() -> bool:
 def _allows_placeholder_token() -> bool:
     return os.getenv(ALLOW_PLACEHOLDER_TOKEN_ENV) == "true"
 {% if 'backend' in modules %}
+
+def _identity_capability() -> str:
+    capability = os.getenv("USER_IDENTITY_CAPABILITY")
+    if not capability:
+        raise RuntimeError(
+            "USER_IDENTITY_CAPABILITY is not set; please add it to your environment "
+            "before calling backend package routes as a Telegram user."
+        )
+    return capability
+
 
 async def _has_active_access(telegram_id: int | None) -> bool:
     """Resolve the Telegram identity and accept only an active backend user."""

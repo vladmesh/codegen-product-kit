@@ -19,7 +19,7 @@ packages:
       - notify the product when a reminder is due
     settings:
       - name: reminder_owner_ref
-        summary: Opaque user reference that owns the first-deploy reminder seeded by the product.
+        summary: Owner of the seeded first-deploy reminder, in the canonical caller form telegram:<id>.
     environment:
       - name: REDIS_URL
         required: true

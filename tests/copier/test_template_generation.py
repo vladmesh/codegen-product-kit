@@ -531,6 +531,10 @@ class TestBackendWithTgBotGeneration:
             "SETTINGS_WRITE_CAPABILITY=local-settings-capability-not-for-production" in env_example
         )
         assert "JOBS_FIRE_CAPABILITY=local-jobs-capability-not-for-production" in env_example
+        assert "X-Identity-Capability" not in json.dumps(openapi)
+        assert (
+            "USER_IDENTITY_CAPABILITY=local-identity-capability-not-for-production" in env_example
+        )
         assert (backend / "src" / "generated" / "registry.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "users.py").is_file()
         assert (backend / "src" / "generated" / "routers" / "settings.py").is_file()

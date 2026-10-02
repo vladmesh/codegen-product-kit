@@ -73,6 +73,29 @@ loop goes on to the next slot. Do not add a second dispatch path or a scheduler 
 `POST /jobs/evidence` reads that evidence back and carries no capability. Never put this credential, or any secret, in a
 URL, an event payload, an error body, or a log line.
 
+### Caller identity on package routes
+
+A package route that acts for a user depends on `codegen_kit.caller_identity`
+(`src/app/caller_identity.py`); it is the only place a user identity is taken from a request. This
+is service-level trust inside the product: the trusted caller is an in-product service, the tg_bot,
+which presents exactly one `X-Identity-Capability` matching the generated
+`USER_IDENTITY_CAPABILITY` together with `X-User-Channel` and `X-User-External-Id` naming the user
+it acts for, taken from the real Telegram update. A request is not trusted because of where it
+comes from. The dependency compares the capability in constant time, validates the channel (no
+`:`, at most 64 characters) and external id (at most 256), resolves them in `user_channels` and
+requires the user to be `active`:
+
+- a missing, repeated, wrong or non-ASCII capability, or a missing, repeated, empty or malformed
+  channel or external id answers **401**;
+- an unknown identity or an inactive user answers **403**;
+- otherwise the route receives the canonical `user_ref`, `"<channel>:<external_id>"`, for example
+  `telegram:123456`.
+
+Never accept a user reference from a body, query or path on a package route, never add a second
+identity check beside the dependency, and never wrap the product's own routes in a global identity
+middleware. The identity headers stay out of OpenAPI, and the capability out of logs, URLs, event
+payloads and error bodies.
+
 ## Database and migrations
 
 `get_async_db()` owns commit, rollback, and close. Controllers must not call `session.commit()`,
