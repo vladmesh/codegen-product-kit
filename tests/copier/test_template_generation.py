@@ -537,28 +537,32 @@ class TestBackendWithTgBotGeneration:
         assert (backend / "src" / "generated" / "routers" / "jobs.py").is_file()
         assert (backend / "src" / "generated" / "jobs_schemas.py").is_file()
 
-    def test_the_jobs_core_adds_no_scheduler_container_worker_or_timer(
+    def test_the_jobs_core_adds_no_scheduler_container_worker_or_running_timer(
         self, project_backend: Path
     ) -> None:
-        """Firing is a recorded, event-emitting contract; scheduling is a provider's job."""
+        """Only package-declared timers run, inside the backend; a fresh product declares none."""
+        import runpy
+
         import yaml
 
         compose = yaml.safe_load((project_backend / "infra" / "compose.base.yml").read_text())
         services = yaml.safe_load((project_backend / "services.yml").read_text())["services"]
+        backend = project_backend / "services" / "backend"
         backend_source = "\n".join(
-            path.read_text()
-            for path in sorted((project_backend / "services" / "backend" / "src").rglob("*.py"))
+            path.read_text() for path in sorted((backend / "src").rglob("*.py"))
         )
-        manifest = yaml.safe_load(
-            (project_backend / "services" / "backend" / "manifest.yaml").read_text()
-        )
+        lifespan = (backend / "src" / "app" / "lifespan.py").read_text()
+        manifest = yaml.safe_load((backend / "manifest.yaml").read_text())
+        jobs = runpy.run_path(str(backend / "src" / "generated" / "jobs_schemas.py"))
 
         assert set(compose["services"]) == {"backend", "db", "redis"}
         assert [service["name"] for service in services] == ["backend"]
         assert "scheduler" not in backend_source
-        assert "while True" not in backend_source
-        assert "asyncio.sleep" not in backend_source
         assert "apscheduler" not in backend_source.lower()
+        # The one loop is the core timer, started from the generated timer contract only.
+        assert backend_source.count("while True") == 1
+        assert "start_timer_loop(JOB_TIMERS)" in lifespan
+        assert jobs["JOB_TIMERS"] == {}
         assert manifest["jobs_schema"]["properties"] == {}
         assert manifest["provides"] == []
         assert manifest["packages"] == []

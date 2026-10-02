@@ -11,6 +11,9 @@ may fire, mapped to the JSON Schema each fire's arguments must satisfy.
 JOB_CAPABILITY_PROVIDERS records which services declared that they provide a
 core capability. It is descriptive only: the core never resolves a provider,
 it emits the declared event and a subscriber does the work.
+JOB_TIMERS maps each package-declared timer job to its period in seconds. The
+backend's core timer loop fires it with the slot instant as ``at`` and starts
+no loop while it is empty.
 """
 
 from __future__ import annotations
@@ -20,3 +23,5 @@ JOB_SCHEMAS: dict[str, object] = {}
 JOB_SCHEMA_SOURCES: dict[str, str] = {}
 
 JOB_CAPABILITY_PROVIDERS: dict[str, list[str]] = {}
+
+JOB_TIMERS: dict[str, int] = {}

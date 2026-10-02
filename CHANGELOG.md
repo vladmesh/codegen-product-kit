@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `packages/<name>/v<version>`. `kit add <name>` resolves, builds and verifies a released package
   from the live catalog; `--wheel` installs an explicit artifact of any catalog package. Release
   procedure: [docs/CONTRACTS.md](docs/CONTRACTS.md#package-catalog-and-releases).
+- Core timer loop (`CORE_VERSION` 2.1.0): packages may declare `timers` in `package.yaml`, and the
+  backend fires each declared timer job once per slot through the existing jobs core, so
+  `codegen-kit-reminders` 0.4.0 emits due reminders without an external `POST /jobs/fire`.
+  Products without timers run no loop. Upgrade facts and the release-tag rule:
+  [0.7.0 release notes](docs/releases/0.7.0.md).
 
 ## [0.6.4] - 2026-09-29 (prepared, not published)
 

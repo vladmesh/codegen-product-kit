@@ -64,7 +64,8 @@ def test_catalog_lists_reminders_release_for_a_planner() -> None:
     assert reminders.distribution == "codegen-kit-reminders"
     assert reminders.path == "packages/codegen-kit-reminders"
     assert [(item.version, item.tag, item.requires_core) for item in reminders.versions] == [
-        ("0.3.0", "packages/reminders/v0.3.0", ">=2,<3")
+        ("0.3.0", "packages/reminders/v0.3.0", ">=2,<3"),
+        ("0.4.0", "packages/reminders/v0.4.0", ">=2.1,<3"),
     ]
     assert reminders.summary
     assert "remind me at a time" in reminders.capabilities
@@ -147,6 +148,13 @@ def test_selection_takes_newest_version_admitting_the_core() -> None:
         reminders.select("1.0.0")
 
 
+def test_core_2_0_keeps_reminders_0_3_0_and_core_2_1_takes_the_timer_release() -> None:
+    reminders = load_catalog(CATALOG).get("reminders")
+
+    assert reminders.select("2.0.0").version == "0.3.0"
+    assert reminders.select("2.1.0").version == "0.4.0"
+
+
 # --- the catalog tied to package sources at HEAD -------------------------------------------
 
 
@@ -217,26 +225,45 @@ def _tag(repository: Path, tag: str) -> None:
     )
 
 
-@pytest.fixture
-def kit_source(tmp_path: Path) -> Path:
-    """A local kit repository: this catalog plus the reminders source tagged at 0.3.0."""
+def _reminders_source(package: Path, *, previous_release: bool) -> None:
+    """Write the HEAD reminders source, or its 0.3.0 form: no timer, core 2.0 admitted."""
 
-    repository = tmp_path / "kit-source"
-    package = repository / "packages/codegen-kit-reminders"
+    shutil.rmtree(package, ignore_errors=True)
     shutil.copytree(
         KIT_ROOT / "packages/codegen-kit-reminders",
         package,
         ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"),
     )
-    shutil.copy2(CATALOG, repository / "packages/catalog.yaml")
     (package / "_build").mkdir()
     shutil.copy2(OFFLINE_BACKEND, package / "_build/offline_backend.py")
     project = package / "pyproject.toml"
     assert HATCH_BUILD_SYSTEM in project.read_text()
     project.write_text(project.read_text().replace(HATCH_BUILD_SYSTEM, OFFLINE_BUILD_SYSTEM))
+    if not previous_release:
+        return
+    project.write_text(project.read_text().replace('version = "0.4.0"', 'version = "0.3.0"'))
+    manifest_path = package / "codegen_kit_reminders/package.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest.update(version="0.3.0", requires_core=">=2,<3")
+    del manifest["timers"]
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+
+
+@pytest.fixture
+def kit_source(tmp_path: Path) -> Path:
+    """A local kit repository: this catalog, reminders tagged at 0.3.0 and then at 0.4.0."""
+
+    repository = tmp_path / "kit-source"
+    package = repository / "packages/codegen-kit-reminders"
+    (repository / "packages").mkdir(parents=True)
+    shutil.copy2(CATALOG, repository / "packages/catalog.yaml")
+    _reminders_source(package, previous_release=True)
     _git("init", "--quiet", "--initial-branch=main", cwd=repository)
     _commit(repository, "Kit with reminders 0.3.0")
     _tag(repository, "packages/reminders/v0.3.0")
+    _reminders_source(package, previous_release=False)
+    _commit(repository, "Kit with reminders 0.4.0")
+    _tag(repository, "packages/reminders/v0.4.0")
     return repository
 
 
@@ -329,7 +356,7 @@ def test_kit_add_resolves_the_catalog_and_installs_the_released_tag(
         str(product),
     )
 
-    wheel = "codegen_kit_reminders-0.3.0-py3-none-any.whl"
+    wheel = "codegen_kit_reminders-0.4.0-py3-none-any.whl"
     assert (product / "services/backend/packages" / wheel).is_file()
     assert commands == [
         [
@@ -349,6 +376,34 @@ def test_kit_add_resolves_the_catalog_and_installs_the_released_tag(
     assert yaml.safe_load((product / "services/backend/manifest.yaml").read_text())["packages"] == [
         "reminders"
     ]
+    [active] = _active_packages(product)
+    assert (active["name"], active["version"]) == ("reminders", "0.4.0")
+    assert "kit: installed reminders 0.4.0 (packages/reminders/v0.4.0)" in capsys.readouterr().out
+
+
+def test_kit_add_on_core_2_0_installs_the_kept_0_3_0_release(
+    kit_source: Path,
+    product: Path,
+    backend_site: tuple[Path, list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "CORE_VERSION", "2.0.0")
+    monkeypatch.setattr("framework.spec.package_resolution.CORE_VERSION", "2.0.0")
+
+    _kit(
+        monkeypatch,
+        "add",
+        "reminders",
+        "--catalog-source",
+        str(kit_source),
+        "--product-root",
+        str(product),
+    )
+
+    assert (
+        product / "services/backend/packages/codegen_kit_reminders-0.3.0-py3-none-any.whl"
+    ).is_file()
     [active] = _active_packages(product)
     assert (active["name"], active["version"]) == ("reminders", "0.3.0")
     assert "kit: installed reminders 0.3.0 (packages/reminders/v0.3.0)" in capsys.readouterr().out
@@ -373,7 +428,7 @@ def test_catalog_source_and_ref_come_from_the_environment(
     _kit(monkeypatch, "add", "reminders", "--product-root", str(product))
 
     [active] = _active_packages(product)
-    assert active["version"] == "0.3.0"
+    assert active["version"] == "0.4.0"
 
 
 Change = Callable[[Path, pytest.MonkeyPatch], None]
@@ -388,7 +443,7 @@ def _future_core(_kit_source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _unpublish(kit_source: Path, _monkeypatch: pytest.MonkeyPatch) -> None:
-    _git("tag", "--delete", "packages/reminders/v0.3.0", cwd=kit_source)
+    _git("tag", "--delete", "packages/reminders/v0.4.0", cwd=kit_source)
 
 
 def _retag_with_project(old: str, new: str) -> Change:
@@ -397,7 +452,7 @@ def _retag_with_project(old: str, new: str) -> Change:
         assert old in project.read_text()
         project.write_text(project.read_text().replace(old, new))
         _commit(kit_source, f"Tagged source declares {new}")
-        _tag(kit_source, "packages/reminders/v0.3.0")
+        _tag(kit_source, "packages/reminders/v0.4.0")
 
     return change
 
@@ -416,18 +471,19 @@ def _retag_with_project(old: str, new: str) -> Change:
             [
                 "IncompatibleCatalogVersionError",
                 "0.3.0 requires core >=2,<3",
+                "0.4.0 requires core >=2.1,<3",
                 "compatible with core 9.0.0",
             ],
         ),
         (
             "reminders",
             _unpublish,
-            ["PackageNotPublishedError", "0.3.0 is not published yet", "v0.3.0 does not exist"],
+            ["PackageNotPublishedError", "0.4.0 is not published yet", "v0.4.0 does not exist"],
         ),
         (
             "reminders",
-            _retag_with_project('version = "0.3.0"', 'version = "0.3.1"'),
-            ["PackageWheelMismatchError", "version '0.3.1' is not catalog version '0.3.0'"],
+            _retag_with_project('version = "0.4.0"', 'version = "0.4.1"'),
+            ["PackageWheelMismatchError", "version '0.4.1' is not catalog version '0.4.0'"],
         ),
         (
             "reminders",

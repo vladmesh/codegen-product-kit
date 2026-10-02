@@ -57,11 +57,19 @@ are neither environment-backed product settings nor part of generated OpenAPI.
 
 ## Core jobs
 
-Generated backends provide `jobs.fire` and `jobs.evidence` through typed v1 REST contracts. The core
-schedules nothing: `jobs.fire` validates a manifest-declared name and its arguments, records the
-command under the caller-supplied `(fired_by_product, command_id)` identity, and emits `job_fired`
-for whichever optional module declared that it provides `jobs.fire`. Storage uniqueness on that
-identity makes a replay return the recorded evidence instead of executing again. `jobs.fire` is
+Generated backends provide `jobs.fire` and `jobs.evidence` through typed v1 REST contracts.
+`jobs.fire` validates a manifest-declared name and its arguments, records the command under the
+caller-supplied `(fired_by_product, command_id)` identity, and emits `job_fired` for whichever
+optional module declared that it provides `jobs.fire`. Storage uniqueness on that identity makes a
+replay return the recorded evidence instead of executing again.
+
+The core keeps exactly one schedule: the timers that installed packages declare in `package.yaml`.
+Generation records them as `JOB_TIMERS` next to the job registry, and the backend lifespan starts one
+timer loop when that map is non-empty. Each period the loop fires each timer job with
+`{"at": <slot instant>}` through the same record-then-emit path as `POST /jobs/fire`, under the
+deterministic identity `core-timer:<job>:<slot>`, so a restart or a second backend process firing
+the same slot dedups on the existing key. A product without package timers runs no loop. See
+[Core timer loop](CONTRACTS.md#core-timer-loop). `jobs.fire` is
 protected by one generated fire capability; `jobs.evidence` is not, and neither the capability nor
 any secret appears in generated OpenAPI, event payloads or error bodies.
 

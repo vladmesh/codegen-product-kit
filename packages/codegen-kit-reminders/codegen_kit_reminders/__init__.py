@@ -15,7 +15,7 @@ FIRST_DEPLOY_REMIND_AT = datetime(2000, 1, 1, tzinfo=UTC)
 
 
 class RemindersPackage:
-    """Mount reminder routes and consume externally fired ticks."""
+    """Mount reminder routes and consume ticks fired by the core timer or a caller."""
 
     router = router
 

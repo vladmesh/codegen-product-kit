@@ -1,10 +1,15 @@
 """Implementation of the versioned, manifest-backed core jobs contract.
 
-The core never schedules: it starts no timer and runs no loop. It accepts a fire of a
-name the product declared, records the command under the caller's identity, and emits
-``job_fired``. Whichever optional module declared that it provides ``jobs.fire``
-subscribes to that event and does the work, so a caller never names a module, a queue,
-a container or a transport.
+It accepts a fire of a name the product declared, records the command under the
+caller's identity, and emits ``job_fired``. Whichever optional module declared that it
+provides ``jobs.fire`` subscribes to that event and does the work, so a caller never
+names a module, a queue, a container or a transport.
+
+The only schedule the core keeps is the package-declared timers of the generated
+``JOB_TIMERS``: ``services.backend.src.app.timers`` fires each of them once per slot
+through this same ``fire`` with ``{"at": <slot instant>}``, under the deterministic
+identity ``core-timer:<job>:<slot>`` and ``fired_by_run="core-timer"``. A product that
+declares no timer starts no loop. Nothing else here starts a timer.
 """
 
 from __future__ import annotations
