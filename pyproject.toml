@@ -31,3 +31,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["framework"]
+
+# The tooling's own catalog copy checks `kit add --wheel` names; `kit add <name>` reads it live.
+[tool.hatch.build.targets.wheel.force-include]
+"packages/catalog.yaml" = "framework/package_catalog.yaml"

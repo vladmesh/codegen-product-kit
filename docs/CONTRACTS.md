@@ -105,17 +105,28 @@ packages:
   - weather
 ```
 
-For the bundled reminders package, one tooling command performs every product mutation after the
-wheel has been built:
+For a kit package listed in the [package catalog](#package-catalog-and-releases), one tooling
+command resolves the released package and performs every product mutation:
+
+```bash
+kit add reminders
+```
+
+It reads the catalog live from the kit repository, picks the newest released version whose
+`requires_core` admits the product's core, fetches that version's package tag, builds the wheel
+with `uv build`, and refuses the wheel unless its distribution, version and entry point equal the
+catalog entry. It then copies that exact artifact under `services/backend/packages/`, adds the
+backend dependency and lock entry, adds the package name to the manifest allowlist, synchronizes the
+backend environment, and regenerates the active-package contract. The committed wheel stays the
+product's installation boundary, so generated CI is unchanged.
+
+An already built artifact is installed explicitly with `--wheel`; the catalog is then not read
+live. The name must be a package of the catalog shipped with the installed tooling, and the wheel
+file must be that package's distribution. Its version is the caller's choice:
 
 ```bash
 kit add reminders --wheel /path/to/codegen_kit_reminders-0.3.0-py3-none-any.whl
 ```
-
-It copies that exact artifact under `services/backend/packages/`, adds the backend dependency and
-lock entry, adds `reminders` to the manifest allowlist, synchronizes the backend environment, and
-regenerates the active-package contract. The command deliberately accepts an artifact path rather
-than resolving a catalog; package publication and catalog resolution are outside protocol v1.
 
 On a main push, generated image CI repeats the committed installation boundary before generation:
 it performs a frozen root tooling sync followed by a frozen `services/backend` sync, then runs
@@ -281,6 +292,72 @@ exactly one outbox row per reminder, so a reminder never acquires a second logic
 generated downstream consumer's transactional `(consumer_group, event_id)` guard collapses entries
 carrying the stable UUID to one logical effect. External effects outside that transaction still need
 their own idempotency boundary.
+
+### Package catalog and releases
+
+A kit package is versioned and released independently of the kit core. `packages/catalog.yaml`
+lists every package and its released versions; `framework/catalog.py` is its only loader:
+
+```yaml
+format_version: 1
+packages:
+  - name: reminders                       # entry point name and package.yaml name
+    distribution: codegen-kit-reminders   # pyproject project.name
+    path: packages/codegen-kit-reminders  # package source in this repository
+    summary: One line on what the package does.
+    capabilities: [remind me at a time]   # user-language phrases a planner matches a brief to
+    settings:                             # package settings_schema properties
+      - {name: reminder_owner_ref, summary: What the product supplies.}
+    environment:                          # package.yaml environment
+      - {name: REDIS_URL, required: true, summary: What it is used for.}
+    versions:
+      - {version: 0.3.0, tag: packages/reminders/v0.3.0, requires_core: ">=2,<3"}
+```
+
+The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
+(`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
+`packages/<name>/v<version>` (`InvalidCatalogEntryError`), a repeated package name
+(`DuplicateCatalogPackageError`), a repeated version (`DuplicateCatalogVersionError`), and a
+version that is not canonical PEP 440 (`InvalidCatalogVersionError`). A kit test ties the newest
+catalog version of every package to its `pyproject.toml` and `package.yaml` at HEAD: distribution,
+name, version, `requires_core`, settings names and environment names must agree.
+
+Products receive the tooling from Git at the kit core ref they were generated from, so a catalog
+inside that tooling is frozen at the product's pin. `kit add <name>` therefore reads
+`packages/catalog.yaml` live, by default from `https://github.com/vladmesh/codegen-product-kit.git`
+at the remote's default branch (`HEAD`). `--catalog-source` or `KIT_CATALOG_SOURCE`, and
+`--catalog-ref` or `KIT_CATALOG_REF`, point it at another Git repository or ref, such as a stand
+mirror or a local test repository. The packages and versions it can resolve are those of the live
+catalog; the product's core only filters versions by `requires_core`.
+
+`kit add <name>` refuses with a non-zero exit, before any product file changes, when the name is
+not in the catalog (`UnknownPackageError`, listing the known names), when no version admits the
+product's core (`IncompatibleCatalogVersionError`, naming each version's requirement and the core
+version), when the catalog source or ref cannot be fetched (`CatalogSourceUnreachableError`), when
+the chosen version's tag does not exist at the source (`PackageNotPublishedError`, "not published
+yet"), when the build fails (`PackageBuildError`), and when the built wheel's distribution, version
+or entry point differs from the catalog (`PackageWheelMismatchError`). The product's manifest,
+pyproject, lock and `services/backend/packages/` are untouched by any of these refusals.
+
+A package release tag is the annotated tag `packages/<name>/v<version>` at the commit whose package
+sources declare that version. It is not a PEP 440 version, so it can never be read as a kit core
+version: Copier's latest-tag selection and its template version both skip it. Copier may still
+record it in `_commit` as a `git describe` string such as `packages/reminders/v0.3.0-2-g1a2b3c4`,
+which Git resolves to the exact commit.
+
+Releasing a package version takes two steps:
+
+1. One reviewed pull request bumps the version in the package's `pyproject.toml` and `package.yaml`
+   (and `requires_core` when it changes) and appends the matching entry under the package's
+   `versions` in `packages/catalog.yaml`. Adding a new package adds its whole catalog entry the same
+   way. The catalog-to-source test fails if either side is left behind.
+2. After it merges, a PO release operation publishes the annotated tag `packages/<name>/v<version>`
+   at that merge commit. Until then `kit add <name>` refuses the version as not published yet.
+
+Neither step creates a kit core tag or moves the orchestrator's kit pin
+(`scheduler.service_template_ref`): every product whose tooling has catalog `kit add` resolves the
+new version from the live catalog. Tooling at kit core `0.6.4` and earlier has only the `--wheel`
+form; catalog resolution reaches products from the first kit core release that contains it. A published package tag is never moved or replaced; a fix is a new version.
 
 ## Core settings v1
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Package catalog `packages/catalog.yaml` with independent package releases tagged
+  `packages/<name>/v<version>`. `kit add <name>` resolves, builds and verifies a released package
+  from the live catalog; `--wheel` installs an explicit artifact of any catalog package. Release
+  procedure: [docs/CONTRACTS.md](docs/CONTRACTS.md#package-catalog-and-releases).
+
 ## [0.6.4] - 2026-09-29 (prepared, not published)
 
 ### Fixed
