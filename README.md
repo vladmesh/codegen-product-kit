@@ -23,8 +23,9 @@ The future component vocabulary is:
 - **package** — code imported and executed inside a product process;
 - **component** — the common term for all three.
 
-This repository implements an in-process package runtime, but not a component catalog or automatic
-composition across component types. The current `modules` Copier option selects only the two
+This repository implements an in-process package runtime and a package catalog
+(`packages/catalog.yaml`) from which `kit add <name>` installs released packages, but not a catalog
+of services or containers or automatic composition across component types. The current `modules` Copier option selects only the two
 built-in application shapes above.
 
 ## Generate a project

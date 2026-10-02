@@ -1,0 +1,30 @@
+# Package catalog: every kit package and its released versions.
+#
+# `kit add <name>` reads this file live from the kit repository's default branch, so a new
+# package release needs no kit core tag. Format and release procedure: docs/CONTRACTS.md,
+# "Package catalog and releases". A release PR bumps the package version and appends its
+# entry under `versions`; the annotated tag `packages/<name>/v<version>` is published at the
+# merge commit by a separate PO operation.
+format_version: 1
+packages:
+  - name: reminders
+    distribution: codegen-kit-reminders
+    path: packages/codegen-kit-reminders
+    summary: One-time text reminders that a product user schedules, lists and cancels.
+    capabilities:
+      - remind me at a time
+      - schedule a one-time text reminder
+      - list my upcoming reminders
+      - cancel a reminder
+      - notify the product when a reminder is due
+    settings:
+      - name: reminder_owner_ref
+        summary: Opaque user reference that owns the first-deploy reminder seeded by the product.
+    environment:
+      - name: REDIS_URL
+        required: true
+        summary: Redis broker that delivers job_fired and publishes reminders.due.
+    versions:
+      - version: 0.3.0
+        tag: packages/reminders/v0.3.0
+        requires_core: ">=2,<3"

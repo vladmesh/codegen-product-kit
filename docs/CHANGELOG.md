@@ -1,5 +1,15 @@
 # Contract changelog
 
+## 2026-10-02
+
+- Packages are released independently of the kit core. `packages/catalog.yaml` (format version 1,
+  validated by `framework/catalog.py`) lists every package with its summary, capabilities, settings,
+  environment and released versions; a release is the annotated tag `packages/<name>/v<version>`.
+  `kit add <name>` without `--wheel` reads the catalog live, picks the newest version admitting the
+  product core, builds the tagged source with `uv build`, verifies the wheel against the catalog and
+  runs the existing install. `kit add <name> --wheel` accepts any package of the tooling's catalog.
+  See [Package catalog and releases](CONTRACTS.md#package-catalog-and-releases).
+
 ## 2026-09-08
 
 - Generated main-push image jobs now run the root frozen tooling sync and the backend frozen runtime
