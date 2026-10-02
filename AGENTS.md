@@ -86,8 +86,9 @@ Agents should interact with the system primarily through `make`.
 
 - **Verify:** `make lint && make test` (framework unit + tooling); `make test-copier` for the
   generation matrix (slow, CI runs it).
-- **Broad check under Secretary (one canonical form):**
-  `python3 -m secretary check broad --reuse --module pytest --module-arg tests/unit --module-arg tests/tooling --module-arg tests/copier --module-arg=-m --module-arg "not slow"`
+- **Broad check under Ummanu (one canonical form; run it exactly as the Ummanu worker packet
+  prints it):**
+  `ummanu check broad --reuse --module pytest --module-arg tests/unit --module-arg tests/tooling --module-arg tests/copier --module-arg=-m --module-arg "not slow"`
   — `make test` plus the non-slow copier generation tests (~3 min): a change under `template/` is
   only exercised by the copier layer, so the framework suite alone proves nothing about it.
   Order: focused tests while editing → this broad check once, after the last edit, on the dirty
