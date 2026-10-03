@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 import importlib
 from importlib import metadata
 import os
@@ -24,6 +25,8 @@ from framework.lint.package_imports import lint_installed_packages
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
 KIT_ROOT = Path(__file__).parents[2]
 REMINDERS = KIT_ROOT / "packages/codegen-kit-reminders"
+# A reserved TLD never resolves: a package runtime that reaches for Redis fails fast.
+UNREACHABLE_REDIS_URL = "redis://redis.invalid:6379"
 LINT_LAYOUT_FIXTURES = (
     Path(__file__).parents[1] / "fixtures/synthetic_single_module",
     Path(__file__).parents[1] / "fixtures/synthetic_missing_module",
@@ -432,20 +435,17 @@ REMINDERS_CALLER_IDENTITY_TEST = textwrap.dedent(
 )
 
 
-def test_generated_reminders_routes_act_only_for_the_verified_caller(
-    generated_backend_runtime: tuple[Path, Path],
-) -> None:
-    """The installed reminders routes take their owner from the core caller identity."""
+@contextmanager
+def _reminders_activated(runtime_project: Path, python: Path) -> Iterator[None]:
+    """Install the real reminders source and list it in the shared generated runtime."""
 
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("uv is required to install the reminders package")
-    runtime_project, python = generated_backend_runtime
     product_manifest = runtime_project / "services/backend/manifest.yaml"
     original_product = product_manifest.read_text()
     product = yaml.safe_load(original_product)
     product["packages"] = ["synthetic", "reminders"]
-    product_test = runtime_project / "services/backend/tests/unit/test_reminders_identity.py"
     installed = subprocess.run(
         [uv, "pip", "install", "--python", str(python), str(REMINDERS)],
         capture_output=True,
@@ -461,17 +461,8 @@ def test_generated_reminders_routes_act_only_for_the_verified_caller(
             text=True,
         )  # noqa: S603
         assert generated.returncode == 0, generated.stdout + generated.stderr
-        product_test.write_text(REMINDERS_CALLER_IDENTITY_TEST)
-        result = subprocess.run(
-            [str(python), "-m", "pytest", "-q", str(product_test.relative_to(runtime_project))],
-            cwd=runtime_project,
-            capture_output=True,
-            text=True,
-        )  # noqa: S603
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "3 passed" in result.stdout
+        yield
     finally:
-        product_test.unlink(missing_ok=True)
         product_manifest.write_text(original_product)
         # Other tests in this module share the runtime and list only the synthetic package.
         subprocess.run(
@@ -479,6 +470,52 @@ def test_generated_reminders_routes_act_only_for_the_verified_caller(
             capture_output=True,
             text=True,
         )  # noqa: S603
+
+
+def test_generated_reminders_routes_act_only_for_the_verified_caller(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    """The installed reminders routes take their owner from the core caller identity."""
+
+    runtime_project, python = generated_backend_runtime
+    product_test = runtime_project / "services/backend/tests/unit/test_reminders_identity.py"
+    with _reminders_activated(runtime_project, python):
+        product_test.write_text(REMINDERS_CALLER_IDENTITY_TEST)
+        try:
+            result = subprocess.run(
+                [str(python), "-m", "pytest", "-q", str(product_test.relative_to(runtime_project))],
+                cwd=runtime_project,
+                capture_output=True,
+                text=True,
+            )  # noqa: S603
+        finally:
+            product_test.unlink(missing_ok=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "3 passed" in result.stdout
+
+
+def test_generated_backend_unit_tests_pass_with_reminders_and_no_redis(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    """The product's own backend unit leg starts no package runtime, so needs no Redis.
+
+    Kit 0.7.0's lifespan tests started the real reminders consumer, which failed on
+    the product CI's unit leg; the slow two-product test repeats this through
+    ``kit add`` and ``make tests``.
+    """
+
+    runtime_project, python = generated_backend_runtime
+    environment = {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
+    environment["REDIS_URL"] = UNREACHABLE_REDIS_URL
+    with _reminders_activated(runtime_project, python):
+        result = subprocess.run(
+            [str(python), "-m", "pytest", "-q", "services/backend/tests/unit"],
+            cwd=runtime_project,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )  # noqa: S603
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_generated_lifespan_cleans_up_partial_package_startup(

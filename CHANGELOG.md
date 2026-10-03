@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-03 (prepared, not published)
+
+### Fixed
+
+- A generated product that installs a package (`kit add reminders`) passes its own unit-test leg
+  (`make tests`) without Redis again. The backend's two lifespan tests in `test_job_timers.py`
+  started every active package's real runtime, and reminders' consumer failed with a Redis
+  `ConnectionError`; they now replace package startup and shutdown with recording no-ops and still
+  assert the startup, timer-loop and shutdown order and the loop count. `CORE_VERSION` stays 2.1.0
+  and no package release is needed. Upgrade facts: [0.7.1 release notes](docs/releases/0.7.1.md).
+
+## [0.7.0] - 2026-10-02
+
 ### Added
 
 - Package catalog `packages/catalog.yaml` with independent package releases tagged

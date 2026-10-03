@@ -1,5 +1,11 @@
 # Contract changelog
 
+## 2026-10-03
+
+- No contract change. Kit 0.7.1 fixes the generated backend's lifespan unit tests, which started
+  installed packages' real runtimes and so needed Redis; the façade stays `2.1.0` and package
+  protocol v1 is unchanged. See the [0.7.1 notes](releases/0.7.1.md).
+
 ## 2026-10-02
 
 - The backend core establishes a verified caller identity for package routes. The `codegen_kit`
