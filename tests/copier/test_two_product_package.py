@@ -16,6 +16,8 @@ from tests.copier.conftest import run_copier
 
 KIT_ROOT = Path(__file__).parents[2]
 REMINDERS = KIT_ROOT / "packages/codegen-kit-reminders"
+# A reserved TLD never resolves: a package runtime that reaches for Redis fails fast.
+UNREACHABLE_REDIS_URL = "redis://redis.invalid:6379"
 
 
 def _run(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
@@ -456,6 +458,35 @@ def test_two_products_install_one_unchanged_wheel_without_authored_source(
     assert not any(
         path.startswith("services/backend/src/app/") or "/controllers/" in path for path in paths
     )
+
+
+@pytest.mark.slow
+def test_product_with_installed_reminders_passes_its_unit_leg_without_redis(
+    two_products: tuple[Path, Path, Path, Path],
+) -> None:
+    """Run product B's CI "Run tests" step with reminders installed and no Redis.
+
+    Kit 0.7.0's lifespan unit tests started the real reminders consumer, which failed
+    with a Redis ConnectionError on the product CI's unit leg.
+    """
+    _, product_b, _, _ = two_products
+    workflow = yaml.safe_load((product_b / ".github/workflows/ci.yml").read_text())
+    steps = {step.get("name"): step for step in workflow["jobs"]["lint-and-test"]["steps"]}
+    assert steps["Prepare environment files"]["run"].splitlines()[0] == "cp .env.example .env"
+    assert steps["Run tests"]["run"] == "make tests"
+
+    dotenv = product_b / ".env"
+    original_dotenv = dotenv.read_bytes() if dotenv.exists() else None
+    shutil.copy2(product_b / ".env.example", dotenv)
+    try:
+        # A command-line variable overrides the exported .env value, so the unit leg
+        # sees a Redis host that can never resolve.
+        _run(["make", "tests", f"REDIS_URL={UNREACHABLE_REDIS_URL}"], product_b)
+    finally:
+        if original_dotenv is None:
+            dotenv.unlink(missing_ok=True)
+        else:
+            dotenv.write_bytes(original_dotenv)
 
 
 @pytest.mark.slow

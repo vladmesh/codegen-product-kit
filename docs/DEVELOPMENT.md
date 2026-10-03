@@ -97,3 +97,4 @@ See [0.6.4 release and upgrade notes](releases/0.6.4.md) for the prepared transp
 including real Copier update commands and workflow conflict review.
 See [0.7.0 release and upgrade notes](releases/0.7.0.md) for the core timer loop and for the rule
 that a kit core tag and a package tag never share a commit.
+See [0.7.1 release and upgrade notes](releases/0.7.1.md) for the generated lifespan unit-test fix.
