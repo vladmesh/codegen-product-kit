@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Additive catalog v1 component signatures: package actions, curated library recommendations,
+  default-binding resource references, stateless libraries with declared primary outputs, and
+  extensions with parent version requirements. The public pure `primary_output_matches` API
+  infers semantic compatibility from that primary output only. `kit add` checks extensions
+  against the product's active installed parent before fetching/building or changing files.
+- Offline compatibility coverage executes the unchanged kit 0.7.1 catalog loader. Reminders
+  0.3.0/0.4.0 and core 2.0/2.1 selection are preserved. Library and extension lists remain empty;
+  populated contract fixtures do not announce releases, runtime actions or binding resources.
+  Contract and deferred runtime boundary: [docs/CONTRACTS.md](docs/CONTRACTS.md#additive-component-metadata-in-v1).
+
 ## [0.7.1] - 2026-10-03 (prepared, not published)
 
 ### Fixed

@@ -329,6 +329,8 @@ lists every package and its released versions; `framework/catalog.py` is its onl
 
 ```yaml
 format_version: 1
+libraries: []                            # additive, optional for older v1 catalogs
+extensions: []                           # no library or extension is shipped yet
 packages:
   - name: reminders                       # entry point name and package.yaml name
     distribution: codegen-kit-reminders   # pyproject project.name
@@ -348,9 +350,167 @@ The loader refuses, with a named `CatalogError` subclass, an unknown `format_ver
 (`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
 `packages/<name>/v<version>` (`InvalidCatalogEntryError`), a repeated package name
 (`DuplicateCatalogPackageError`), a repeated version (`DuplicateCatalogVersionError`), and a
-version that is not canonical PEP 440 (`InvalidCatalogVersionError`). A kit test ties the newest
+version that is not canonical PEP 440 (`InvalidCatalogVersionError`). Component names are unique
+across all three lists; distribution names are unique after Python distribution normalization
+(`DuplicateCatalogComponentError`). Function/action names and recommendation targets are unique
+within their owner. All version ranges use `packaging.specifiers.SpecifierSet`; malformed core,
+Python or parent ranges raise `InvalidCatalogEntryError`. A kit test ties the newest
 catalog version of every package to its `pyproject.toml` and `package.yaml` at HEAD: distribution,
 name, version, `requires_core`, settings names and environment names must agree.
+
+#### Additive component metadata in v1
+
+The format remains v1 because released products pin tooling while reading the catalog from the
+default branch. Kit 0.7.1's reader and existing orchestrator readers see only `packages`, ignore
+the additive fields, and retain the old fields and version selection. Core 2.0 still selects
+reminders 0.3.0; core 2.1 still selects reminders 0.4.0. An offline regression executes the
+unchanged 0.7.1 loader, with its tag, commit and source blob recorded in
+[`tests/fixtures/catalog/README.md`](../tests/fixtures/catalog/README.md), on both the repository
+catalog and a populated fixture. No second catalog or compatibility adapter is involved.
+
+`Catalog.packages` and `Catalog.get(name)` retain package-only behavior. `Catalog.libraries` and
+`Catalog.extensions` default to empty tuples when their lists are absent.
+`Catalog.get_installable(name)` resolves packages and extensions for `kit add`; it does not
+resolve libraries. An extension has the same fields, independent release tags and installation
+recipe as a package, plus required `extends: {package: <name>, versions: <PEP 440 range>}`.
+Its parent must name an entry in `packages`, not another extension or a library.
+
+Packages and extensions may additionally declare:
+
+- `actions`: a list of `{name, input, output}` records. `input` is an object JSON Schema with
+  named `properties`; `required` names must be declared properties. `output` is a JSON Schema.
+  These are catalog signatures, not runtime manifest fields or endpoints inferred from OpenAPI.
+- `recommended_with`: a list of `{library, why}` records naming catalog libraries. This is
+  curated usefulness, independent of computed type compatibility. It triggers no installation.
+- `default_binding`: `python.module:relative/resource/path` identifying a resource shipped by
+  that component. It is an author-provided starting point for a later product-owned binding;
+  the catalog neither installs nor executes it. The loader validates its syntax, not resource
+  existence. Release-source verification must establish that it actually ships.
+
+Missing optional fields mean no declared action, recommendation or binding. Tooling must not
+infer them for older packages. Catalog interface metadata does not certify an older selected
+release; consumers must verify the selected installed manifest before generating bindings.
+Runtime manifest actions, their validation and binding generation belong to subsequent work.
+
+Libraries declare `{name, distribution, path, module, summary, functions, versions}`. Each
+function has `{name, input, output, value}`; `value` names one required property of its object
+result, the primary output. A result may be nullable through `type: [object, 'null']` or an
+`anyOf`/`oneOf` object-plus-null schema. Each library version has `{version, tag, requires_python}`,
+using the same `packages/<name>/v<version>` convention but no core activation requirement.
+Versions must be nonempty, unique and canonical PEP 440. Signatures are validated as Draft
+2020-12 JSON Schema, with mapping schemas at nested positions; boolean property/item schemas
+are outside this representation. Required named properties must exist.
+
+Libraries are stateless language dependencies: no package entry point, allowlist, lifecycle,
+database, HTTP activation or events. This increment exposes their metadata; it adds no library
+installation command or runtime dependency.
+
+The following is future contract data only. No textparse release, new reminders action manifest,
+or binding resource is announced by this example. The complete reminders create/list/cancel,
+English-only textparse `when`, version records and test-only extension appear in
+[`tests/fixtures/catalog/components.yaml`](../tests/fixtures/catalog/components.yaml).
+The repository catalog keeps empty library/extension lists and no optional reminders metadata
+until real artifacts land.
+
+```yaml
+# Future optional fields under the reminders package record:
+actions:
+  - name: create
+    input:
+      type: object
+      properties:
+        text: {type: string}
+        remind_at: {type: string, format: date-time}
+      required: [text, remind_at]
+      additionalProperties: false
+    output:
+      type: object
+      properties: {id: {type: string, format: uuid}}
+      required: [id]
+recommended_with:
+  - {library: textparse, why: Parses an English time phrase for remind_at.}
+default_binding: codegen_kit_reminders:bindings/default.yaml
+
+# Future entry under libraries:
+name: textparse
+distribution: codegen-kit-textparse
+path: packages/codegen-kit-textparse
+module: codegen_kit_textparse
+summary: English time phrase to an instant and remaining text, or no result.
+functions:
+  - name: when
+    input:
+      type: object
+      properties:
+        text: {type: string}
+        lang: {type: string, const: en}
+        now: {type: string, format: date-time}
+        tz: {type: string, format: x-iana-tz}
+      required: [text, lang, now, tz]
+      additionalProperties: false
+    output:
+      type: [object, 'null']
+      properties:
+        at: {type: string, format: date-time}
+        rest: {type: string}
+      required: [at, rest]
+      additionalProperties: false
+    value: at
+versions:
+  - {version: 0.1.0, tag: packages/textparse/v0.1.0, requires_python: '>=3.11'}
+```
+
+#### Primary-output matching
+
+`framework.component_matching.primary_output_matches(function: CatalogFunction,
+parameter: dict) -> bool` is public and pure. Pass a validated library function and one action
+input property's schema. It projects only the declared `value`; it never searches secondary
+fields. `textparse.when`'s `at` matches `reminders.create.remind_at` because both are
+`{type: string, format: date-time}`. `rest` is a plain string, a duration has another format,
+and a recurrence whose primary value is an RRULE cannot use its secondary `first` instant to
+create this edge. Duration and recurrence examples are negative schema tests, not supported
+textparse functions. English `when(text, lang, now, tz) -> {at, rest} | None` is the sole planned
+textparse 0.1 function.
+
+The conservative matching subset is:
+
+- `title`, `description`, `default`, `examples`, `$comment` and `$schema` annotations are ignored
+  at schema positions, including nested schemas. Literal enum/const object contents are preserved.
+- At the function result boundary, null means no result and is removed before projection.
+  A later binding handles that branch. Null inside a primary value or parameter remains a union.
+- Types and formats must agree. A target needs semantic discrimination through `format`,
+  `enum`, `const`, semantic array items or a semantic required object field. A plain string
+  parameter creates no inferred edge, even when the source is also a string.
+- An output's enum/const values must be a subset of the parameter's allowed enum/const values.
+  Both constraints are honored when present. Arrays compare item schemas recursively.
+- Every required target object field must be required in the output and have a compatible
+  property schema. Shared optional properties are checked too. A target with
+  `additionalProperties: false` requires a closed output with no extra declared properties.
+- Non-null unions (`anyOf`, `oneOf`, or multi-type `type`) infer no edge unless the normalized
+  schemas are identical and semantically discriminating. Branch order is retained.
+- References, numeric/string/length constraints and other unmodelled keywords produce no
+  inferred edge. Matching is discovery over this subset, not general JSON Schema containment
+  or runtime value validation. A false result does not forbid an explicit later binding.
+
+Recommendations never override a failed match, and a match never installs or activates anything.
+
+#### Extension install precondition
+
+Both catalog-resolved `kit add` and explicit `kit add --wheel` check an extension's parent
+before package-source fetch/build, wheel copy, dependency/lock changes, allowlist changes,
+synchronization or generation. The catalog itself must first be read to identify the extension.
+The explicit artifact form uses the tooling's bundled catalog, as for existing packages;
+the Python `add_package` API also accepts an explicit validated catalog.
+
+The parent must be in the backend manifest allowlist and resolve through the existing
+`resolve_active_packages` path in the product backend environment. That validates installed
+entry points, package roots, manifest identity, core compatibility and manifest/distribution
+version agreement. The product's own backend environment is required; the tooling host's
+development fallback cannot satisfy this guard. The validated installed manifest version must
+satisfy `extends.versions`. A catalog's newest release, a wheel filename, a lock entry or an
+allowlist name alone is insufficient. Failure raises `ExtensionPreconditionError` and leaves
+product files unchanged. Admission reuses the existing package recipe below; it neither installs
+nor upgrades the parent implicitly. No production extension is shipped in this increment.
 
 Products receive the tooling from Git at the kit core ref they were generated from, so a catalog
 inside that tooling is frozen at the product's pin. `kit add <name>` therefore reads

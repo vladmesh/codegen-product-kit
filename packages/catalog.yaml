@@ -6,6 +6,8 @@
 # entry under `versions`; the annotated tag `packages/<name>/v<version>` is published at the
 # merge commit by a separate PO operation.
 format_version: 1
+libraries: []
+extensions: []
 packages:
   - name: reminders
     distribution: codegen-kit-reminders

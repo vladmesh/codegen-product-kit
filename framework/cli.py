@@ -11,10 +11,18 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 import yaml
 
-from framework.catalog import Catalog, CatalogPackage, CatalogVersion, bundled_catalog
+from framework.catalog import (
+    Catalog,
+    CatalogPackage,
+    CatalogVersion,
+    ExtensionPreconditionError,
+    bundled_catalog,
+)
 from framework.generate import generate_all
 from framework.package_source import (
     CATALOG_REF_ENV,
@@ -26,7 +34,8 @@ from framework.package_source import (
     read_catalog,
     verify_wheel,
 )
-from framework.spec.package_resolution import CORE_VERSION
+from framework.spec.loader import SpecValidationError, load_manifest
+from framework.spec.package_resolution import CORE_VERSION, resolve_active_packages
 
 
 def _run(command: list[str], repo_root: Path) -> None:
@@ -90,6 +99,36 @@ def _install_wheel(package: CatalogPackage, wheel: Path, repo_root: Path) -> Non
     generate_all(repo_root)
 
 
+def _require_extension_parent(package: CatalogPackage, repo_root: Path) -> None:
+    """Read the product's validated installed set before fetching or mutating anything."""
+
+    parent = package.extends
+    if parent is None:
+        return
+    where = (
+        f"extension {package.name!r} requires installed parent {parent.package!r} {parent.versions}"
+    )
+    try:
+        manifest = load_manifest(repo_root / "services/backend/manifest.yaml")
+    except SpecValidationError as error:
+        raise ExtensionPreconditionError(f"{where}; {error}") from error
+    if parent.package not in manifest.packages:
+        raise ExtensionPreconditionError(f"{where}; parent is not allowlisted")
+    # Do not let the resolver's development fallback use the tooling host environment.
+    if not (repo_root / "services/backend/.venv/bin/python").is_file():
+        raise ExtensionPreconditionError(f"{where}; product backend environment is not installed")
+    try:
+        active = resolve_active_packages(repo_root, {"backend": manifest})
+    except (ValueError, SpecValidationError) as error:
+        raise ExtensionPreconditionError(f"{where}; {error}") from error
+    installed = next((item for item in active if item.name == parent.package), None)
+    if installed is None:
+        raise ExtensionPreconditionError(f"{where}; parent is not active")
+    version = installed.manifest.version  # resolver also verifies distribution version identity
+    if Version(version) not in SpecifierSet(parent.versions):
+        raise ExtensionPreconditionError(f"{where}; installed parent version is {version}")
+
+
 def add_package(name: str, wheel: Path, repo_root: Path, catalog: Catalog | None = None) -> None:
     """Install one explicit artifact of a catalog package and regenerate the product contract.
 
@@ -97,13 +136,14 @@ def add_package(name: str, wheel: Path, repo_root: Path, catalog: Catalog | None
     with this tooling; the artifact's version is the caller's choice.
     """
 
-    package = (catalog or bundled_catalog()).get(name)
+    package = (catalog or bundled_catalog()).get_installable(name)
     wheel = wheel.expanduser().resolve()
     if not wheel.is_file() or wheel.suffix != ".whl":
         raise ValueError(f"wheel does not exist: {wheel}")
     if canonicalize_name(wheel.name.split("-")[0]) != canonicalize_name(package.distribution):
         raise ValueError(f"wheel is not {package.distribution}: {wheel.name}")
     _require_backend_product(repo_root)
+    _require_extension_parent(package, repo_root)
     _install_wheel(package, wheel, repo_root)
 
 
@@ -119,8 +159,9 @@ def add_released_package(
     """
 
     _require_backend_product(repo_root)
-    package = read_catalog(source, ref).get(name)
+    package = read_catalog(source, ref).get_installable(name)
     version = package.select(CORE_VERSION)
+    _require_extension_parent(package, repo_root)
     with TemporaryDirectory(prefix="kit-add-") as scratch:
         workdir = Path(scratch)
         project = fetch_package_source(source, package, version, workdir)
@@ -134,7 +175,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kit")
     commands = parser.add_subparsers(dest="command", required=True)
     add = commands.add_parser(
-        "add", help="install a catalog package, or an explicit package artifact, into this product"
+        "add",
+        help="install a catalog package or extension, or its explicit wheel, into this product",
     )
     add.add_argument("name", help="catalog package name, for example 'reminders'")
     add.add_argument(
