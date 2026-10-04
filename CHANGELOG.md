@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The slow package crash/recovery proof registers its due-event reader before creating the
+  pending emission, so a live backend timer's recovery cannot precede the reader's stream cursor.
+  Crash, database-state, recovered-delivery, event-identity and stream-count assertions remain.
+- Catalog parsing rejects `extends` under `packages` and directs the author to `extensions`.
+  Moving an extension into the package list can no longer discard its parent requirement and
+  bypass installation preconditions. Other unknown additive keys remain accepted.
+
+### Added
+
+- Additive catalog v1 component signatures: package actions, curated library recommendations,
+  default-binding resource references, stateless libraries with declared primary outputs, and
+  extensions with parent version requirements. The public pure `primary_output_matches` API
+  infers semantic compatibility from that primary output only. `kit add` checks extensions
+  against the product's active installed parent before fetching/building or changing files.
+- Offline compatibility coverage executes the unchanged kit 0.7.1 catalog loader. Reminders
+  0.3.0/0.4.0 and core 2.0/2.1 selection are preserved. Library and extension lists remain empty;
+  populated contract fixtures do not announce releases, runtime actions or binding resources.
+  Contract and deferred runtime boundary: [docs/CONTRACTS.md](docs/CONTRACTS.md#additive-component-metadata-in-v1).
+
 ## [0.7.1] - 2026-10-03 (prepared, not published)
 
 ### Fixed

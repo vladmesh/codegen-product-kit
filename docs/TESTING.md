@@ -64,5 +64,12 @@ to the local committed source. See [the upgrade review boundary](releases/0.6.4.
 Existing slow generation, service typechecks, logging and PostgreSQL migration proofs keep their
 CI routes; a local fast broad receipt does not replace the required release matrix.
 
+The package migration proof's manual crash/recovery scenario registers its `reminders.due`
+reader before crashing the publisher. A live backend timer may recover a committed pending
+emission before the replacement process runs; creating a new consumer group at the stream's
+latest entry after that publication would skip the event. Early registration preserves the
+delivery observation while retaining the crash exit, pending database state, replacement exit,
+event identity and stream-count assertions. This Redis/PostgreSQL scenario runs in CI only.
+
 When a Docker-dependent test cannot run, skip it explicitly at the pytest boundary with a reason;
 do not silently return from the test.

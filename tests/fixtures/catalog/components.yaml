@@ -1,0 +1,84 @@
+# Contract fixture only. Future metadata and synthetic artifacts, not shipped releases.
+format_version: 1
+packages:
+  - name: reminders
+    distribution: codegen-kit-reminders
+    path: packages/codegen-kit-reminders
+    summary: One-time reminders for the verified caller.
+    capabilities: [remind me at a time]
+    settings:
+      - {name: reminder_owner_ref, summary: Owner of the seed reminder.}
+    environment:
+      - {name: REDIS_URL, required: true, summary: Event broker.}
+    actions:
+      - name: create
+        input:
+          type: object
+          properties:
+            text: {type: string}
+            remind_at: {type: string, format: date-time}
+          required: [text, remind_at]
+          additionalProperties: false
+        output: &reminder
+          type: object
+          properties:
+            id: {type: string, format: uuid}
+            text: {type: string}
+            remind_at: {type: string, format: date-time}
+            state: {type: string, enum: [scheduled, cancelled, due, emitted]}
+          required: [id, text, remind_at, state]
+          additionalProperties: false
+      - name: list
+        input: {type: object, properties: {}, additionalProperties: false}
+        output: {type: array, items: *reminder}
+      - name: cancel
+        input:
+          type: object
+          properties: {reminder_id: {type: string, format: uuid}}
+          required: [reminder_id]
+          additionalProperties: false
+        output: *reminder
+    recommended_with:
+      - {library: textparse, why: Parses an English time phrase for remind_at.}
+    default_binding: codegen_kit_reminders:bindings/default.yaml
+    versions:
+      - {version: 0.3.0, tag: packages/reminders/v0.3.0, requires_core: '>=2,<3'}
+      - {version: 0.4.0, tag: packages/reminders/v0.4.0, requires_core: '>=2.1,<3'}
+libraries:
+  - name: textparse
+    distribution: codegen-kit-textparse
+    path: packages/codegen-kit-textparse
+    module: codegen_kit_textparse
+    summary: English time phrase to an instant and remaining text, or no result.
+    functions:
+      - name: when
+        input:
+          type: object
+          properties:
+            text: {type: string}
+            lang: {type: string, const: en}
+            now: {type: string, format: date-time}
+            tz: {type: string, format: x-iana-tz}
+          required: [text, lang, now, tz]
+          additionalProperties: false
+        output:
+          type: [object, 'null']
+          properties:
+            at: {type: string, format: date-time}
+            rest: {type: string}
+          required: [at, rest]
+          additionalProperties: false
+        value: at
+    versions:
+      - {version: 0.1.0, tag: packages/textparse/v0.1.0, requires_python: '>=3.11'}
+extensions:
+  - name: synthetic-extension
+    distribution: synthetic-extension
+    path: tests/fixtures/synthetic-extension
+    summary: Test-only extension using the existing package install recipe.
+    capabilities: [test extension admission]
+    settings: []
+    environment: []
+    extends: {package: reminders, versions: '>=0.4,<0.5'}
+    versions:
+      - {version: 0.1.0, tag: packages/synthetic-extension/v0.1.0, requires_core: '>=2.1,<3'}
