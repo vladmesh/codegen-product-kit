@@ -26,7 +26,10 @@ The future component vocabulary is:
 This repository implements an in-process package runtime and a package catalog
 (`packages/catalog.yaml`) from which `kit add <name>` installs released packages, but not a catalog
 of services or containers or automatic composition across component types. The current `modules` Copier option selects only the two
-built-in application shapes above.
+built-in application shapes above. The catalog also declares plain libraries: `kit add textparse`
+targets `services/tg_bot`, with no backend activation. Its three-form English 0.1.0 source is
+prepared; independent tag publication follows merge. See the
+[library contract](docs/CONTRACTS.md#library-api-and-installation).
 
 ## Generate a project
 

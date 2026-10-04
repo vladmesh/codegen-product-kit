@@ -37,6 +37,8 @@ def test_additive_models_and_missing_metadata() -> None:
     assert catalog.get_installable("synthetic-extension").extends.package == "reminders"
     document = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
     del document["libraries"], document["extensions"]
+    # Construct a pre-library catalog: recommendations cannot reference absent libraries.
+    del document["packages"][0]["recommended_with"]
     legacy = parse_catalog(yaml.safe_dump(document))
     assert legacy.libraries == legacy.extensions == ()
     assert legacy.get("reminders").actions == ()

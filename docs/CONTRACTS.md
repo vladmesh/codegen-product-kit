@@ -329,8 +329,8 @@ lists every package and its released versions; `framework/catalog.py` is its onl
 
 ```yaml
 format_version: 1
-libraries: []                            # additive, optional for older v1 catalogs
-extensions: []                           # no library or extension is shipped yet
+libraries: []                            # omitted here; textparse source entry described below
+extensions: []                           # no production extension is shipped yet
 packages:
   - name: reminders                       # entry point name and package.yaml name
     distribution: codegen-kit-reminders   # pyproject project.name
@@ -370,8 +370,9 @@ catalog and a populated fixture. No second catalog or compatibility adapter is i
 
 `Catalog.packages` and `Catalog.get(name)` retain package-only behavior. `Catalog.libraries` and
 `Catalog.extensions` default to empty tuples when their lists are absent.
-`Catalog.get_installable(name)` resolves packages and extensions for `kit add`; it does not
-resolve libraries. An extension has the same fields, independent release tags and installation
+`Catalog.get_installable(name)` retains package/extension-only behavior.
+`Catalog.get_component(name)` additionally resolves libraries at the `kit add` boundary.
+An extension has the same fields, independent release tags and installation
 recipe as a package, plus required `extends: {package: <name>, versions: <PEP 440 range>}`.
 Its parent must name an entry in `packages`, not another extension or a library.
 The `extends` field belongs only to records in `extensions`. Any occurrence under `packages`,
@@ -406,15 +407,16 @@ Versions must be nonempty, unique and canonical PEP 440. Signatures are validate
 are outside this representation. Required named properties must exist.
 
 Libraries are stateless language dependencies: no package entry point, allowlist, lifecycle,
-database, HTTP activation or events. This increment exposes their metadata; it adds no library
-installation command or runtime dependency.
+database, HTTP activation or events. `kit add textparse` installs a plain dependency into
+`services/tg_bot`; the library source and 0.1.0 catalog entry now exist. Its independent
+tag remains a post-merge release operation. Reminders recommends textparse, without adding
+actions or a default binding to its existing releases.
 
-The following is future contract data only. No textparse release, new reminders action manifest,
-or binding resource is announced by this example. The complete reminders create/list/cancel,
+The reminders actions/default binding below remain future contract data. The textparse
+signature matches its actual source, without announcing a published tag. The complete reminders create/list/cancel,
 English-only textparse `when`, version records and test-only extension appear in
 [`tests/fixtures/catalog/components.yaml`](../tests/fixtures/catalog/components.yaml).
-The repository catalog keeps empty library/extension lists and no optional reminders metadata
-until real artifacts land.
+The repository catalog retains empty extensions and no reminders actions/default binding.
 
 ```yaml
 # Future optional fields under the reminders package record:
@@ -435,7 +437,7 @@ recommended_with:
   - {library: textparse, why: Parses an English time phrase for remind_at.}
 default_binding: codegen_kit_reminders:bindings/default.yaml
 
-# Future entry under libraries:
+# Actual source entry under libraries (tag publication follows merge):
 name: textparse
 distribution: codegen-kit-textparse
 path: packages/codegen-kit-textparse
@@ -473,7 +475,7 @@ fields. `textparse.when`'s `at` matches `reminders.create.remind_at` because bot
 `{type: string, format: date-time}`. `rest` is a plain string, a duration has another format,
 and a recurrence whose primary value is an RRULE cannot use its secondary `first` instant to
 create this edge. Duration and recurrence examples are negative schema tests, not supported
-textparse functions. English `when(text, lang, now, tz) -> {at, rest} | None` is the sole planned
+textparse functions. English `when(text, lang, now, tz) -> {at, rest} | None` is the sole
 textparse 0.1 function.
 
 The conservative matching subset is:
@@ -497,6 +499,55 @@ The conservative matching subset is:
   or runtime value validation. A false result does not forbid an explicit later binding.
 
 Recommendations never override a failed match, and a match never installs or activates anything.
+
+#### Library API and installation
+
+`codegen-kit-textparse` 0.1.0 imports as `codegen_kit_textparse` and exposes only `when`.
+It accepts exactly `in N minutes/hours` (positive integer, singular/plural),
+`at H[:MM][am/pm]`, and `tomorrow at H[:MM][am/pm]`. Grammar is case insensitive;
+bare hours use their literal 24-hour value. A clock without a date rolls to its next
+strictly future occurrence in the supplied IANA zone. Tomorrow uses the next local date.
+The Python API requires a caller-supplied aware `datetime` `now` and explicit `tz`.
+The data-boundary catalog schema represents `now` as `string/date-time`; the Python
+function performs no implicit string conversion. `at` is an aware ISO date-time string.
+`rest` retains task wording, case and punctuation after removal of the time and an optional
+leading reminder trigger, with whitespace normalized. Unsupported languages/text return
+`None`; a naive clock raises `ValueError`, invalid zones raise `ZoneInfoNotFoundError`
+or `ValueError`. There is no host clock, default zone, network or model call.
+
+Relative minute/hour offsets use elapsed UTC arithmetic. Absolute times round-trip both
+folds through zoneinfo and return `None` for nonexistent or ambiguous wall times, including
+next-occurrence rollover; no DST correction or fold choice is guessed. Compound durations,
+recurrence, weekdays, month dates, word numbers, fuzzy grammar, noon/midnight and part-of-day
+inference are refused. Guards also conservatively refuse reserved temporal vocabulary in
+the remaining task text. The runtime closure is stdlib plus `tzdata` only, with no parser engine
+or language registry. Narrow corpus, configuration, whitespace and dependency details are in
+the [package README](../packages/codegen-kit-textparse/README.md) and its notices.
+
+The library branch reads the same live catalog source/ref switches, selects the newest
+stable release admitting the tg_bot Python interpreter, and fetches its exact independent
+tag through the existing source/build pipeline. The service interpreter comes from its venv,
+or read-only `uv python find --project services/tg_bot --no-python-downloads`; it must already
+be available. The wheel must agree on distribution/version in METADATA and filename, satisfy
+catalog and artifact `Requires-Python`, have compatible interpreter/platform tags and the
+declared import module, and contain no runtime package entry-point group or `package.yaml`.
+Malformed artifacts raise `PackageWheelMismatchError`. No parser is imported by tooling.
+
+Without tg_bot the command refuses before writes, including backend-only products. After
+verification it copies the wheel to `services/tg_bot/packages/`, runs `uv add --project
+services/tg_bot --no-sync <wheel>`, then `uv sync --project services/tg_bot --frozen`.
+The tg_bot Docker dependency stage copies that directory before frozen sync. There are no
+backend allowlist changes, deptry entry-point exemptions or contract generation.
+`kit add textparse --wheel <path>` uses the bundled catalog (or the Python API's supplied
+catalog), verifies an explicitly chosen declared version and follows the same recipe.
+uv install failures after preflight do not promise rollback. Package/extension explicit-wheel
+behavior and extension parent guards remain unchanged.
+
+Publication is prepared in [textparse 0.1.0 release notes](releases/textparse-0.1.0.md).
+Until its tag exists the default remote install refuses as unpublished. CI's generated
+backend,tg_bot proof builds the real wheel from a local annotated release-tag fixture,
+calls it through the service's own interpreter and builds/runs the tg_bot image. That
+network/container proof belongs to the existing slow Copier CI leg, not local broad checks.
 
 #### Extension install precondition
 
@@ -522,7 +573,7 @@ inside that tooling is frozen at the product's pin. `kit add <name>` therefore r
 at the remote's default branch (`HEAD`). `--catalog-source` or `KIT_CATALOG_SOURCE`, and
 `--catalog-ref` or `KIT_CATALOG_REF`, point it at another Git repository or ref, such as a stand
 mirror or a local test repository. The packages and versions it can resolve are those of the live
-catalog; the product's core only filters versions by `requires_core`.
+catalog; runtime packages/extensions filter by `requires_core`, libraries by target Python.
 
 `kit add <name>` refuses with a non-zero exit, before any product file changes, when the name is
 not in the catalog (`UnknownPackageError`, listing the known names), when no version admits the

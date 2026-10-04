@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+from email.message import Message
 from email.parser import Parser
 import io
 import os
@@ -12,13 +13,17 @@ import tarfile
 from tempfile import TemporaryDirectory
 import zipfile
 
-from packaging.utils import canonicalize_name
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.tags import compatible_tags, cpython_tags
+from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 from framework.catalog import (
     CATALOG_PATH,
     Catalog,
     CatalogError,
+    CatalogLibrary,
+    CatalogLibraryVersion,
     CatalogPackage,
     CatalogVersion,
     parse_catalog,
@@ -101,7 +106,10 @@ def read_catalog(source: str, ref: str) -> Catalog:
 
 
 def fetch_package_source(
-    source: str, package: CatalogPackage, version: CatalogVersion, workdir: Path
+    source: str,
+    package: CatalogPackage | CatalogLibrary,
+    version: CatalogVersion | CatalogLibraryVersion,
+    workdir: Path,
 ) -> Path:
     """Export the package directory at its release tag; refuse an unpublished tag."""
 
@@ -168,7 +176,12 @@ def _dist_info_file(archive: zipfile.ZipFile, name: str) -> str | None:
     return found[0] if found else None
 
 
-def verify_wheel(wheel: Path, package: CatalogPackage, version: CatalogVersion) -> None:
+def verify_wheel(
+    wheel: Path,
+    package: CatalogPackage | CatalogLibrary,
+    version: CatalogVersion | CatalogLibraryVersion,
+    python_version: str | None = None,
+) -> None:
     """Refuse a wheel unless it is the catalog's distribution, version and entry point."""
 
     try:
@@ -182,8 +195,13 @@ def verify_wheel(wheel: Path, package: CatalogPackage, version: CatalogVersion) 
             entry_points.optionxform = str  # type: ignore[assignment,method-assign]
             if entry_points_file is not None:
                 entry_points.read_string(archive.read(entry_points_file).decode())
-    except zipfile.BadZipFile as error:
-        raise PackageWheelMismatchError(f"{wheel.name} is not a wheel archive") from error
+            if isinstance(package, CatalogLibrary):
+                _verify_library_headers(metadata)
+                _verify_library_layout(archive, package, entry_points)
+    except (zipfile.BadZipFile, OSError, UnicodeError, configparser.Error) as error:
+        raise PackageWheelMismatchError(
+            f"{wheel.name} is not a valid wheel archive: {error}"
+        ) from error
 
     distribution = metadata.get("Name", "")
     if canonicalize_name(distribution) != canonicalize_name(package.distribution):
@@ -201,7 +219,81 @@ def verify_wheel(wheel: Path, package: CatalogPackage, version: CatalogVersion) 
             f"built wheel version {built_version!r} is not catalog version {version.version!r} "
             f"of package {package.name!r}"
         )
-    if not entry_points.has_option(ENTRY_POINT_GROUP, package.name):
+    if isinstance(package, CatalogLibrary):
+        _verify_library_python(
+            wheel, metadata.get("Requires-Python"), python_version, version, package.distribution
+        )
+    elif not entry_points.has_option(ENTRY_POINT_GROUP, package.name):
         raise PackageWheelMismatchError(
             f"built wheel declares no {ENTRY_POINT_GROUP} entry point {package.name!r}"
         )
+
+
+def _verify_library_headers(metadata: Message) -> None:
+    for field in ("Name", "Version", "Requires-Python"):
+        if len(metadata.get_all(field, [])) != 1:
+            raise PackageWheelMismatchError(f"library METADATA needs one {field}")
+
+
+def _verify_library_layout(
+    archive: zipfile.ZipFile, library: CatalogLibrary, entry_points: configparser.ConfigParser
+) -> None:
+    module_path = library.module.replace(".", "/")
+    names = archive.namelist()
+    if f"{module_path}/__init__.py" not in names and f"{module_path}.py" not in names:
+        raise PackageWheelMismatchError(f"wheel has no import module {library.module!r}")
+    if any(name.startswith("/") or ".." in Path(name).parts for name in names):
+        raise PackageWheelMismatchError("library wheel contains an unsafe archive path")
+    if len(set(names)) != len(names):
+        raise PackageWheelMismatchError("library wheel contains duplicate archive paths")
+    for required in ("/WHEEL", "/RECORD"):
+        if _dist_info_file(archive, required) is None:
+            raise PackageWheelMismatchError(f"library wheel has no dist-info{required}")
+    info_directories = {
+        name.split("/")[0] for name in names if name.split("/")[0].endswith(".dist-info")
+    }
+    if len(info_directories) != 1:
+        raise PackageWheelMismatchError("library wheel must have exactly one dist-info directory")
+    if entry_points.has_section(ENTRY_POINT_GROUP):
+        raise PackageWheelMismatchError(f"library wheel must not declare {ENTRY_POINT_GROUP}")
+    if any(name.endswith("/package.yaml") for name in names):
+        raise PackageWheelMismatchError("library wheel must not contain package.yaml")
+
+
+def _verify_library_python(
+    wheel: Path,
+    requires_python: str | None,
+    python_version: str | None,
+    version: CatalogVersion | CatalogLibraryVersion,
+    expected_distribution: str,
+) -> None:
+    if python_version is None or not isinstance(version, CatalogLibraryVersion):
+        raise PackageWheelMismatchError("library verification requires the target Python version")
+    try:
+        if not requires_python:
+            raise PackageWheelMismatchError("library wheel has no Requires-Python")
+        target = Version(python_version)
+        if target not in SpecifierSet(requires_python) or target not in SpecifierSet(
+            version.requires_python
+        ):
+            raise PackageWheelMismatchError(
+                f"library wheel/catalog requires Python "
+                f"{requires_python}/{version.requires_python}; "
+                f"target Python is {python_version}"
+            )
+        distribution, artifact_version, _, tags = parse_wheel_filename(wheel.name)
+        python_pair = (target.major, target.minor)
+        interpreter = f"cp{target.major}{target.minor}"
+        supported = set(cpython_tags(python_version=python_pair)) | set(
+            compatible_tags(python_version=python_pair, interpreter=interpreter)
+        )
+        if not tags & supported:
+            raise PackageWheelMismatchError(
+                f"wheel tags are incompatible with Python {python_version}"
+            )
+        if artifact_version != Version(version.version):
+            raise PackageWheelMismatchError("wheel filename version differs from catalog version")
+        if distribution != canonicalize_name(expected_distribution):
+            raise PackageWheelMismatchError("wheel filename distribution differs from METADATA")
+    except (InvalidSpecifier, InvalidVersion, InvalidWheelFilename) as error:
+        raise PackageWheelMismatchError(f"invalid library wheel metadata: {error}") from error

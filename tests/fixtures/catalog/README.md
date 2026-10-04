@@ -7,7 +7,8 @@ commit `56da5c83cb8d011823ce2cb70345415b223b93ab`, Git blob
 they do not emulate its reader.
 
 `components.yaml` is a contract example, not a release catalog. Its actions,
-recommendation, default binding, English textparse release and synthetic extension
-do not claim that those artifacts ship. Reminders' existing versions are retained
+default binding and synthetic extension do not claim that those artifacts ship.
+The repository now ships textparse source and its recommendation; its independent tag
+still requires publication. Reminders' existing versions are retained
 to exercise the released reader's core 2.0/2.1 selections. Subsequent cards must tie
 new metadata to real release sources before publishing it in the repository catalog.

@@ -12,15 +12,18 @@ import sys
 from tempfile import TemporaryDirectory
 
 from packaging.specifiers import SpecifierSet
-from packaging.utils import canonicalize_name
+from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 from packaging.version import Version
 import yaml
 
 from framework.catalog import (
     Catalog,
+    CatalogLibrary,
+    CatalogLibraryVersion,
     CatalogPackage,
     CatalogVersion,
     ExtensionPreconditionError,
+    IncompatibleCatalogVersionError,
     bundled_catalog,
 )
 from framework.generate import generate_all
@@ -29,6 +32,7 @@ from framework.package_source import (
     CATALOG_SOURCE_ENV,
     DEFAULT_CATALOG_REF,
     DEFAULT_CATALOG_SOURCE,
+    PackageWheelMismatchError,
     build_wheel,
     fetch_package_source,
     read_catalog,
@@ -64,12 +68,42 @@ def _require_backend_product(repo_root: Path) -> None:
         raise ValueError(f"{repo_root} is not a generated product with a backend")
 
 
-def _install_wheel(package: CatalogPackage, wheel: Path, repo_root: Path) -> None:
-    """Copy, lock, allowlist, synchronize and regenerate; the only product mutation."""
+def _require_tg_bot_product(repo_root: Path) -> None:
+    if not (repo_root / "services/tg_bot/pyproject.toml").is_file():
+        raise ValueError(f"{repo_root} has no services/tg_bot; libraries target tg_bot")
+
+
+def _library_python_version(repo_root: Path) -> str:
+    """Read the selected service interpreter, without installing or changing the product."""
+    python = repo_root / "services/tg_bot/.venv/bin/python"
+    if not python.is_file():
+        found = subprocess.run(  # noqa: S603
+            ["uv", "python", "find", "--project", "services/tg_bot", "--no-python-downloads"],  # noqa: S607
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if found.returncode != 0:
+            raise IncompatibleCatalogVersionError(
+                f"cannot find tg_bot Python without downloads: {found.stderr.strip()}"
+            )
+        python = Path(found.stdout.strip())
+    result = subprocess.run(  # noqa: S603
+        [str(python), "-I", "-c", "import platform; print(platform.python_version())"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _install_wheel(package: CatalogPackage | CatalogLibrary, wheel: Path, repo_root: Path) -> None:
+    """Copy and lock the dependency; activate/regenerate only runtime packages."""
 
     manifest_path = repo_root / "services/backend/manifest.yaml"
     backend_project = repo_root / "services/backend/pyproject.toml"
-    package_dir = repo_root / "services/backend/packages"
+    service = "services/tg_bot" if isinstance(package, CatalogLibrary) else "services/backend"
+    package_dir = repo_root / service / "packages"
     package_dir.mkdir(parents=True, exist_ok=True)
     installed_wheel = package_dir / wheel.name
     if installed_wheel != wheel:
@@ -81,12 +115,15 @@ def _install_wheel(package: CatalogPackage, wheel: Path, repo_root: Path) -> Non
             "uv",
             "add",
             "--project",
-            "services/backend",
+            service,
             "--no-sync",
             str(relative_wheel),
         ],
         repo_root,
     )
+    if isinstance(package, CatalogLibrary):
+        _run(["uv", "sync", "--project", service, "--frozen"], repo_root)
+        return
     _allow_dynamic_dependency(backend_project, package.distribution)
 
     manifest = yaml.safe_load(manifest_path.read_text())
@@ -130,13 +167,34 @@ def _require_extension_parent(package: CatalogPackage, repo_root: Path) -> None:
 
 
 def add_package(name: str, wheel: Path, repo_root: Path, catalog: Catalog | None = None) -> None:
-    """Install one explicit artifact of a catalog package and regenerate the product contract.
+    """Install an explicit catalog artifact into its service.
 
     The name and distribution are checked against ``catalog``, by default the catalog shipped
-    with this tooling; the artifact's version is the caller's choice.
+    with this tooling. Package versions retain the explicit-artifact behavior; library
+    versions must be declared and verified against the catalog and target Python.
     """
 
-    package = (catalog or bundled_catalog()).get_installable(name)
+    package = (catalog or bundled_catalog()).get_component(name)
+    if isinstance(package, CatalogLibrary):
+        _require_tg_bot_product(repo_root)
+        python_version = _library_python_version(repo_root)
+        wheel = wheel.expanduser().resolve()
+        if not wheel.is_file():
+            raise PackageWheelMismatchError(f"wheel does not exist: {wheel}")
+        try:
+            _, artifact_version, _, _ = parse_wheel_filename(wheel.name)
+        except InvalidWheelFilename as error:
+            raise PackageWheelMismatchError(str(error)) from error
+        version = next(
+            (item for item in package.versions if Version(item.version) == artifact_version), None
+        )
+        if version is None:
+            raise PackageWheelMismatchError(
+                f"library {name!r} has no catalog version {artifact_version}"
+            )
+        verify_wheel(wheel, package, version, python_version)
+        _install_wheel(package, wheel, repo_root)
+        return
     wheel = wheel.expanduser().resolve()
     if not wheel.is_file() or wheel.suffix != ".whl":
         raise ValueError(f"wheel does not exist: {wheel}")
@@ -152,21 +210,30 @@ def add_released_package(
     repo_root: Path,
     source: str = DEFAULT_CATALOG_SOURCE,
     ref: str = DEFAULT_CATALOG_REF,
-) -> CatalogVersion:
+) -> CatalogVersion | CatalogLibraryVersion:
     """Resolve a package from the live catalog, build its released tag and install it.
 
     Every refusal happens before the product is touched.
     """
 
-    _require_backend_product(repo_root)
-    package = read_catalog(source, ref).get_installable(name)
-    version = package.select(CORE_VERSION)
-    _require_extension_parent(package, repo_root)
+    package = read_catalog(source, ref).get_component(name)
+    python_version = None
+    if isinstance(package, CatalogLibrary):
+        _require_tg_bot_product(repo_root)
+        python_version = _library_python_version(repo_root)
+        version = package.select(python_version)
+    else:
+        _require_backend_product(repo_root)
+        version = package.select(CORE_VERSION)
+        _require_extension_parent(package, repo_root)
     with TemporaryDirectory(prefix="kit-add-") as scratch:
         workdir = Path(scratch)
         project = fetch_package_source(source, package, version, workdir)
         wheel = build_wheel(project, workdir / "dist")
-        verify_wheel(wheel, package, version)
+        if isinstance(package, CatalogLibrary):
+            verify_wheel(wheel, package, version, python_version)
+        else:
+            verify_wheel(wheel, package, version)
         _install_wheel(package, wheel, repo_root)
     return version
 
@@ -176,9 +243,9 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     add = commands.add_parser(
         "add",
-        help="install a catalog package or extension, or its explicit wheel, into this product",
+        help="install a library into tg_bot, or a runtime package/extension into backend",
     )
-    add.add_argument("name", help="catalog package name, for example 'reminders'")
+    add.add_argument("name", help="catalog component name, for example 'reminders' or 'textparse'")
     add.add_argument(
         "--wheel",
         type=Path,

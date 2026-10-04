@@ -118,7 +118,10 @@ acts for a user depends on the core `caller_identity`, which verifies the truste
 (the tg_bot) and resolves the active user it names to `"<channel>:<external_id>"`; a package never
 takes a user reference from a request. Packages are released
 independently of the kit core and listed in `packages/catalog.yaml`; `kit add <name>` resolves,
-builds, verifies and installs a released package from that live catalog. There is still no catalog
+builds, verifies and installs a released package from that live catalog. Its additive `libraries`
+list describes plain dependencies; `kit add textparse` installs the verified library into tg_bot
+without package activation or backend generation. The parser belongs to the library, outside kit
+core and generic channel handlers. There is still no catalog
 of services or containers; `backend` and `tg_bot` remain Copier selections.
 
 ## Tooling and runtime
