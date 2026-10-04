@@ -102,6 +102,46 @@ def test_refused_corpus(text: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "time",
+    [
+        "at 9am-ish",
+        "at 9pm-ish",
+        "tomorrow at 9-ish",
+        "in 2 minutes-ish",
+        "at 18:30-ish",
+        "tomorrow at 9am-ish",
+        "in 1 minute-ish",
+        "in 1 hour-ish",
+        "in 2 hours-ish",
+        "at 9am-approx",
+        "in 2 minutes-approx",
+    ],
+)
+def test_attached_textual_suffixes_are_refused(time: str) -> None:
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    assert textparse.when(f"buy milk {time}", "en", clock, "UTC") is None
+
+
+@pytest.mark.parametrize(
+    ("time", "at"),
+    [
+        ("at 9am", "2026-10-04T09:00:00+00:00"),
+        ("at 9pm", "2026-10-04T21:00:00+00:00"),
+        ("at 18:30", "2026-10-04T18:30:00+00:00"),
+        ("tomorrow at 9", "2026-10-05T09:00:00+00:00"),
+        ("in 2 minutes", "2026-10-04T08:02:00+00:00"),
+        ("in 1 hour", "2026-10-04T09:00:00+00:00"),
+        ("at 007", "2026-10-05T07:00:00+00:00"),
+    ],
+)
+@pytest.mark.parametrize("punctuation", ["", ".", ",", ";", "!", "?", " -"])
+def test_exact_times_retain_sentence_punctuation(time: str, at: str, punctuation: str) -> None:
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    result = textparse.when(f"Buy Milk {time}{punctuation}", "en", clock, "UTC")
+    assert result == {"at": at, "rest": f"Buy Milk {punctuation.strip()}".strip()}
+
+
+@pytest.mark.parametrize(
     ("text", "now", "zone", "at"),
     [
         ("tomorrow at 0", "2026-12-31T23:59:00+00:00", "UTC", "2027-01-01T00:00:00+00:00"),

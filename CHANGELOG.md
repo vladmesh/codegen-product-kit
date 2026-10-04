@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Textparse refuses attached textual suffixes such as `at 9am-ish`, `tomorrow at 9-ish`
+  and `in 2 minutes-ish` instead of scheduling their exact-time substring. Exact forms
+  and sentence punctuation retain their time and remainder behavior.
 - The slow package crash/recovery proof registers its due-event reader before creating the
   pending emission, so a live backend timer's recovery cannot precede the reader's stream cursor.
   Crash, database-state, recovered-delivery, event-identity and stream-count assertions remain.

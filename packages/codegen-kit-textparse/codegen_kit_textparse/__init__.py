@@ -103,9 +103,9 @@ def when(text: str, lang: str, now: datetime, tz: str) -> _Result | None:
     if len(matches) != 1:
         return None
     match = matches[0]
-    # Do not accept a prefix of malformed clock notation, decimal duration or suffix.
+    # Refuse malformed notation and attached continuations such as "minutes-ish".
     if re.match(
-        r"\s*[:/]|[.-] *[0-9]|\s*[+-][0-9]| +[0-9]|"
+        r"-\w|\s*[:/]|[.-] *[0-9]|\s*[+-][0-9]| +[0-9]|"
         r"\s+(?:and|or|to)\s+(?:at\s+)?[0-9]|"
         r"\s*(?:a\.m\.|p\.m\.|(?:am|pm)\w)",
         text[match.end() :],

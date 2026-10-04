@@ -519,7 +519,9 @@ Relative minute/hour offsets use elapsed UTC arithmetic. Absolute times round-tr
 folds through zoneinfo and return `None` for nonexistent or ambiguous wall times, including
 next-occurrence rollover; no DST correction or fold choice is guessed. Compound durations,
 recurrence, weekdays, month dates, word numbers, fuzzy grammar, noon/midnight and part-of-day
-inference are refused. Guards also conservatively refuse reserved temporal vocabulary in
+inference and attached textual suffixes such as `at 9am-ish` or `in 2 minutes-ish` are
+refused. Ordinary sentence punctuation after an exact time remains valid and is retained
+in the remainder. Guards also conservatively refuse reserved temporal vocabulary in
 the remaining task text. The runtime closure is stdlib plus `tzdata` only, with no parser engine
 or language registry. Narrow corpus, configuration, whitespace and dependency details are in
 the [package README](../packages/codegen-kit-textparse/README.md) and its notices.
