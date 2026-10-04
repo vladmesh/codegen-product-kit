@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Catalog parsing rejects `extends` under `packages` and directs the author to `extensions`.
+  Moving an extension into the package list can no longer discard its parent requirement and
+  bypass installation preconditions. Other unknown additive keys remain accepted.
+
 ### Added
 
 - Additive catalog v1 component signatures: package actions, curated library recommendations,

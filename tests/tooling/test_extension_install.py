@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from framework import cli
-from framework.catalog import ExtensionPreconditionError, load_catalog
+from framework.catalog import ExtensionPreconditionError, load_catalog, parse_catalog
 from framework.spec import package_resolution
 
 ROOT = Path(__file__).parents[2]
@@ -187,4 +187,55 @@ def test_cli_extension_refusal_is_named_and_exits_before_mutation(
     error = capsys.readouterr().err
     assert "ExtensionPreconditionError" in error
     assert "not allowlisted" in error
+    assert _snapshot(product) == before
+
+
+@pytest.mark.parametrize("mode", ["released", "artifact"])
+@pytest.mark.parametrize(
+    "extends", [{"package": "reminders", "versions": ">=0.4,<0.5"}, "not a parent declaration"]
+)
+def test_misplaced_extension_fails_parsing_before_install_operations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    extends: object,
+) -> None:
+    document = yaml.safe_load(CATALOG.read_text())
+    extension = document["extensions"].pop()
+    extension["extends"] = extends
+    document["packages"].append(extension)
+    source = yaml.safe_dump(document)
+    product = tmp_path / "product"
+    _product(product, allowlisted=False)
+    monkeypatch.setattr(cli, "read_catalog", lambda *_args: parse_catalog(source))
+    monkeypatch.setattr(cli, "bundled_catalog", lambda: parse_catalog(source))
+    operations: list[str] = []
+
+    def unexpected_operation(*_args: object) -> None:
+        operations.append("unexpected operation")
+
+    for operation in (
+        "fetch_package_source",
+        "build_wheel",
+        "verify_wheel",
+        "_install_wheel",
+        "_run",
+        "generate_all",
+    ):
+        monkeypatch.setattr(cli, operation, unexpected_operation)
+    arguments = ["kit", "add", "synthetic-extension", "--product-root", str(product)]
+    if mode == "artifact":
+        wheel = tmp_path / "synthetic_extension-0.1.0-py3-none-any.whl"
+        wheel.write_bytes(b"fixture wheel")
+        arguments.extend(["--wheel", str(wheel)])
+    monkeypatch.setattr("sys.argv", arguments)
+    before = _snapshot(product)
+    with pytest.raises(SystemExit, match="1"):
+        cli.main()
+    assert (
+        "InvalidCatalogEntryError: packages[1] 'synthetic-extension' has misplaced 'extends'"
+        in capsys.readouterr().err
+    )
+    assert operations == []
     assert _snapshot(product) == before

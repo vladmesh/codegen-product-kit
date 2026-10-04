@@ -450,6 +450,16 @@ def _package(raw: object, index: int) -> CatalogPackage:
     )
 
 
+def _catalog_package(raw: object, index: int) -> CatalogPackage:
+    entry = _mapping(raw, f"packages[{index}]")
+    if "extends" in entry:
+        raise InvalidCatalogEntryError(
+            f"packages[{index}] {entry.get('name')!r} has misplaced 'extends'; "
+            "move the record to top-level 'extensions'"
+        )
+    return _package(entry, index)
+
+
 def _extension(raw: object, index: int, parent_names: set[str]) -> CatalogPackage:
     entry = _mapping(raw, f"extensions[{index}]")
     extension = _package(entry, index)
@@ -498,7 +508,8 @@ def parse_catalog(source: str, origin: str = CATALOG_PATH) -> Catalog:
             f"{origin} has format_version {format_version!r}; this tooling reads {FORMAT_VERSION}"
         )
     packages = tuple(
-        _package(raw, index) for index, raw in enumerate(_items(document, "packages", origin))
+        _catalog_package(raw, index)
+        for index, raw in enumerate(_items(document, "packages", origin))
     )
     names: set[str] = set()
     for package in packages:

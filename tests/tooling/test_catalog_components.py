@@ -43,6 +43,33 @@ def test_additive_models_and_missing_metadata() -> None:
     assert legacy.get("reminders").default_binding is None
 
 
+@pytest.mark.parametrize("misplaced", ["moved-extension", "malformed", "null"])
+def test_packages_reject_any_extends_field_at_the_list_boundary(misplaced: str) -> None:
+    document = _document()
+    if misplaced == "moved-extension":
+        document["packages"].append(document["extensions"].pop())
+        index, name = 1, "synthetic-extension"
+    else:
+        document["packages"][0]["extends"] = (
+            "not a parent declaration" if misplaced == "malformed" else None
+        )
+        index, name = 0, "reminders"
+    with pytest.raises(InvalidCatalogEntryError) as raised:
+        parse_catalog(yaml.safe_dump(document))
+    assert str(raised.value) == (
+        f"InvalidCatalogEntryError: packages[{index}] {name!r} has misplaced 'extends'; "
+        "move the record to top-level 'extensions'"
+    )
+
+
+def test_package_list_boundary_still_accepts_unknown_additive_keys() -> None:
+    document = _document()
+    document["packages"][0]["future_metadata"] = {"example": True}
+    catalog = parse_catalog(yaml.safe_dump(document))
+    assert catalog.get("reminders").name == "reminders"
+    assert catalog.get_installable("synthetic-extension").extends.package == "reminders"
+
+
 @pytest.mark.parametrize("source", [ROOT / "packages/catalog.yaml", FIXTURES / "components.yaml"])
 def test_actual_0_7_1_loader_preserves_package_fields_and_selection(source: Path) -> None:
     path = FIXTURES / "released_0_7_1.py"

@@ -374,6 +374,10 @@ catalog and a populated fixture. No second catalog or compatibility adapter is i
 resolve libraries. An extension has the same fields, independent release tags and installation
 recipe as a package, plus required `extends: {package: <name>, versions: <PEP 440 range>}`.
 Its parent must name an entry in `packages`, not another extension or a library.
+The `extends` field belongs only to records in `extensions`. Any occurrence under `packages`,
+including a malformed or null value, raises `InvalidCatalogEntryError` during parsing and directs
+the author to `extensions`; it cannot silently become a package without a parent precondition.
+Other unknown additive keys remain accepted.
 
 Packages and extensions may additionally declare:
 
