@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The slow package crash/recovery proof registers its due-event reader before creating the
+  pending emission, so a live backend timer's recovery cannot precede the reader's stream cursor.
+  Crash, database-state, recovered-delivery, event-identity and stream-count assertions remain.
 - Catalog parsing rejects `extends` under `packages` and directs the author to `extensions`.
   Moving an extension into the package list can no longer discard its parent requirement and
   bypass installation preconditions. Other unknown additive keys remain accepted.

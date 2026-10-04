@@ -1341,6 +1341,10 @@ def test_package_contract_and_migrations_against_real_postgres(
                     assert restart.status_code == 201
                     restart_id = restart.json()["id"]
 
+                # Establish the group's cursor before the crash creates a pending
+                # emission. Another live backend's timer may recover that row before
+                # the replacement runs; a group created later at "$" would skip it.
+                restart_reader, restart_subscriber = await _due_reader("restart")
                 crashing = textwrap.dedent(
                     '''
                     import asyncio
@@ -1383,7 +1387,6 @@ def test_package_contract_and_migrations_against_real_postgres(
                 finally:
                     await connection.close()
 
-                restart_reader, restart_subscriber = await _due_reader("restart")
                 recovering = crashing.replace(
                     "runtime.publish_event = crash",
                     "# replacement process uses the real publisher",
