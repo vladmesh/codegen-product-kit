@@ -6,6 +6,13 @@ Uses modular generators with validated spec types.
 from pathlib import Path
 import sys
 
+from framework.binding_product import (
+    binding_files,
+    require_binding_product,
+    validate_product_bindings,
+)
+from framework.bindings import BindingError
+from framework.generators.bindings import BindingsGenerator
 from framework.generators.controllers import ControllersGenerator
 from framework.generators.event_adapter import EventAdapterGenerator
 from framework.generators.events import EventsGenerator
@@ -26,13 +33,19 @@ def generate_all(repo_root: Path | None = None) -> None:
         repo_root = get_repo_root()
 
     print("Loading and validating specs...")
+    bindings = binding_files(repo_root)
+    if bindings:
+        require_binding_product(repo_root)
     try:
         specs = load_specs(repo_root)
     except SpecValidationError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    binding_plan = validate_product_bindings(repo_root, specs, bindings)
+
     if not specs.models.models:
+        BindingsGenerator(specs, repo_root, binding_plan).generate()
         print("No specs found. Skipping generation.")
         return
 
@@ -52,6 +65,7 @@ def generate_all(repo_root: Path | None = None) -> None:
         ("Events", EventsGenerator(specs, repo_root)),
         ("EventAdapters", EventAdapterGenerator(specs, repo_root)),
         ("Routers", RoutersGenerator(specs, repo_root)),
+        ("Bindings", BindingsGenerator(specs, repo_root, binding_plan)),
     ]
 
     for name, generator in generators:
@@ -67,7 +81,11 @@ def generate_all(repo_root: Path | None = None) -> None:
 
 def main() -> None:
     """CLI entrypoint."""
-    generate_all()
+    try:
+        generate_all()
+    except BindingError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":

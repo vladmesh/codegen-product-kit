@@ -12,6 +12,7 @@ import tomllib
 import zipfile
 
 import pytest
+import yaml
 
 from framework.package_source import DEFAULT_CATALOG_SOURCE, build_wheel
 from tests.tooling.test_package_catalog import _commit, _git, _snapshot, _tag
@@ -159,6 +160,7 @@ def test_real_tag_wheel_installs_and_runs_in_generated_tg_bot_and_image(
             Path(os.environ["CODEGEN_RELEASE_SMOKE_RECEIPT"]).write_text(
                 json.dumps(receipt, indent=2) + "\n"
             )
+            _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate)
     finally:
         subprocess.run(
             ["docker", "image", "rm", "--force", image], check=False, capture_output=True
@@ -191,3 +193,118 @@ def _published_provenance(run, tag: str) -> tuple[dict[str, str], str]:
         tag + "^{}": "d68d997fe43a6067bfadf25bd76283141e1fc598",
     }
     return provenance, package_tree
+
+
+def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
+    """Extend the same default-remote lane without local wheel/source substitutions."""
+    tag = "refs/tags/packages/reminders/v0.5.0"
+    remote = run(["git", "ls-remote", DEFAULT_CATALOG_SOURCE, tag, tag + "^{}"])
+    provenance = {ref: sha for sha, ref in (line.split() for line in remote.splitlines())}
+    assert provenance == {
+        tag: "45a6eca816494f0100bd3ec75d45339eb977e36b",
+        tag + "^{}": "2748ffd05a982b9d193f4e43d47f6e4a6ff70a21",
+    }
+    tree = run(
+        ["git", "-C", str(ROOT), "rev-parse", tag + ":packages/codegen-kit-reminders"]
+    ).strip()
+    assert tree == "55d6cc832dba101e85a4a6053232dacc8513794e"
+    installed = run(
+        [
+            str(tooling_python),
+            "-m",
+            "framework.cli",
+            "add",
+            "reminders",
+            "--product-root",
+            str(product),
+        ]
+    )
+    assert "reminders 0.5.0 (packages/reminders/v0.5.0)" in installed
+    run(
+        [
+            str(tooling_python),
+            "-m",
+            "framework.cli",
+            "bind",
+            "reminders",
+            "--default",
+            "--product-root",
+            str(product),
+        ]
+    )
+    run([str(tooling_python), "-m", "framework.generate"])
+    backend_python = product / "services/backend/.venv/bin/python"
+    installed_evidence = json.loads(
+        run(
+            [
+                str(backend_python),
+                "-c",
+                "import json; from importlib.metadata import distribution; "
+                "from pathlib import Path; "
+                "d=distribution('codegen-kit-reminders'); "
+                "print(json.dumps({'version': d.version, "
+                "'entry_points': [e.name for e in d.entry_points], "
+                "'default_resource': Path(d.locate_file("
+                "'codegen_kit_reminders/bindings/default.yaml')).read_text()}))",
+            ]
+        )
+    )
+    assert installed_evidence["version"] == "0.5.0"
+    assert "reminders" in installed_evidence["entry_points"]
+    assert (product / "services/tg_bot/bindings/reminders.yaml").read_text() == installed_evidence[
+        "default_resource"
+    ]
+    activation = yaml.safe_load((product / "services/backend/manifest.yaml").read_text())
+    assert "reminders" in activation["packages"]
+    generated = (product / "codegen_kit/_active_packages.py").read_text()
+    assert "reminders" in generated and "0.5.0" in generated
+    activation_evidence = json.loads(
+        run(
+            [
+                str(backend_python),
+                "-c",
+                "import json; from dotenv import load_dotenv; load_dotenv('.env.example'); "
+                "from fastapi import FastAPI; "
+                "from codegen_kit.packages import configure_generated_packages; "
+                "app=FastAPI(); configure_generated_packages(app); "
+                "print(json.dumps({'activated': "
+                "[p.manifest.name for p in app.state.codegen_packages], "
+                "'routes': [r.path for r in app.routes]}))",
+            ]
+        ).splitlines()[-1]
+    )
+    assert activation_evidence["activated"] == ["reminders"]
+    assert "/reminders" in activation_evidence["routes"]
+    assert "/reminders/{reminder_id}" in activation_evidence["routes"]
+    run(["make", "typecheck"])
+    evidence = {}
+    for name in ("binding_scenarios", "binding_redis_scenarios"):
+        script = str(ROOT / f"tests/copier/{name}.py")
+        evidence[name] = json.loads(
+            run(
+                [
+                    str(tg_bot / ".venv/bin/python"),
+                    "-c",
+                    f"import runpy; runpy.run_path({script!r}, run_name='__main__')",
+                ]
+            ).splitlines()[-1]
+        )
+    receipt = {
+        "candidate": candidate,
+        "catalog_source": DEFAULT_CATALOG_SOURCE,
+        "tag_provenance": provenance,
+        "package_tree": tree,
+        "installed_package": installed_evidence,
+        "activation": activation["packages"],
+        "active_contract": generated,
+        "runtime_activation": activation_evidence,
+        "library_version": evidence["binding_scenarios"]["library_version"],
+        "generated_bindings_sha256": sha256(
+            (product / "services/tg_bot/src/generated/bindings.py").read_bytes()
+        ).hexdigest(),
+        "evidence": evidence,
+        "run_id": os.environ["GITHUB_RUN_ID"],
+    }
+    Path(os.environ["CODEGEN_BINDINGS_SMOKE_RECEIPT"]).write_text(
+        json.dumps(receipt, indent=2) + "\n"
+    )

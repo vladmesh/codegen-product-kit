@@ -350,11 +350,12 @@ packages:
     versions:
       - {version: 0.3.0, tag: packages/reminders/v0.3.0, requires_core: ">=2,<3"}
       - {version: 0.4.0, tag: packages/reminders/v0.4.0, requires_core: ">=2.1,<3"}
-      - {version: 0.5.0, tag: packages/reminders/v0.5.0, requires_core: ">=2.2,<3"} # prepared
+      - {version: 0.5.0, tag: packages/reminders/v0.5.0, requires_core: ">=2.2,<3"}
 ```
 
-The 0.5.0 source/catalog entry is release preparation. Its tag is published only by the
-separate reviewed PO operation; until then core 2.2 selection refuses the unpublished tag.
+Reminders 0.5.0 and textparse 0.1.0 are independently published immutable package tags.
+Their source trees and refs are preserved by the bindings increment; a later core release
+does not republish either component.
 
 The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
 (`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
@@ -406,15 +407,15 @@ Packages and extensions may additionally declare:
 - `recommended_with`: a list of `{library, why}` records naming catalog libraries. This is
   curated usefulness, independent of computed type compatibility. It triggers no installation.
 - `default_binding`: `python.module:relative/resource/path` identifying a resource shipped by
-  that component. It is an author-provided starting point for a later product-owned binding;
+  that component. It is an author-provided starting point for a product-owned binding;
   the catalog neither installs nor executes it. The loader validates its syntax, not resource
   existence. Release-source verification must establish that it actually ships.
 
 Missing optional fields mean no declared action, recommendation or binding. Tooling must not
 infer them for older packages. Catalog interface metadata does not certify an older selected
 release; consumers must verify the selected installed manifest before generating bindings.
-Manifest actions and finite binding validation now exist. Binding CLI, handler generation and
-execution remain subsequent work; validation calls no product runtime or parser.
+Manifest actions, finite validation, binding CLI, handler generation and relay admission share
+the installed-product boundary below; validation calls no product runtime or parser.
 
 Libraries declare `{name, distribution, path, module, summary, functions, versions}`. Each
 function has `{name, input, output, value}`; `value` names one required property of its object
@@ -432,17 +433,16 @@ published tag is `packages/textparse/v0.1.0`. Reminders recommends textparse. Th
 0.5 manifest and catalog publish complete create/list/cancel schemas and the resource
 `codegen_kit_reminders:bindings/default.yaml`; 0.3/0.4 remain unchanged and selectable.
 The newest catalog metadata does not backport actions or binding support to old wheels:
-later binding admission must load the actual installed manifest/version. Historical fixtures
+binding admission loads the actual installed manifest/version. Historical fixtures
 come from real release tags with byte/tree provenance; the 0.7.1 reader is unchanged.
 
 #### Finite binding v1
 
 `framework.bindings.load_binding(path)` reads typed data and `validate_binding(binding,
 installed_manifest, catalog)` checks admission. Both reject unknown keys. It resolves action
-names from the supplied installed manifest, not the newest catalog record. There is no
-`kit bind` command or generated handler on this card. The packaged default is a starting
-resource for a later copy to `services/tg_bot/bindings/reminders.yaml`. That copy becomes
-user-owned; generation must not overwrite it. The package resource remains package-owned.
+names from the supplied installed manifest, not the newest catalog record. `kit bind` copies
+the installed default to `services/tg_bot/bindings/reminders.yaml`. That copy becomes
+product-owned; regeneration does not overwrite it. The resource remains package-owned.
 
 The grammar is deliberately finite:
 
@@ -477,7 +477,7 @@ and adds only guarded minLength support; unsupported constraints still refuse. T
 `primary_output_matches` inference remains semantic and demonstrates actual textparse `when`
 matching actual reminder create's date-time, never `rest` or a secondary field.
 
-The future generator must require one configured product IANA timezone with no fallback;
+The generated handler requires one configured product IANA timezone with no fallback;
 `validate_product_timezone` refuses missing/invalid zones. The library receives the caller's
 clock and explicit zone. Preset offsets use elapsed UTC seconds from the callback's caller
 clock; tomorrow is the next local calendar date at 09:00 in that same zone. A wall time in a
@@ -487,9 +487,8 @@ in the product zone, for example `7 October 2026 at 14:02`, independent of host 
 
 The default `/reminders` displays only scheduled items, attaches cancellation to `item.id`,
 and routes `reminders.due` to `event.user_ref` with `event.text`. Complete action and event
-schemas remain in the manifest/catalog. Validators admit declarations only; runnable
-Telegram registration, callback state, API calls and due relay/dedupe are later generated
-product behavior. Recurrence, custom preset values, filter expressions beyond equality, nullable/optional display
+schemas remain in the manifest/catalog. Validators admit declarations; generated Telegram
+commands, callbacks and the relay execute them in the product interpreter. Recurrence, custom preset values, filter expressions beyond equality, nullable/optional display
 fields, nested field paths, arbitrary time formats, error routing and general binding workflows
 are intentionally unsupported. See [reminders preparation](releases/reminders-0.5.0.md).
 
@@ -510,7 +509,7 @@ The conservative matching subset is:
 - `title`, `description`, `default`, `examples`, `$comment` and `$schema` annotations are ignored
   at schema positions, including nested schemas. Literal enum/const object contents are preserved.
 - At the function result boundary, null means no result and is removed before projection.
-  A later binding handles that branch. Null inside a primary value or parameter remains a union.
+  A parsed-create binding handles that branch. Null inside a primary value or parameter remains a union.
 - Types and formats must agree. A target needs semantic discrimination through `format`,
   `enum`, `const`, semantic array items or a semantic required object field. A plain string
   parameter creates no inferred edge, even when the source is also a string.
@@ -730,10 +729,10 @@ product events. Each entry contains a generated envelope with `event_id` (UUID),
 `occurred_at`, integer `schema_version` (currently `1`), and the declared message under `payload`.
 Publishers create this metadata, while consumers deserialize the whole typed envelope.
 
-Generated subscriber groups are named `events:<service>`. Each consuming service gets its own stable
+Generated backend adapter subscriber groups are named `events:<service>`. Each consuming service gets its own stable
 group, preserving fan-out: replicas of one service compete within that service's group, while a
 different service receives the same stream entry through its own group. Consumer names include the
-role, hostname and process id. FastStream creates a group at `$` on its first start, so that first
+role, hostname and process id. Those adapters let FastStream create a group at `$` on its first start, so that first
 start establishes the current stream tail and consumes only later entries. A deployment must start
 and ready a new consuming service before allowing any event it must receive to be published; events
 published before the group's first creation are deliberately not replayed. Once the group exists,
@@ -903,3 +902,126 @@ about 525,600 a year; the 10-second minimum would add 8,640 a day.
 `JOBS_FIRE_CAPABILITY` secret, compared with `compare_digest`. The header is intentionally absent
 from the generated schemas and from OpenAPI. It must never be logged, placed in LLM-facing data, or
 carried in a URL, an event payload or an error body. Reading evidence back does not carry it.
+
+
+### Product Telegram bindings
+
+Install into a generated `backend,tg_bot` product using its pinned candidate tooling:
+
+```bash
+kit add reminders --product-root /path/to/product
+kit add textparse --product-root /path/to/product
+kit bind reminders --default --product-root /path/to/product
+# Explicit override, including replacement of an existing product binding:
+kit bind reminders --file /path/to/custom-reminders.yaml --product-root /path/to/product
+# Subsequent product edits:
+cd /path/to/product
+make generate-from-spec
+```
+
+`framework.binding_product.validate_product_bindings` is the shared whole-product boundary
+for bind and regeneration. The backend and bot must have their own installed virtualenvs.
+Isolated interpreter queries read only stdlib metadata; a host interpreter/site directory,
+a catalog claim or an allowlist alone cannot establish installation. Backend resolution
+checks the actual package entry point, manifest identity/version, tooling and product-facade core compatibility and
+resources without loading its runtime. The default must resolve inside that installed entry
+point module. Bot library admission combines the tooling catalog's function schema with
+installed distribution/version, RECORD module evidence and the finite export's static
+signature. No library or package runtime code is imported/executed by the tooling.
+
+The complete binding set is validated before any generated output changes. Unknown mappings,
+missing actions/events/recipients/libraries, incompatible settings, repeated package bindings,
+commands/events and callback button labels fail explicitly. `start` and `command` are reserved;
+commands have Telegram's 32-character limit. No old package obtains actions from newer catalog
+metadata. A repeated byte-identical default is idempotent. A differing existing file is retained
+and refused with `BindingOwnedFileError`; use `--file` for an explicit replacement. Generation
+owns `services/tg_bot/src/generated/bindings.py` and `binding_relay.py`; product bindings and
+service manifests stay product-owned. Removing every binding emits an inert seed and removes
+the generated relay companion. Backend-less bots retain the inert seed and fail-closed admission,
+without a parser import, relay startup or additional Redis environment requirement.
+
+Bind adds a missing timezone declaration to `services/tg_bot/manifest.yaml` through the current
+service settings registry: `{type: string, format: x-iana-tz}` at the binding's key. A matching
+existing product-owned declaration is reused; unrelated declarations survive. Package ownership,
+duplicate owners or a different schema fail. This declares a requirement, never a value.
+Before scheduling, an operator separately writes the explicit product value through the existing
+backend contract, using the privately held `SETTINGS_WRITE_CAPABILITY`:
+
+```bash
+curl --fail-with-body -X POST "$BACKEND_API_URL/settings/set" \
+  -H "Content-Type: application/json" \
+  -H "X-Settings-Capability: $SETTINGS_WRITE_CAPABILITY" \
+  -d '{"contract_version":1,"key":"timezone","scope":"product","value":"America/New_York"}'
+```
+
+Handlers read `POST /settings/get` with `contract_version: 1`, the declared key and
+`scope: product`, without a subject id. Missing (404), unavailable, malformed or non-IANA
+values give an explicit setup reply before create. No environment/host/UTC default or user
+setting participates. `month_word` uses an explicit English month table and the product zone.
+
+`register(application, BackendClient)` adds commands/callbacks after the existing admission
+TypeHandler. `start`/`stop` run from the existing `post_init`/`post_shutdown` and own the relay's
+subscriber broker/client; startup failure closes those resources and the existing publisher.
+The generated module receives the client factory, avoiding an import of bot main. The real
+parser is called only in generated product bot code with the original text, `lang=en`, an
+aware clock and the product zone. Empty original or parsed rest gives `on_invalid_text` and
+never create. Only None offers the three declared presets, retaining original text. Relative
+presets use elapsed UTC arithmetic; tomorrow means product-local 09:00 on the next date, with
+round-trip zone validation rejecting gaps/folds. Parser refusal policy is preserved.
+
+Action methods, prefix/path, input/output schemas, mappings and replies come from the validated
+binding/installed manifest. The default uses POST `/reminders` with only text/remind_at,
+GET `/reminders`, and DELETE `/reminders/{reminder_id}`. All use
+`request_as_telegram_user` with the real command/callback update's user id. BackendClient sends
+its capability and canonical Telegram identity headers; body/query/callback identities are never
+trusted. Generated mutations use one attempt: an uncertain mutating HTTP result cannot safely be retried
+without a package action idempotency key. HTTP/configuration/schema failures give a bounded
+reply that advises checking access/configuration and listing items before another attempt;
+capabilities and backend exception bodies are never echoed.
+
+Selections use `b1:<24-character-random-token>:<index>`, below 64 bytes, with no task or identity
+in callback data. The process-local store retains at most 1,024 contexts for 600 seconds, with
+at most 65,536 encoded context bytes and 100 choices each; original tasks/replies are capped at
+4,000 characters; replies stay within 4,000 UTF-16 code units. List contexts retain only fields needed by the button's validated arguments.
+Selections are bound to initiating user/chat and the declared binding/action, consumed before
+any await, and cannot be reused, transferred or forged. Expired, evicted, restarted or previously
+used selections explicitly require running the command again. An uncertain failed request does
+not reopen its selection. These tokens provide no durable cross-restart callback workflow.
+
+The relay consumes the actual declared stream name, `reminders.due` for the released default,
+in stable group `events:tg_bot`. Live and XAUTOCLAIM recovery readers have process/instance-unique
+consumer names. It creates each stream/group at `0-0` with MKSTREAM before readers start, accepting
+only BUSYGROUP on repeat, preserving existing cursors and replaying due events published before
+first startup. This deliberately differs from the generic backend adapter's first-start tail.
+Transport is the existing EventEnvelope and BinaryMessageFormatV1. Envelope version/UUID/aware
+time, the actual payload schema and declared recipient are validated; only canonical positive
+`telegram:<id>` recipients are routed to `send_message`, with the reply rendered from binding data.
+
+Redis SET NX EX establishes an atomic 120-second claim on `bindings:events:tg_bot:<event_id>`
+shared across replicas/restarts. Delivery has a 45-second timeout. Token-checked Lua completion
+replaces the owned claim with `done` for seven days (604,800 seconds); completed duplicates ACK
+without sending, including concurrent stream entries. A claim held by another delivery leaves
+that entry pending. A transient failure releases only its owned claim and leaves the stream
+entry pending for XAUTOCLAIM (five-second idle threshold, one-second polling). A crash before
+completion permits retry after lease expiry. Forbidden/deactivated/missing chats complete a
+terminal marker and ACK; invalid envelopes/recipients ACK immediately with a fixed bounded
+warning, without retry or payload logging. Other errors retry. Owned subscribers and Redis
+connections close on startup failure/shutdown.
+
+This is bounded dedupe over retryable stream delivery, not exactly-once Telegram delivery.
+A crash or an ambiguous Telegram timeout after Telegram accepts a send but before the completed
+marker can duplicate it. A process suspended beyond its lease may also lose exclusivity;
+Redis persistence/availability and untrimmed backlog are prerequisites. Completed-marker expiry
+allows a very late duplicate to send again. There is no bot database, second outbox or external
+API idempotency promise.
+
+The existing `published_remote` slow Copier lane installs the actual reminders 0.5.0 and textparse
+0.1.0 independent tags through default catalog/remote paths with exact candidate tooling, binds
+and regenerates without handwritten handlers, and runs controlled-clock fake-backend handler
+scenarios. The same lane runs a real Redis stream with a fake Telegram sender, covering pre-start
+publication, normal/duplicate ids, concurrent readers, restart, transient retry, terminal refusal,
+invalid envelopes/recipients and abandoned-claim expiry. Uploaded
+`bindings-remote-redis-smoke-<run-id>` records candidate, immutable tag targets/trees, installed
+resource/version/activation, generated hash and execution evidence. Local metadata/transport
+fixtures do not establish that remote/real-Redis result. Actual 2.1 Copier upgrade, final core
+release, orchestrator installation and live stand acceptance remain later sprint boundaries.

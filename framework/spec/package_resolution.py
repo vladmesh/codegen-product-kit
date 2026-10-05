@@ -41,7 +41,7 @@ def backend_site_packages(repo_root: Path) -> Path | None:
         current = Path(site.getsitepackages()[0])
         return current if current.is_dir() else None
     result = subprocess.run(  # noqa: S603
-        [str(python), "-c", "import site; print(site.getsitepackages()[0])"],
+        [str(python), "-I", "-c", "import site; print(site.getsitepackages()[0])"],
         check=True,
         capture_output=True,
         text=True,

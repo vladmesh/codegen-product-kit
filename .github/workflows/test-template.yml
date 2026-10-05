@@ -95,6 +95,16 @@ jobs:
 
   test-pytest:
     runs-on: ubuntu-latest
+    services:
+      binding-redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       CODEGEN_TOOLING_REQUIREMENT: "codegen-kit-tooling @ git+${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}@${{ github.event.pull_request.head.sha || github.sha }}"
     steps:
@@ -123,6 +133,8 @@ jobs:
       - name: Run copier tests (slow)
         env:
           CODEGEN_RELEASE_SMOKE_RECEIPT: ${{ runner.temp }}/textparse-remote-receipt.json
+          CODEGEN_BINDINGS_SMOKE_RECEIPT: ${{ runner.temp }}/bindings-remote-receipt.json
+          CODEGEN_BINDINGS_REDIS_URL: redis://127.0.0.1:6379/14
         run: make test-copier-slow
 
       - name: Preserve published textparse release-smoke receipt
@@ -130,4 +142,11 @@ jobs:
         with:
           name: textparse-remote-release-smoke-${{ github.run_id }}
           path: ${{ runner.temp }}/textparse-remote-receipt.json
+          if-no-files-found: error
+
+      - name: Preserve published bindings and real Redis receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-remote-redis-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/bindings-remote-receipt.json
           if-no-files-found: error
