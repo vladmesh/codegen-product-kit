@@ -46,7 +46,10 @@ imported. `publish_event()` uses the generated product transport. Version `2.1.0
 `timers` manifest field, fired by the [core timer loop](#core-timer-loop), and the
 `caller_identity` request dependency of the [core caller identity](#core-caller-identity-v1); a
 package that declares timers or depends on the caller identity requires `>=2.1`, and a package
-without them is unchanged. The unchanged wheel can therefore
+without them is unchanged. Version `2.2.0` admits optional `actions`, `default_binding`, and
+message `recipient` metadata. Tooling validates these contracts; runtime activation executes
+none of them and imports no tooling, channel or parser code. Reminders 0.5.0 requires `>=2.2,<3`.
+The unchanged wheel can therefore
 be installed into another generated product with the same compatible core without rebuilding it.
 
 ### Package manifest
@@ -74,6 +77,9 @@ rejects unknown fields. Its fields are:
 | `setting_seeds` | Optional ordered `{key, scope: product}` bindings to package-owned local setting names | Enforced against `settings_schema`; duplicate, unknown-key, unsupported-scope, malformed, and unknown nested fields are refused |
 | `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
 | `resources` | Named distribution resource paths | Enforced as existing, non-traversing distribution resources |
+| `actions` | Optional list of stable `{name, summary, operation: {method, path}, input, output}` records (core 2.2) | Tooling rejects unknown keys, duplicate/malformed names, methods/paths and invalid inline typed schemas; activation admits metadata only |
+| `default_binding` | Optional non-traversing `module:path` resource (core 2.2) | Tooling validates syntax; wheel/source tests prove shipping; activation does not load it |
+| `events.messages.<event>.recipient` | Optional name of a required string field in that existing message | Tooling rejects unknown, optional, nullable or non-string recipient fields; no separate emits registry |
 
 The tooling API is `framework.spec.packages.load_package_manifest(path)`. Unknown fields raise
 `UnknownPackageManifestFieldError`; invalid syntax and other schema errors raise
@@ -344,7 +350,11 @@ packages:
     versions:
       - {version: 0.3.0, tag: packages/reminders/v0.3.0, requires_core: ">=2,<3"}
       - {version: 0.4.0, tag: packages/reminders/v0.4.0, requires_core: ">=2.1,<3"}
+      - {version: 0.5.0, tag: packages/reminders/v0.5.0, requires_core: ">=2.2,<3"} # prepared
 ```
+
+The 0.5.0 source/catalog entry is release preparation. Its tag is published only by the
+separate reviewed PO operation; until then core 2.2 selection refuses the unpublished tag.
 
 The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
 (`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
@@ -363,7 +373,7 @@ name, version, `requires_core`, settings names and environment names must agree.
 The format remains v1 because released products pin tooling while reading the catalog from the
 default branch. Kit 0.7.1's reader and existing orchestrator readers see only `packages`, ignore
 the additive fields, and retain the old fields and version selection. Core 2.0 still selects
-reminders 0.3.0; core 2.1 still selects reminders 0.4.0. An offline regression executes the
+reminders 0.3.0; core 2.1 still selects reminders 0.4.0; core 2.2 selects reminders 0.5.0. An offline regression executes the
 unchanged 0.7.1 loader, with its tag, commit and source blob recorded in
 [`tests/fixtures/catalog/README.md`](../tests/fixtures/catalog/README.md), on both the repository
 catalog and a populated fixture. No second catalog or compatibility adapter is involved.
@@ -384,7 +394,15 @@ Packages and extensions may additionally declare:
 
 - `actions`: a list of `{name, input, output}` records. `input` is an object JSON Schema with
   named `properties`; `required` names must be declared properties. `output` is a JSON Schema.
-  These are catalog signatures, not runtime manifest fields or endpoints inferred from OpenAPI.
+  Reminders 0.5 additionally publishes `summary` and `operation: {method, path}` matching its
+  manifest. Operations use uppercase GET/POST/PUT/PATCH/DELETE and an empty path or slash-prefixed
+  route suffix relative to `http.prefix`. Names use `[a-z][a-z0-9_]*`. Path placeholders must
+  name required inputs. Schemas are inline typed Draft 2020-12 objects/arrays/scalars; no external
+  lookup, reference aliases or action executor is introduced. The stable action vocabulary is
+  declared, with schemas and methods/paths structurally verified against real FastAPI OpenAPI.
+  Comparison flattens body plus public path/query inputs, resolves local OpenAPI refs, strips
+  only titles/descriptions, and retains formats, requiredness, enum/default and constraints.
+  JSON success outputs are checked too; deliberate schema/operation drift fails the test.
 - `recommended_with`: a list of `{library, why}` records naming catalog libraries. This is
   curated usefulness, independent of computed type compatibility. It triggers no installation.
 - `default_binding`: `python.module:relative/resource/path` identifying a resource shipped by
@@ -395,7 +413,8 @@ Packages and extensions may additionally declare:
 Missing optional fields mean no declared action, recommendation or binding. Tooling must not
 infer them for older packages. Catalog interface metadata does not certify an older selected
 release; consumers must verify the selected installed manifest before generating bindings.
-Runtime manifest actions, their validation and binding generation belong to subsequent work.
+Manifest actions and finite binding validation now exist. Binding CLI, handler generation and
+execution remain subsequent work; validation calls no product runtime or parser.
 
 Libraries declare `{name, distribution, path, module, summary, functions, versions}`. Each
 function has `{name, input, output, value}`; `value` names one required property of its object
@@ -409,62 +428,70 @@ are outside this representation. Required named properties must exist.
 Libraries are stateless language dependencies: no package entry point, allowlist, lifecycle,
 database, HTTP activation or events. `kit add textparse` installs a plain dependency into
 `services/tg_bot`; the library source and 0.1.0 catalog entry now exist. Its independent
-tag remains a post-merge release operation. Reminders recommends textparse, without adding
-actions or a default binding to its existing releases.
+published tag is `packages/textparse/v0.1.0`. Reminders recommends textparse. The real
+0.5 manifest and catalog publish complete create/list/cancel schemas and the resource
+`codegen_kit_reminders:bindings/default.yaml`; 0.3/0.4 remain unchanged and selectable.
+The newest catalog metadata does not backport actions or binding support to old wheels:
+later binding admission must load the actual installed manifest/version. Historical fixtures
+come from real release tags with byte/tree provenance; the 0.7.1 reader is unchanged.
 
-The reminders actions/default binding below remain future contract data. The textparse
-signature matches its actual source, without announcing a published tag. The complete reminders create/list/cancel,
-English-only textparse `when`, version records and test-only extension appear in
-[`tests/fixtures/catalog/components.yaml`](../tests/fixtures/catalog/components.yaml).
-The repository catalog retains empty extensions and no reminders actions/default binding.
+#### Finite binding v1
 
-```yaml
-# Future optional fields under the reminders package record:
-actions:
-  - name: create
-    input:
-      type: object
-      properties:
-        text: {type: string}
-        remind_at: {type: string, format: date-time}
-      required: [text, remind_at]
-      additionalProperties: false
-    output:
-      type: object
-      properties: {id: {type: string, format: uuid}}
-      required: [id]
-recommended_with:
-  - {library: textparse, why: Parses an English time phrase for remind_at.}
-default_binding: codegen_kit_reminders:bindings/default.yaml
+`framework.bindings.load_binding(path)` reads typed data and `validate_binding(binding,
+installed_manifest, catalog)` checks admission. Both reject unknown keys. It resolves action
+names from the supplied installed manifest, not the newest catalog record. There is no
+`kit bind` command or generated handler on this card. The packaged default is a starting
+resource for a later copy to `services/tg_bot/bindings/reminders.yaml`. That copy becomes
+user-owned; generation must not overwrite it. The package resource remains package-owned.
 
-# Actual source entry under libraries (tag publication follows merge):
-name: textparse
-distribution: codegen-kit-textparse
-path: packages/codegen-kit-textparse
-module: codegen_kit_textparse
-summary: English time phrase to an instant and remaining text, or no result.
-functions:
-  - name: when
-    input:
-      type: object
-      properties:
-        text: {type: string}
-        lang: {type: string, const: en}
-        now: {type: string, format: date-time}
-        tz: {type: string, format: x-iana-tz}
-      required: [text, lang, now, tz]
-      additionalProperties: false
-    output:
-      type: [object, 'null']
-      properties:
-        at: {type: string, format: date-time}
-        rest: {type: string}
-      required: [at, rest]
-      additionalProperties: false
-    value: at
-versions:
-  - {version: 0.1.0, tag: packages/textparse/v0.1.0, requires_python: '>=3.11'}
-```
+The grammar is deliberately finite:
+
+| Data | Contract |
+|---|---|
+| Header | `binding_version: 1`, `package`, `timezone: {key, scope: product, required: true, format: x-iana-tz}` |
+| Commands | Unique bare command names, English `help`, discriminated `kind: parsed_create` or `kind: list` |
+| Parsed create | `action`, `args`, `parse: {function: textparse.when, text: $text, lang: en, now: $clock, tz: $timezone}`, `nonempty_text: true`, `on_invalid_text`, `reply`, mandatory `on_empty` |
+| On-empty branch | English `text`, `context: original_text`, exactly three ordered `presets` with label, explicit time, action, args and reply |
+| Preset times | `{kind: offset, seconds: 300}`, `{kind: offset, seconds: 3600}`, `{kind: wall_time, days: 1, time: '09:00'}`; no free-text parse |
+| List | `action`, `args`, `filter: {field: state, equals: scheduled}`, `reply_each`, `on_none`, buttons with label, action, args and reply |
+| Events | Unique published `event`, `to` referencing that message's declared recipient, `reply`; no duplicate message registry |
+| Reply | `parts` of literal strings or `{source: <reference>, format: month_word}`; `format` omitted for plain text |
+
+Sources are only `$text` (unaltered text after the command), `$clock` (caller-supplied aware
+instant), `$timezone` (explicit product setting), `$parsed.<field>`, `$preset.at`,
+`$item.<field>`, `$event.<field>` and `$result.<field>`. Each is available only in its branch:
+parse arguments use text/clock/timezone; parsed create uses parsed fields; preset callbacks
+use original text and their computed instant; cancellation buttons use the listed item;
+reply fields use the relevant action result, listed item or event. References must name
+required fields in the real schema. Unknown/optional fields, unknown actions/functions/events,
+unknown arguments, missing required arguments, incompatible schemas and duplicate commands
+fail admission. Reply fields must have the declared display type. There is no eval, import
+string, arbitrary expression, template interpolation, secondary parse function or scripting.
+Literal reply strings are emitted as literals.
+
+A nullable parse result takes `on_empty` exclusively and never calls create. A non-null result
+maps `rest` to text and primary `at` to remind_at; empty original/parsed text takes
+`on_invalid_text` before any create. That explicit guard proves the API's `minLength: 1`.
+`argument_schema_matches` reuses the existing conservative matcher for plain argument types
+and adds only guarded minLength support; unsupported constraints still refuse. The public
+`primary_output_matches` inference remains semantic and demonstrates actual textparse `when`
+matching actual reminder create's date-time, never `rest` or a secondary field.
+
+The future generator must require one configured product IANA timezone with no fallback;
+`validate_product_timezone` refuses missing/invalid zones. The library receives the caller's
+clock and explicit zone. Preset offsets use elapsed UTC seconds from the callback's caller
+clock; tomorrow is the next local calendar date at 09:00 in that same zone. A wall time in a
+DST gap or fold must fail explicitly, never guess an instant. Callback context retains the
+original reminder text, not nullable parsed rest. `month_word` means an English month name
+in the product zone, for example `7 October 2026 at 14:02`, independent of host locale.
+
+The default `/reminders` displays only scheduled items, attaches cancellation to `item.id`,
+and routes `reminders.due` to `event.user_ref` with `event.text`. Complete action and event
+schemas remain in the manifest/catalog. Validators admit declarations only; runnable
+Telegram registration, callback state, API calls and due relay/dedupe are later generated
+product behavior. Recurrence, custom preset values, filter expressions beyond equality, nullable/optional display
+fields, nested field paths, arbitrary time formats, error routing and general binding workflows
+are intentionally unsupported. See [reminders preparation](releases/reminders-0.5.0.md).
 
 #### Primary-output matching
 

@@ -57,8 +57,8 @@ def test_reminders_package_manifest_declares_only_the_implemented_deployment_mod
     manifest = load_package_manifest(REMINDERS)
 
     assert manifest.name == "reminders"
-    assert manifest.version == "0.4.0"
-    assert manifest.requires_core == ">=2.1,<3"
+    assert manifest.version == "0.5.0"
+    assert manifest.requires_core == ">=2.2,<3"
     assert [(timer.job, timer.every_seconds) for timer in manifest.timers] == [("tick", 60)]
     assert manifest.deployment.modes == ["in_process"]
     assert manifest.jobs_schema["properties"]["tick"]["required"] == ["at"]

@@ -72,6 +72,20 @@ into generated backend,tg_bot, verifies the tg_bot interpreter and dependency cl
 builds and calls through the tg_bot image. It runs in the existing slow `test-pytest` CI leg;
 workers do not run it locally under the control-host rule.
 
+The same slow test is parameterized for the actual published textparse tag and default remote
+catalog/source, using exact candidate tooling. The required `test-pytest` job executes both cases;
+missing CI configuration fails the remote case. A successful remote interpreter/image proof writes
+an uploaded `textparse-remote-release-smoke-<run-id>` JSON receipt. Local fixture evidence cannot
+stand in for this remote receipt. No worker runs either heavy proof locally.
+
+`tests/tooling/test_reminders_contracts.py` imports the real reminder API with inert identity/storage
+dependencies and compares action inputs/outputs against FastAPI OpenAPI, resolving local refs and
+retaining constraints. Deliberate operation/schema drift must fail. It validates the shipped finite
+binding and its refusal paths, checks actual parser/action schema matching, and verifies preserved
+old package Git trees. Fast generated activation tests admit metadata under core 2.2, exercise real
+caller-owned routes and resolve the installed binding resource. The slow real Hatch wheel fixture
+checks resource bytes. These contract proofs do not execute Telegram handlers or callbacks.
+
 The package migration proof's manual crash/recovery scenario registers its `reminders.due`
 reader before crashing the publisher. A live backend timer may recover a committed pending
 emission before the replacement process runs; creating a new consumer group at the stream's

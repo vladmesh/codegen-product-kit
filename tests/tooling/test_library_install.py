@@ -61,12 +61,12 @@ def test_source_catalog_signature_and_dependency_boundary() -> None:
     assert project["dependencies"] == ["tzdata>=2024.1"]
     assert "entry-points" not in project
     assert not list((ROOT / LIBRARY.path).rglob("package.yaml"))
-    fixture = load_catalog(ROOT / "tests/fixtures/catalog/components.yaml")
-    parameter = fixture.get("reminders").actions[0].input["properties"]["remind_at"]
-    assert primary_output_matches(function, parameter)
     reminders = load_catalog(ROOT / "packages/catalog.yaml").get("reminders")
+    parameter = reminders.actions[0].input["properties"]["remind_at"]
+    assert primary_output_matches(function, parameter)
     assert reminders.recommended_with[0].library == "textparse"
-    assert reminders.actions == () and reminders.default_binding is None
+    assert [action.name for action in reminders.actions] == ["create", "list", "cancel"]
+    assert reminders.default_binding == "codegen_kit_reminders:bindings/default.yaml"
 
 
 def test_library_selection_uses_python_and_stable_version_order() -> None:

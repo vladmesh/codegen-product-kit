@@ -98,3 +98,5 @@ including real Copier update commands and workflow conflict review.
 See [0.7.0 release and upgrade notes](releases/0.7.0.md) for the core timer loop and for the rule
 that a kit core tag and a package tag never share a commit.
 See [0.7.1 release and upgrade notes](releases/0.7.1.md) for the generated lifespan unit-test fix.
+See [reminders 0.5.0 preparation](releases/reminders-0.5.0.md) for core 2.2 action admission,
+the finite default binding and independent package publication prerequisites.

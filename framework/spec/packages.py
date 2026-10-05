@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, SchemaError
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import yaml
 
+from framework.spec.actions import PackageAction, resource_reference
 from framework.spec.manifests import _validate_declaration_schema, empty_declaration_schema
 
 PACKAGE_PROTOCOL_VERSION = 1
@@ -97,6 +98,7 @@ class PackageEventMessage(BaseModel):
 
     model: str
     schema_data: dict[str, Any] = Field(alias="schema")
+    recipient: str | None = None
     model_config = {"extra": "forbid", "populate_by_name": True}
 
     @field_validator("model")
@@ -116,6 +118,18 @@ class PackageEventMessage(BaseModel):
         if schema.get("type") != "object":
             raise ValueError("must describe an object message")
         return schema
+
+    @model_validator(mode="after")
+    def validate_recipient(self) -> PackageEventMessage:
+        if self.recipient is not None:
+            field = self.schema_data.get("properties", {}).get(self.recipient)
+            if (
+                self.recipient not in self.schema_data.get("required", [])
+                or not isinstance(field, dict)
+                or field.get("type") != "string"
+            ):
+                raise ValueError("recipient must name a required string message field")
+        return self
 
 
 class EventsDeclaration(BaseModel):
@@ -268,6 +282,8 @@ class PackageManifest(BaseModel):
     deployment: DeploymentDeclaration = Field(default_factory=DeploymentDeclaration)
     environment: list[EnvironmentDeclaration] = Field(default_factory=list)
     resources: list[ResourceDeclaration] = Field(default_factory=list)
+    actions: list[PackageAction] = Field(default_factory=list)
+    default_binding: str | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -278,6 +294,7 @@ class PackageManifest(BaseModel):
             ("requires", self.requires),
             ("environment", [item.name for item in self.environment]),
             ("resources", [item.name for item in self.resources]),
+            ("actions", [item.name for item in self.actions]),
         ):
             if len(set(values)) != len(values):
                 raise ValueError(f"{field_name} must not repeat a name")
@@ -292,6 +309,11 @@ class PackageManifest(BaseModel):
                 )
         _validate_timers(self.timers, self.jobs_schema)
         return self
+
+    @field_validator("default_binding")
+    @classmethod
+    def binding_resource(cls, value: str | None) -> str | None:
+        return resource_reference(value) if value is not None else None
 
     @field_validator("settings_schema")
     @classmethod

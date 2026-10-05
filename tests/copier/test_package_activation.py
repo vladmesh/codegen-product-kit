@@ -293,6 +293,7 @@ REMINDERS_CALLER_IDENTITY_TEST = textwrap.dedent(
     from collections.abc import AsyncIterator
     from contextlib import asynccontextmanager
     from datetime import datetime
+    from importlib.resources import files
     import sqlite3
     from uuid import UUID
 
@@ -424,6 +425,10 @@ REMINDERS_CALLER_IDENTITY_TEST = textwrap.dedent(
 
     @pytest.mark.asyncio
     async def test_reminders_contract_has_no_owner_input(reminders_app: FastAPI) -> None:
+        default = files("codegen_kit_reminders").joinpath("bindings/default.yaml").read_text()
+        assert "binding_version: 1" in default
+        assert "context: original_text" in default
+        assert "format: month_word" in default
         operations = reminders_app.openapi()["paths"]
         for path in ("/reminders", "/reminders/{reminder_id}"):
             for operation in operations[path].values():
@@ -877,9 +882,36 @@ def test_runtime_activates_a_package_that_declares_timers(
         activated = runtime.discover_packages(["synthetic"])
 
         assert [package.manifest.name for package in activated] == ["synthetic"]
-        assert runtime.CORE_VERSION == "2.1.0"
+        assert runtime.CORE_VERSION == "2.2.0"
     finally:
         installed_manifest.write_text(original)
+
+
+def test_generated_runtime_admits_action_binding_and_recipient_metadata(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from framework.spec.package_resolution import CORE_VERSION
+
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    path = installed_synthetic / "synthetic_package/package.yaml"
+    original = path.read_text()
+    candidate = yaml.safe_load((REMINDERS / "codegen_kit_reminders/package.yaml").read_text())
+    try:
+        data = yaml.safe_load(original)
+        data.update(
+            requires_core=">=2.2,<3",
+            actions=candidate["actions"],
+            default_binding=candidate["default_binding"],
+            events=candidate["events"],
+        )
+        path.write_text(yaml.safe_dump(data))
+        assert runtime.CORE_VERSION == CORE_VERSION == "2.2.0"
+        assert runtime.PACKAGE_PROTOCOL_VERSION == 1
+        assert runtime.discover_packages(["synthetic"])[0].manifest.name == "synthetic"
+        # Activation has no tooling dependency and does not resolve or execute these resources.
+        assert "from framework" not in (project_backend / "codegen_kit/packages.py").read_text()
+    finally:
+        path.write_text(original)
 
 
 def test_runtime_requires_callback_for_declared_setting_seed(
