@@ -195,7 +195,9 @@ def _published_provenance(run, tag: str) -> tuple[dict[str, str], str]:
     return provenance, package_tree
 
 
-def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
+def _bindings_remote_proof(
+    run, product, tooling_python, tg_bot, candidate, *, install_reminders=True, run_redis=True
+):
     """Extend the same default-remote lane without local wheel/source substitutions."""
     tag = "refs/tags/packages/reminders/v0.5.0"
     remote = run(["git", "ls-remote", DEFAULT_CATALOG_SOURCE, tag, tag + "^{}"])
@@ -208,18 +210,23 @@ def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
         ["git", "-C", str(ROOT), "rev-parse", tag + ":packages/codegen-kit-reminders"]
     ).strip()
     assert tree == "55d6cc832dba101e85a4a6053232dacc8513794e"
-    installed = run(
-        [
-            str(tooling_python),
-            "-m",
-            "framework.cli",
-            "add",
-            "reminders",
-            "--product-root",
-            str(product),
-        ]
+    installed = (
+        run(
+            [
+                str(tooling_python),
+                "-m",
+                "framework.cli",
+                "add",
+                "reminders",
+                "--product-root",
+                str(product),
+            ]
+        )
+        if install_reminders
+        else None
     )
-    assert "reminders 0.5.0 (packages/reminders/v0.5.0)" in installed
+    if install_reminders:
+        assert "reminders 0.5.0 (packages/reminders/v0.5.0)" in installed
     run(
         [
             str(tooling_python),
@@ -278,7 +285,9 @@ def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
     assert "/reminders/{reminder_id}" in activation_evidence["routes"]
     typecheck_output = run(["make", "typecheck"])
     evidence = {}
-    for name in ("binding_scenarios", "binding_redis_scenarios"):
+    for name in (
+        ("binding_scenarios", "binding_redis_scenarios") if run_redis else ("binding_scenarios",)
+    ):
         script = str(ROOT / f"tests/copier/{name}.py")
         evidence[name] = json.loads(
             run(
@@ -306,6 +315,8 @@ def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
         "evidence": evidence,
         "run_id": os.environ["GITHUB_RUN_ID"],
     }
-    Path(os.environ["CODEGEN_BINDINGS_SMOKE_RECEIPT"]).write_text(
-        json.dumps(receipt, indent=2) + "\n"
-    )
+    if run_redis:
+        Path(os.environ["CODEGEN_BINDINGS_SMOKE_RECEIPT"]).write_text(
+            json.dumps(receipt, indent=2) + "\n"
+        )
+    return receipt

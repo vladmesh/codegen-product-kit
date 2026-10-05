@@ -114,3 +114,30 @@ execution receipt is uploaded as `bindings-remote-redis-smoke-<run-id>` with mis
 failure. This lane retains the textparse interpreter/image proof and original artifact.
 Workers do not run real Redis, Docker, image/dependency or product typecheck proofs locally;
 the task packet's broad wrapper and its permitted focused subsets supply local evidence.
+
+`tests/copier/test_core_upgrade.py` adds a CI-only slow released-product proof in the same required
+`test-pytest` job, using full history/tags and `CODEGEN_CORE_UPGRADE_SHA` set to the full PR head
+SHA (push: commit SHA). It clones that exact source with the original annotated 0.7.1 objects;
+an isolated Git URL mapping permits faithful old/candidate tooling downloads while retaining
+original URL/commit provenance. Published-component installs use the actual default remote with
+that mapping removed. There is no current-tooling override on the released copy, dirty snapshot
+attestation, patched baseline, skip, or fresh-copy substitute for update.
+
+The test commits generated 0.7.1 output as-is, verifies core 2.1/old lock/runtime tooling and clean
+baseline, executes real Copier update with conflict rejection, then reads candidate core 2.2,
+answers, lock, installed direct URL/import origin and protected-file hashes. Product setup,
+validation, generation, typecheck and unit tests precede actual reminders 0.5/textparse 0.1
+installation and default bind. The existing fake-backend/clock handler corpus is reused for the
+unbound-to-bound transition, confirmation, None presets, caller headers, timezone/DST, list/cancel;
+the established real Redis lane stays separate. Product typecheck output is inspected as well as
+its exit status because the generated Makefile loops over services.
+
+Required upload `core-21-upgrade-smoke-<run-id>` fails if its receipt is absent. It records exact
+producer/tag/tree/blob and candidate identities, baseline commit/answers, copy/update argv/output,
+conflict scan, protected hashes, updated answers/lock and installed tooling provenance, all product
+check output and published-component/scenario results. Core update, setup/generation and later
+install/binding changes have separate hash diffs. The two existing textparse/binding artifacts
+and required job names remain intact. No local slow upgrade, uv-download/typecheck, Docker or
+real Redis run is authorized; use focused permitted subsets, lint and the packet's canonical broad
+wrapper once after final edits. Worker-local content receipts remain distinct from the executed
+dispatcher exact-SHA gate and CI artifacts. See [0.8.0 evidence limits](releases/0.8.0.md).
