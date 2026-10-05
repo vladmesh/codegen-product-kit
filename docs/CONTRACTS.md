@@ -519,10 +519,15 @@ Relative minute/hour offsets use elapsed UTC arithmetic. Absolute times round-tr
 folds through zoneinfo and return `None` for nonexistent or ambiguous wall times, including
 next-occurrence rollover; no DST correction or fold choice is guessed. Compound durations,
 recurrence, weekdays, month dates, word numbers, fuzzy grammar, noon/midnight and part-of-day
-inference and attached textual suffixes such as `at 9am-ish` or `in 2 minutes-ish` are
-refused. Ordinary sentence punctuation after an exact time remains valid and is retained
-in the remainder. Guards also conservatively refuse reserved temporal vocabulary in
-the remaining task text. The runtime closure is stdlib plus `tzdata` only, with no parser engine
+inference are refused. All three forms share admission checks before resolution, rollover
+or remainder cleanup: a contiguous punctuation joiner run followed by a word cannot
+continue a supported token (`at 7pm'ish`, `in 2 hours~ish`, `at 9am...ish`), and the
+bounded qualifiers `ish`, `approx`, `roughly`, `or so`, `give or take` and `thereabouts`
+outside the consumed span cause refusal. No qualifier removal or substring retry is
+performed. Ordinary sentence punctuation followed by whitespace/end and spaced sentence
+dashes retain their behavior and are preserved in the remainder. Guards also conservatively
+refuse reserved temporal vocabulary in the remaining task text. The runtime closure is
+stdlib plus `tzdata` only, with no parser engine
 or language registry. Narrow corpus, configuration, whitespace and dependency details are in
 the [package README](../packages/codegen-kit-textparse/README.md) and its notices.
 

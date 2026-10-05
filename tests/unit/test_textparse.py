@@ -123,6 +123,129 @@ def test_attached_textual_suffixes_are_refused(time: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        "at 7pm'ish",
+        "at 7pm’ish",
+        "tomorrow at 9'ish",
+        "in 2 minutes'ish",
+        "in 2 hours~ish",
+        "tomorrow at 9am~ish",
+        "at 9am–ish",
+        "in 2 minutes–ish",
+        "at 9am—ish",
+        "tomorrow at 9—ish",
+        "in 2 minutes—ish",
+        "at 9am(ish)",
+        "at 9am+ish",
+        "at 9am*ish",
+        "at 9am...ish",
+        "at 9 approx",
+        "at 9 roughly",
+        "roughly at 9",
+        "at 9 or so",
+        "at 9am give or take",
+        "at 9am (ish)",
+        "at 9 -ish",
+        "at 9 thereabouts",
+    ],
+)
+def test_review_approximation_examples_are_refused(text: str) -> None:
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    assert textparse.when(text, "en", clock, "UTC") is None
+
+
+@pytest.mark.parametrize("time", ["at 9am", "tomorrow at 9", "in 2 hours"])
+@pytest.mark.parametrize(
+    "joiner", ["-", "'", "’", "~", "–", "—", "(", "+", "*", ".", "...", "~(*...'"]
+)
+@pytest.mark.parametrize("suffix", ["ish", "extra"])
+def test_joiner_runs_refuse_before_any_resolution(
+    time: str,
+    joiner: str,
+    suffix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "extra" is not reserved vocabulary: this independently proves the token boundary.
+    monkeypatch.setattr(
+        textparse, "_resolve", lambda *_args: pytest.fail("refusal reached resolution")
+    )
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    assert textparse.when(f"Buy Milk {time}{joiner}{suffix}", "en", clock, "UTC") is None
+
+
+@pytest.mark.parametrize("time", ["at 9am", "tomorrow at 9", "in 2 hours"])
+@pytest.mark.parametrize(
+    "qualifier", ["ish", "approx", "roughly", "or so", "give or take", "thereabouts"]
+)
+@pytest.mark.parametrize("position", ["before", "after", "parentheses", "spaced-dash"])
+def test_qualifiers_refuse_before_any_resolution(
+    time: str,
+    qualifier: str,
+    position: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        textparse, "_resolve", lambda *_args: pytest.fail("refusal reached resolution")
+    )
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    texts = {
+        "before": f"Buy Milk {qualifier} {time}",
+        "after": f"Buy Milk {time} {qualifier}",
+        "parentheses": f"Buy Milk {time} ({qualifier})",
+        "spaced-dash": f"Buy Milk {time} -{qualifier}",
+    }
+    assert textparse.when(texts[position], "en", clock, "UTC") is None
+
+
+@pytest.mark.parametrize("time", ["at 9am", "tomorrow at 9", "in 2 hours"])
+def test_qualifier_whitespace_case_and_no_substring_retry(
+    time: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        textparse, "_resolve", lambda *_args: pytest.fail("refusal retried resolution")
+    )
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    for qualifier in ("ROUGHLY", "or\tso", "give\n or\t take"):
+        assert textparse.when(f"{time} {qualifier}", "en", clock, "UTC") is None
+    assert textparse.when(f"{time}...ish or at 10am", "en", clock, "UTC") is None
+
+
+@pytest.mark.parametrize(
+    ("time", "at"),
+    [
+        ("at 9am", "2026-10-04T09:00:00+00:00"),
+        ("tomorrow at 9", "2026-10-05T09:00:00+00:00"),
+        ("in 2 hours", "2026-10-04T10:00:00+00:00"),
+    ],
+)
+@pytest.mark.parametrize("punctuation", ["...", "'", "’", ")", "!?", " -", " –", " —"])
+@pytest.mark.parametrize("task", ["", " Buy Bread"])
+def test_joiner_punctuation_controls_resolve_once_and_preserve_rest(
+    time: str,
+    at: str,
+    punctuation: str,
+    task: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolve = textparse._resolve
+    resolved: list[str] = []
+
+    def record_resolution(match, now, zone):
+        resolved.append(match.group())
+        return resolve(match, now, zone)
+
+    monkeypatch.setattr(textparse, "_resolve", record_resolution)
+    clock = datetime.fromisoformat("2026-10-04T08:00:00+00:00")
+    assert textparse.when(f"Buy Milk {time}{punctuation}{task}", "en", clock, "UTC") == {
+        "at": at,
+        "rest": f"Buy Milk {punctuation.strip()}{task}",
+    }
+    assert resolved == [time]
+
+
+@pytest.mark.parametrize(
     ("time", "at"),
     [
         ("at 9am", "2026-10-04T09:00:00+00:00"),

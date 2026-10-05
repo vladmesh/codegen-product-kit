@@ -43,9 +43,15 @@ No word numbers, abbreviations, compound durations, recurrence, weekdays, month 
 noon/midnight, part-of-day inference or fuzzy matching are supported. Invalid clocks,
 multiple time spans and leftover temporal vocabulary are refused, including `in 1 hour
 30 minutes`, `every day at 9`, `next Friday at 9`, and `the day after tomorrow at 9`.
-Attached textual continuations such as `at 9am-ish`, `tomorrow at 9-ish` or
-`in 2 minutes-ish` are refused as whole time tokens. Exact times followed by ordinary
-sentence punctuation remain valid, and punctuation stays in the remainder.
+An attached punctuation run followed by a word is an unsupported continuation of the
+time token: `at 9am-ish`, `at 7pm'ish`, `tomorrow at 9am~ish`, `in 2 hours’ish` and
+`at 9am...ish` all return `None`. This applies to any contiguous punctuation joiners,
+including parentheses, plus, asterisk and typographic dashes, across all three forms.
+The bounded qualifiers `ish`, `approx`, `roughly`, `or so`, `give or take` and
+`thereabouts` outside the consumed time span are also refused, even when detached or
+parenthesized. Both admission checks run before time resolution or remainder cleanup;
+no qualifier is stripped and retried. Ordinary punctuation followed by whitespace/end
+and spaced sentence dashes retain their existing behavior and stay in the remainder.
 The refusal guards are conservative: reserved temporal words inside task wording may
 also produce `None`. They are not another date grammar. This narrow corpus does not
 claim the research prototype's general English accuracy.

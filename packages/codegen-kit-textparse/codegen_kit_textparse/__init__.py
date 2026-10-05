@@ -20,14 +20,15 @@ _TIME = re.compile(
 _UNSUPPORTED = re.compile(
     r"\b(?:today|tonight|tomorrow|yesterday|every|each|daily|weekly|monthly|yearly|"
     r"next|last|after|before|until|within|ago|half|quarter|couple|few|several|"
-    r"about|around|approximately|tmrw|tomorow|tommorow|"
+    r"about|around|approximately|ish|approx|roughly|thereabouts|tmrw|tomorow|tommorow|"
     r"noon|midnight|morning|afternoon|evening|night|"
     r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
     r"mon|tue|wed|thu|fri|sat|sun|"
     r"january|february|march|april|june|july|august|september|october|november|december|"
     r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
     r"seconds?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|am|pm|"
-    r"utc|gmt|est|edt|cst|cdt|mst|mdt|pst|pdt)\b|\bfrom +now\b|"
+    r"utc|gmt|est|edt|cst|cdt|mst|mdt|pst|pdt)\b|"
+    r"\b(?:from +now|or\s+so|give\s+or\s+take)\b|"
     r"\bmay +[0-9]|\b[0-9]+ +may\b|"
     r"\b(?:at|in|on) +[+-]?[0-9]|[0-9]+[:/.][0-9]+|"
     r"\b[0-9]+(?:am|pm)\b",
@@ -103,9 +104,10 @@ def when(text: str, lang: str, now: datetime, tz: str) -> _Result | None:
     if len(matches) != 1:
         return None
     match = matches[0]
-    # Refuse malformed notation and attached continuations such as "minutes-ish".
+    # Any contiguous punctuation run followed by a word continues the time token.
+    # All three forms pass these admission checks before resolution or cleanup.
     if re.match(
-        r"-\w|\s*[:/]|[.-] *[0-9]|\s*[+-][0-9]| +[0-9]|"
+        r"[^\w\s]+\w|\s*[:/]|[.-] *[0-9]|\s*[+-][0-9]| +[0-9]|"
         r"\s+(?:and|or|to)\s+(?:at\s+)?[0-9]|"
         r"\s*(?:a\.m\.|p\.m\.|(?:am|pm)\w)",
         text[match.end() :],
