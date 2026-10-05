@@ -167,3 +167,18 @@ def primary_output_matches(function: CatalogFunction, parameter: dict[str, Any])
         return False
     target = _normalized(parameter)
     return _semantic(target) and _compatible(primary, target)
+
+
+def argument_schema_matches(source: dict[str, Any], target: dict[str, Any]) -> bool:
+    """Validate a finite binding argument, including guarded nonempty reminder text.
+
+    Plain strings are useful arguments even though they infer no catalog edge. The only
+    additional constraint supported here is minLength; every other unsupported constraint
+    continues to refuse a binding rather than guessing compatibility.
+    """
+    source, target = _normalized(source), _normalized(target)
+    if source.get("minLength", 0) < target.get("minLength", 0):
+        return False
+    source.pop("minLength", None)
+    target.pop("minLength", None)
+    return _supported(source) and _supported(target) and _compatible(source, target)

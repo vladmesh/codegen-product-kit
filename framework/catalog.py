@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,7 @@ from packaging.version import InvalidVersion, Version
 import yaml
 
 from framework.component_matching import non_null_schema
+from framework.spec.actions import HttpOperation, PackageAction
 
 CATALOG_PATH = "packages/catalog.yaml"
 FORMAT_VERSION = 1
@@ -104,6 +105,8 @@ class CatalogAction:
     name: str
     input: dict[str, Any]
     output: dict[str, Any]
+    summary: str | None = field(default=None, kw_only=True)
+    operation: HttpOperation | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -354,7 +357,14 @@ def _actions(entry: dict[str, Any], key: str, where: str) -> tuple[CatalogAction
                 )
             result.append(CatalogFunction(name, input_schema, output, value))
         else:
-            result.append(CatalogAction(name, input_schema, output))
+            metadata: dict[str, Any] = {}
+            if "summary" in item or "operation" in item:
+                try:
+                    action = PackageAction.model_validate(item)
+                except ValueError as error:
+                    raise InvalidCatalogEntryError(f"{location}: {error}") from error
+                metadata = {"summary": action.summary, "operation": action.operation}
+            result.append(CatalogAction(name, input_schema, output, **metadata))
     _unique([item.name for item in result], f"{where} {key}")
     return tuple(result)
 

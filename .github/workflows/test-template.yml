@@ -121,4 +121,13 @@ jobs:
         run: make test-copier
 
       - name: Run copier tests (slow)
+        env:
+          CODEGEN_RELEASE_SMOKE_RECEIPT: ${{ runner.temp }}/textparse-remote-receipt.json
         run: make test-copier-slow
+
+      - name: Preserve published textparse release-smoke receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: textparse-remote-release-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/textparse-remote-receipt.json
+          if-no-files-found: error

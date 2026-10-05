@@ -121,7 +121,13 @@ independently of the kit core and listed in `packages/catalog.yaml`; `kit add <n
 builds, verifies and installs a released package from that live catalog. Its additive `libraries`
 list describes plain dependencies; `kit add textparse` installs the verified library into tg_bot
 without package activation or backend generation. The parser belongs to the library, outside kit
-core and generic channel handlers. There is still no catalog
+core and generic channel handlers. Core façade 2.2 admits optional typed actions and
+default-binding metadata under package protocol 1. Reminders 0.5 declares create/list/cancel
+against its real OpenAPI and ships an English binding resource. Tooling validates the finite
+binding against the actual installed manifest and library schemas; activation only admits
+metadata. There is no action executor, parser invocation or channel handler in core. A later
+generator will copy the resource to user-owned `services/tg_bot/bindings/reminders.yaml` and
+implement its commands, presets and due relay. There is still no catalog
 of services or containers; `backend` and `tg_bot` remain Copier selections.
 
 ## Tooling and runtime

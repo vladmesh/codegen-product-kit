@@ -1,7 +1,7 @@
 protocol_version: 1
 name: reminders
-version: 0.4.0
-requires_core: ">=2.1,<3"
+version: 0.5.0
+requires_core: ">=2.2,<3"
 provides: []
 requires: []
 package_dependencies: [alembic, fastapi, faststream, pydantic, redis, sqlalchemy]
@@ -18,6 +18,7 @@ events:
   messages:
     reminders.due:
       model: ReminderDue
+      recipient: user_ref
       schema:
         type: object
         properties:
@@ -70,3 +71,184 @@ environment:
   - name: REDIS_URL
     required: true
 resources: []
+
+actions:
+- name: create
+  summary: Schedule a one-time reminder for the verified caller.
+  operation:
+    method: POST
+    path: ''
+  input:
+    properties:
+      text:
+        type: string
+        minLength: 1
+      remind_at:
+        type: string
+        format: date-time
+    additionalProperties: false
+    type: object
+    required:
+    - remind_at
+    - text
+  output:
+    properties:
+      id:
+        type: string
+        format: uuid
+      user_ref:
+        type: string
+      text:
+        type: string
+      remind_at:
+        type: string
+        format: date-time
+      state:
+        type: string
+        enum:
+        - scheduled
+        - cancelled
+        - due
+        - emitted
+      created_at:
+        type: string
+        format: date-time
+      cancelled_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+      due_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+      emitted_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+    type: object
+    required:
+    - created_at
+    - id
+    - remind_at
+    - state
+    - text
+    - user_ref
+- name: list
+  summary: List reminders owned by the verified caller.
+  operation:
+    method: GET
+    path: ''
+  input:
+    type: object
+    properties: {}
+    additionalProperties: false
+  output:
+    items:
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_ref:
+          type: string
+        text:
+          type: string
+        remind_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum:
+          - scheduled
+          - cancelled
+          - due
+          - emitted
+        created_at:
+          type: string
+          format: date-time
+        cancelled_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        due_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+        emitted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+      type: object
+      required:
+      - created_at
+      - id
+      - remind_at
+      - state
+      - text
+      - user_ref
+    type: array
+- name: cancel
+  summary: Cancel a scheduled reminder owned by the verified caller.
+  operation:
+    method: DELETE
+    path: /{reminder_id}
+  input:
+    type: object
+    properties:
+      reminder_id:
+        type: string
+        format: uuid
+    additionalProperties: false
+    required:
+    - reminder_id
+  output:
+    properties:
+      id:
+        type: string
+        format: uuid
+      user_ref:
+        type: string
+      text:
+        type: string
+      remind_at:
+        type: string
+        format: date-time
+      state:
+        type: string
+        enum:
+        - scheduled
+        - cancelled
+        - due
+        - emitted
+      created_at:
+        type: string
+        format: date-time
+      cancelled_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+      due_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+      emitted_at:
+        anyOf:
+        - type: string
+          format: date-time
+        - type: 'null'
+    type: object
+    required:
+    - created_at
+    - id
+    - remind_at
+    - state
+    - text
+    - user_ref
+default_binding: codegen_kit_reminders:bindings/default.yaml

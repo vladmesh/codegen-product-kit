@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core façade 2.2.0 admits optional protocol-v1 action/default-binding metadata. Reminders
+  0.5.0 declares typed create/list/cancel operations verified against real OpenAPI, names
+  the existing due message's required string recipient, and ships an English binding resource.
+  Its finite validator checks references, argument schemas, nonempty/null-result guards,
+  exact presets and original-text context against actual installed manifests. Handlers and
+  tag publication remain later work: [release preparation](docs/releases/reminders-0.5.0.md).
+- Required slow Copier CI adds published textparse default-remote install/interpreter/image
+  proof, retaining local fixtures and uploading a candidate-bound provenance receipt.
+  Actual reminders 0.3/0.4 source fixtures preserve old installs without relabeling 0.5.
 - `codegen-kit-textparse` 0.1.0 source, the three-form English `when(text, lang, now, tz)`
   library with explicit clock/zone, elapsed UTC offsets and refusal of DST gaps/folds.
   `kit add textparse` resolves its independent tag and verifies/installs a plain dependency
@@ -35,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the product's active installed parent before fetching/building or changing files.
 - Offline compatibility coverage executes the unchanged kit 0.7.1 catalog loader. Reminders
   0.3.0/0.4.0 and core 2.0/2.1 selection are preserved. Extensions remain empty; textparse source
-  and its curated recommendation are now declared. Contract fixtures do not announce new
-  runtime actions or binding resources.
+  and its curated recommendation are now declared. Reminders 0.5 adds actions and a binding
+  resource; installed 0.3/0.4 manifests confer neither.
   Contract and deferred runtime boundary: [docs/CONTRACTS.md](docs/CONTRACTS.md#additive-component-metadata-in-v1).
 
 ## [0.7.1] - 2026-10-03 (prepared, not published)

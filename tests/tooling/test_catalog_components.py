@@ -39,6 +39,7 @@ def test_additive_models_and_missing_metadata() -> None:
     del document["libraries"], document["extensions"]
     # Construct a pre-library catalog: recommendations cannot reference absent libraries.
     del document["packages"][0]["recommended_with"]
+    del document["packages"][0]["actions"], document["packages"][0]["default_binding"]
     legacy = parse_catalog(yaml.safe_dump(document))
     assert legacy.libraries == legacy.extensions == ()
     assert legacy.get("reminders").actions == ()
@@ -106,6 +107,8 @@ def test_actual_0_7_1_loader_preserves_package_fields_and_selection(source: Path
         assert reminders.select("2.1.0").tag == "packages/reminders/v0.4.0"
         assert modern.select("2.0.0").version == "0.3.0"
         assert modern.select("2.1.0").version == "0.4.0"
+        if source == ROOT / "packages/catalog.yaml":
+            assert reminders.select("2.2.0").version == modern.select("2.2.0").version == "0.5.0"
     finally:
         del sys.modules[spec.name]
 
@@ -197,7 +200,7 @@ def _function(primary: dict[str, Any]) -> CatalogFunction:
 
 
 def test_english_when_primary_matches_reminders_and_never_searches_secondary_fields() -> None:
-    catalog = load_catalog(FIXTURES / "components.yaml")
+    catalog = load_catalog(ROOT / "packages/catalog.yaml")
     function = catalog.libraries[0].functions[0]
     parameter = catalog.get("reminders").actions[0].input["properties"]["remind_at"]
     assert primary_output_matches(function, parameter)

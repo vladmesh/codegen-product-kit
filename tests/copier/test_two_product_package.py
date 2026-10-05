@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import textwrap
+import zipfile
 
 import pytest
 import yaml
@@ -292,7 +293,12 @@ def _make_tooling_docker_buildable(product: Path, output: Path) -> None:
 def reminders_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     output = tmp_path_factory.mktemp("reminders-wheel")
     _run(["uv", "build", "--wheel", str(REMINDERS), "--out-dir", str(output)], KIT_ROOT)
-    return next(output.glob("codegen_kit_reminders-*.whl"))
+    wheel = next(output.glob("codegen_kit_reminders-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        resource = "codegen_kit_reminders/bindings/default.yaml"
+        assert archive.read(resource) == (REMINDERS / resource).read_bytes()
+        assert yaml.safe_load(archive.read(resource))["binding_version"] == 1
+    return wheel
 
 
 @pytest.mark.slow
