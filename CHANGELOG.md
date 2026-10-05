@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Generated tg_bot lifecycle unit tests isolate binding startup/shutdown so a product with a
+  default binding passes its unit leg without Redis. Broker assertions remain, with hook order
+  and error cleanup coverage added; runtime and protected product code are unchanged.
 - Textparse refuses textual continuations through contiguous punctuation joiners and
   the bounded approximation qualifiers `ish`, `approx`, `roughly`, `or so`, `give or take`
   and `thereabouts` before resolving any of its three forms. Exact forms and sentence

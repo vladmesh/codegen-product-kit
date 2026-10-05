@@ -141,3 +141,12 @@ and required job names remain intact. No local slow upgrade, uv-download/typeche
 real Redis run is authorized; use focused permitted subsets, lint and the packet's canonical broad
 wrapper once after final edits. Worker-local content receipts remain distinct from the executed
 dispatcher exact-SHA gate and CI artifacts. See [0.8.0 evidence limits](releases/0.8.0.md).
+
+The non-slow `test_bound_product_handler_unit_tests_need_no_redis` runs the product's rendered
+tg_bot handler unit file with reminders/textparse/default binding already installed and
+`REDIS_URL=redis://redis.invalid:6379`. It catches unit tests accidentally starting the real binding
+relay, as the first upgrade CI did at the final post-bind `make tests`. The template lifecycle
+unit test mocks both publisher broker and binding hooks, asserting all awaits and their order;
+error cases require broker cleanup and propagation. The real relay lifecycle remains covered by
+the separate fake transport and CI Redis scenarios, without changing production behavior or the
+genuine old released baseline.
