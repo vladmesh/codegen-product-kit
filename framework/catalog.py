@@ -140,6 +140,24 @@ class CatalogLibrary:
     functions: tuple[CatalogFunction, ...]
     versions: tuple[CatalogLibraryVersion, ...]
 
+    def select(self, python_version: str) -> CatalogLibraryVersion:
+        """Select the newest stable release admitting the target Python interpreter."""
+        compatible = [
+            item
+            for item in self.versions
+            if not Version(item.version).is_prerelease
+            and Version(python_version) in SpecifierSet(item.requires_python)
+        ]
+        if not compatible:
+            requirements = ", ".join(
+                f"{item.version} requires Python {item.requires_python}" for item in self.versions
+            )
+            raise IncompatibleCatalogVersionError(
+                f"library {self.name!r} has no release compatible with Python {python_version}: "
+                f"{requirements}"
+            )
+        return max(compatible, key=lambda item: Version(item.version))
+
 
 @dataclass(frozen=True)
 class CatalogPackage:
@@ -199,6 +217,13 @@ class Catalog:
             if extension.name == name:
                 return extension
         return self.get(name)
+
+    def get_component(self, name: str) -> CatalogPackage | CatalogLibrary:
+        """Resolve an installable component without changing package-only readers."""
+        for library in self.libraries:
+            if library.name == name:
+                return library
+        return self.get_installable(name)
 
 
 def _mapping(value: object, where: str) -> dict[str, Any]:

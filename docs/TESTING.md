@@ -64,6 +64,14 @@ to the local committed source. See [the upgrade review boundary](releases/0.6.4.
 Existing slow generation, service typechecks, logging and PostgreSQL migration proofs keep their
 CI routes; a local fast broad receipt does not replace the required release matrix.
 
+`tests/unit/test_textparse.py` is the narrow three-form English corpus. Library install
+resolution/artifact refusals and released-reader regression are under `tests/tooling/`.
+`tests/copier/test_textparse_install.py` checks the rendered wheel-copy Docker path in the fast
+matrix. Its slow proof builds the actual Hatch wheel, installs from a local independent tag
+into generated backend,tg_bot, verifies the tg_bot interpreter and dependency closure, then
+builds and calls through the tg_bot image. It runs in the existing slow `test-pytest` CI leg;
+workers do not run it locally under the control-host rule.
+
 The package migration proof's manual crash/recovery scenario registers its `reminders.due`
 reader before crashing the publisher. A live backend timer may recover a committed pending
 emission before the replacement process runs; creating a new consumer group at the stream's

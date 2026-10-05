@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Textparse refuses textual continuations through contiguous punctuation joiners and
+  the bounded approximation qualifiers `ish`, `approx`, `roughly`, `or so`, `give or take`
+  and `thereabouts` before resolving any of its three forms. Exact forms and sentence
+  punctuation retain their time and remainder behavior.
 - The slow package crash/recovery proof registers its due-event reader before creating the
   pending emission, so a live backend timer's recovery cannot precede the reader's stream cursor.
   Crash, database-state, recovered-delivery, event-identity and stream-count assertions remain.
@@ -18,14 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `codegen-kit-textparse` 0.1.0 source, the three-form English `when(text, lang, now, tz)`
+  library with explicit clock/zone, elapsed UTC offsets and refusal of DST gaps/folds.
+  `kit add textparse` resolves its independent tag and verifies/installs a plain dependency
+  into tg_bot. The tg_bot image copies local locked wheels before sync. Narrow corpus,
+  no-write artifact refusals and a CI-only real service/image proof accompany the source.
+  Tag publication follows merge: [release operation](docs/releases/textparse-0.1.0.md).
 - Additive catalog v1 component signatures: package actions, curated library recommendations,
   default-binding resource references, stateless libraries with declared primary outputs, and
   extensions with parent version requirements. The public pure `primary_output_matches` API
   infers semantic compatibility from that primary output only. `kit add` checks extensions
   against the product's active installed parent before fetching/building or changing files.
 - Offline compatibility coverage executes the unchanged kit 0.7.1 catalog loader. Reminders
-  0.3.0/0.4.0 and core 2.0/2.1 selection are preserved. Library and extension lists remain empty;
-  populated contract fixtures do not announce releases, runtime actions or binding resources.
+  0.3.0/0.4.0 and core 2.0/2.1 selection are preserved. Extensions remain empty; textparse source
+  and its curated recommendation are now declared. Contract fixtures do not announce new
+  runtime actions or binding resources.
   Contract and deferred runtime boundary: [docs/CONTRACTS.md](docs/CONTRACTS.md#additive-component-metadata-in-v1).
 
 ## [0.7.1] - 2026-10-03 (prepared, not published)

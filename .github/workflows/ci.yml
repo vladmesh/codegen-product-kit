@@ -49,5 +49,8 @@ jobs:
       - name: Build reminders package
         run: uv build --wheel packages/codegen-kit-reminders
 
+      - name: Build textparse library
+        run: uv build --wheel packages/codegen-kit-textparse
+
       - name: Run unit tests
         run: make test

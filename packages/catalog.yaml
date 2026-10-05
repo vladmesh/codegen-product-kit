@@ -6,7 +6,33 @@
 # entry under `versions`; the annotated tag `packages/<name>/v<version>` is published at the
 # merge commit by a separate PO operation.
 format_version: 1
-libraries: []
+libraries:
+  - name: textparse
+    distribution: codegen-kit-textparse
+    path: packages/codegen-kit-textparse
+    module: codegen_kit_textparse
+    summary: Three deterministic English reminder-time forms with an explicit clock and zone.
+    functions:
+      - name: when
+        input:
+          type: object
+          properties:
+            text: {type: string}
+            lang: {type: string, const: en}
+            now: {type: string, format: date-time}
+            tz: {type: string, format: x-iana-tz}
+          required: [text, lang, now, tz]
+          additionalProperties: false
+        output:
+          type: [object, 'null']
+          properties:
+            at: {type: string, format: date-time}
+            rest: {type: string}
+          required: [at, rest]
+          additionalProperties: false
+        value: at
+    versions:
+      - {version: 0.1.0, tag: packages/textparse/v0.1.0, requires_python: '>=3.11'}
 extensions: []
 packages:
   - name: reminders
@@ -19,6 +45,8 @@ packages:
       - list my upcoming reminders
       - cancel a reminder
       - notify the product when a reminder is due
+    recommended_with:
+      - {library: textparse, why: Parses an English time phrase for a one-time reminder.}
     settings:
       - name: reminder_owner_ref
         summary: Owner of the seeded first-deploy reminder, in the canonical caller form telegram:<id>.
