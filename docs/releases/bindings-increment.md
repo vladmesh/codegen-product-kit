@@ -25,6 +25,9 @@ factory to avoid importing main, and owns only its subscriber broker/client. No-
 and standalone seeds import without textparse/relay; standalone bots still fail closed.
 The service declares direct FastStream/Redis/JSON Schema dependencies and keeps locked wheel
 copying for textparse. Generated code remains included in the existing product typecheck scope.
+The immutable textparse 0.1.0 wheel has no PEP 561 marker; its generated import carries only
+`type: ignore[import-untyped]`. Other generated code keeps the existing typecheck policy.
+The published-remote receipt includes the full product typecheck output.
 
 The existing published-remote CI lane uses candidate tooling and actual default catalog/remote
 tags. It keeps the released textparse interpreter/image proof, adds reminders installation,

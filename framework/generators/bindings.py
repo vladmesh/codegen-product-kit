@@ -39,7 +39,9 @@ async def stop(application: object) -> None:
                 "events": self.plan.events,
             }
             imports = "\n".join(
-                f"from {module} import when as parse_{name}"
+                # Published parser wheels lack a PEP 561 marker. Keep mypy's
+                # exception on this import, not on generated handlers or the service.
+                f"from {module} import when as parse_{name}  # type: ignore[import-untyped]"
                 for name, module in sorted(self.plan.libraries.items())
             )
             parsers = (

@@ -276,7 +276,7 @@ def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
     assert activation_evidence["activated"] == ["reminders"]
     assert "/reminders" in activation_evidence["routes"]
     assert "/reminders/{reminder_id}" in activation_evidence["routes"]
-    run(["make", "typecheck"])
+    typecheck_output = run(["make", "typecheck"])
     evidence = {}
     for name in ("binding_scenarios", "binding_redis_scenarios"):
         script = str(ROOT / f"tests/copier/{name}.py")
@@ -299,6 +299,7 @@ def _bindings_remote_proof(run, product, tooling_python, tg_bot, candidate):
         "active_contract": generated,
         "runtime_activation": activation_evidence,
         "library_version": evidence["binding_scenarios"]["library_version"],
+        "product_typecheck": {"command": ["make", "typecheck"], "stdout": typecheck_output},
         "generated_bindings_sha256": sha256(
             (product / "services/tg_bot/src/generated/bindings.py").read_bytes()
         ).hexdigest(),
