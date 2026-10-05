@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `kit bind <package> --default|--file <path>` validates the installed backend package and bot
+  library before creating product-owned bindings and a manifest timezone declaration. Existing
+  regeneration emits caller-aware Telegram commands/callbacks and a Redis Stream relay with
+  seven-day completed-delivery dedupe, retryable claims and pre-start backlog replay. Callback
+  contexts expire after ten minutes; timezone values require separate `/settings/set` setup.
+  The existing published-remote CI lane now proves released reminders/textparse binding and
+  real Redis wiring. [Bindings increment](docs/releases/bindings-increment.md) records ownership,
+  crash limits and remaining sprint boundaries; published component trees/refs are unchanged.
 - Core façade 2.2.0 admits optional protocol-v1 action/default-binding metadata. Reminders
   0.5.0 declares typed create/list/cancel operations verified against real OpenAPI, names
   the existing due message's required string recipient, and ships an English binding resource.

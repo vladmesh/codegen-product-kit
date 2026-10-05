@@ -434,7 +434,11 @@ def _validate_and_merge_packages(
     return errors
 
 
-def load_specs(repo_root: Path, package_site_packages: Path | None = None) -> AllSpecs:
+def load_specs(
+    repo_root: Path,
+    package_site_packages: Path | None = None,
+    manifest_overrides: dict[str, ServiceManifest] | None = None,
+) -> AllSpecs:
     """Load and validate all specs from the repository.
 
     Args:
@@ -448,6 +452,7 @@ def load_specs(repo_root: Path, package_site_packages: Path | None = None) -> Al
     """
     services_dir = repo_root / "services"
     manifests = _load_service_manifests(services_dir)
+    manifests.update(manifest_overrides or {})
     # 1. Load models (required)
     shared_spec_dir = repo_root / "shared" / "spec"
     models_file = shared_spec_dir / "models.yaml"

@@ -25,6 +25,8 @@ apps/backend/tests/.tmp/
 !template/shared/shared/generated/**
 !template/services/backend/src/generated/
 !template/services/backend/src/generated/**
+!template/services/tg_bot/src/generated/
+!template/services/tg_bot/src/generated/**
 !template/services/backend/docs/openapi.json
 test-sync-markers/
 state/checks/

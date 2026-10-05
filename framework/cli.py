@@ -16,6 +16,14 @@ from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel
 from packaging.version import Version
 import yaml
 
+from framework.binding_product import (
+    TIMEZONE_SCHEMA,
+    binding_files,
+    default_binding_resource,
+    require_binding_product,
+    validate_product_bindings,
+)
+from framework.bindings import BindingError, load_binding
 from framework.catalog import (
     Catalog,
     CatalogLibrary,
@@ -38,7 +46,8 @@ from framework.package_source import (
     read_catalog,
     verify_wheel,
 )
-from framework.spec.loader import SpecValidationError, load_manifest
+from framework.spec.loader import SpecValidationError, load_manifest, load_specs
+from framework.spec.manifests import ServiceManifest, empty_declaration_schema
 from framework.spec.package_resolution import CORE_VERSION, resolve_active_packages
 
 
@@ -238,6 +247,60 @@ def add_released_package(
     return version
 
 
+def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None) -> str:
+    """Validate a prospective whole product before writing its owned binding/manifest."""
+    require_binding_product(repo_root)
+    specs = load_specs(repo_root)
+    package = next((item for item in specs.packages if item.name == name), None)
+    if package is None:
+        raise BindingError(f"BindingPackageError: {name} is not installed and active")
+    if not package.manifest.actions:
+        raise BindingError(f"BindingActionsError: {name} has no actions")
+    source = binding_file or default_binding_resource(package)
+    binding = load_binding(source)
+    if binding.package != name:
+        raise BindingError("BindingPackageError: file names another package")
+    target = repo_root / f"services/tg_bot/bindings/{name}.yaml"
+    content = source.read_text()
+    if binding_file is None and target.exists() and target.read_text() != content:
+        raise BindingError(
+            f"BindingOwnedFileError: retained product edits in {target}; use --file explicitly"
+        )
+    selected = binding_files(repo_root)
+    selected[target.name] = binding
+    manifest_path = repo_root / "services/tg_bot/manifest.yaml"
+    manifest_text = manifest_path.read_text() if manifest_path.exists() else None
+    manifest = (
+        yaml.safe_load(manifest_text)
+        if manifest_text is not None
+        else {
+            "version": 1,
+            "settings_schema": empty_declaration_schema(),
+        }
+    )
+    changed = False
+    for item in selected.values():
+        key = item.timezone.key
+        if key not in specs.settings_schemas:
+            manifest["settings_schema"]["properties"][key] = TIMEZONE_SCHEMA.copy()
+            changed = True
+    prospective = load_specs(
+        repo_root,
+        manifest_overrides={
+            "tg_bot": ServiceManifest.model_validate(manifest),
+        },
+    )
+    validate_product_bindings(repo_root, prospective, selected)
+    identical = target.exists() and target.read_text() == content
+    if not identical:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    if changed:
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    generate_all(repo_root)
+    return "unchanged" if identical and not changed else "bound"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kit")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -262,6 +325,14 @@ def _parser() -> argparse.ArgumentParser:
         help=f"ref of the catalog source to read the catalog from (env {CATALOG_REF_ENV})",
     )
     add.add_argument("--product-root", type=Path, default=Path.cwd())
+    bind = commands.add_parser(
+        "bind", help="generate Telegram handlers for an installed backend package"
+    )
+    bind.add_argument("name")
+    route = bind.add_mutually_exclusive_group(required=True)
+    route.add_argument("--default", action="store_true", help="copy the installed package default")
+    route.add_argument("--file", type=Path, help="use this explicit product override")
+    bind.add_argument("--product-root", type=Path, default=Path.cwd())
     return parser
 
 
@@ -270,6 +341,11 @@ def main() -> None:
 
     arguments = _parser().parse_args()
     try:
+        if arguments.command == "bind":
+            result = bind_package(
+                arguments.name, arguments.product_root.resolve(), binding_file=arguments.file
+            )
+            print(f"kit: {result} {arguments.name}")
         if arguments.command == "add":
             product_root = arguments.product_root.resolve()
             if arguments.wheel is not None:
@@ -282,7 +358,7 @@ def main() -> None:
                     arguments.catalog_ref,
                 )
                 print(f"kit: installed {arguments.name} {version.version} ({version.tag})")
-    except (ValueError, subprocess.CalledProcessError) as error:
+    except (ValueError, SpecValidationError, subprocess.CalledProcessError) as error:
         print(f"kit: {error}", file=sys.stderr)
         raise SystemExit(1) from error
 

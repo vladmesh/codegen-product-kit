@@ -1,0 +1,156 @@
+"""Redis Stream delivery with bounded persistent claims, retries and terminal refusal."""
+
+import asyncio
+import logging
+import os
+import re
+from secrets import token_urlsafe
+from typing import Any
+from uuid import UUID, uuid4
+
+from faststream import AckPolicy
+from faststream.redis import RedisBroker, RedisStreamMessage, StreamSub
+from faststream.redis.parser import BinaryMessageFormatV1
+from redis.asyncio import Redis
+from redis.exceptions import ResponseError
+from telegram.error import BadRequest, Forbidden
+
+from shared.generated.events import EventEnvelope, consumer_name
+from services.tg_bot.src.generated.bindings import DATA, check, reference, render
+
+LOGGER = logging.getLogger(__name__)
+CONSUMER_GROUP = "events:tg_bot"
+RETENTION_SECONDS = 604800
+CLAIM_SECONDS = 120
+DELIVERY_TIMEOUT_SECONDS = 45
+RECLAIM_IDLE_MS = 5000
+RECLAIM_POLL_MS = 1000
+FINISH = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SET', KEYS[1], 'done', 'EX', ARGV[2])
+    return 1
+end
+return 0
+"""
+RELEASE = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+class BindingRelay:
+    def __init__(self, bot: Any, runtime: Any, *, reclaim_idle_ms: int = RECLAIM_IDLE_MS,
+                 reclaim_poll_ms: int = RECLAIM_POLL_MS) -> None:
+        self.bot = bot
+        self.runtime = runtime
+        self.redis: Any = None
+        self.broker: Any = None
+        self.reclaim_idle_ms = reclaim_idle_ms
+        self.reclaim_poll_ms = reclaim_poll_ms
+
+    async def start(self) -> None:
+        url = os.getenv("REDIS_URL")
+        if not url:
+            raise RuntimeError("REDIS_URL is not set; binding relay requires Redis")
+        self.redis = Redis.from_url(url, socket_timeout=10, socket_connect_timeout=10)
+        self.broker = RedisBroker(url, message_format=BinaryMessageFormatV1, logger=None)
+        suffix = uuid4().hex
+        try:
+            for binding in DATA["bindings"]:
+                for event in binding["events"]:
+                    stream = event["event"]
+                    try:
+                        # Replay entries published before first startup. Existing cursors stay intact.
+                        await self.redis.xgroup_create(stream, CONSUMER_GROUP, id="0-0", mkstream=True)
+                    except ResponseError as error:
+                        if not str(error).startswith("BUSYGROUP "):
+                            raise
+                    for role in ("live", "reclaim"):
+                        subscriber = self.broker.subscriber(
+                            stream=StreamSub(stream, group=CONSUMER_GROUP,
+                                             consumer=consumer_name(f"tg_bot.{role}") + ":" + suffix,
+                                             min_idle_time=self.reclaim_idle_ms if role == "reclaim" else None,
+                                             polling_interval=self.reclaim_poll_ms if role == "reclaim" else None),
+                            ack_policy=AckPolicy.MANUAL,
+                        )
+                        subscriber(self.listener(binding, event))
+            await self.broker.start()
+        except BaseException:
+            await self.stop()
+            raise
+
+    def listener(self, binding: dict[str, Any], event: dict[str, Any]) -> Any:
+        async def receive(body: Any, message: RedisStreamMessage) -> None:
+            acknowledged = await self.deliver(binding, event, body)
+            if acknowledged:
+                await message.ack(self.redis, CONSUMER_GROUP)
+        return receive
+
+    async def stop(self) -> None:
+        try:
+            if self.broker is not None:
+                await self.broker.stop()
+        finally:
+            self.broker = None
+            if self.redis is not None:
+                await self.redis.aclose()
+                self.redis = None
+
+    async def deliver(self, binding: dict[str, Any], event: dict[str, Any], body: Any) -> bool:
+        try:
+            check({
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "event_id": {"type": "string", "format": "uuid"},
+                    "occurred_at": {"type": "string", "format": "date-time"},
+                    "schema_version": {"type": "integer", "const": 1},
+                    "payload": DATA["events"][event["event"]],
+                },
+                "required": ["event_id", "occurred_at", "schema_version", "payload"],
+            }, body)
+            envelope = EventEnvelope[dict[str, Any]].model_validate(body)
+            if type(body["schema_version"]) is not int or envelope.schema_version != 1:
+                raise ValueError("unsupported version")
+            recipient = reference(event["to"], {"event": envelope.payload})
+            if not isinstance(recipient, str) or re.fullmatch(r"telegram:[1-9][0-9]{0,15}", recipient) is None:
+                raise ValueError("unsupported recipient")
+        except Exception:
+            LOGGER.warning("binding_relay_terminal_invalid_event")
+            return True
+
+        key = f"bindings:{CONSUMER_GROUP}:{UUID(str(envelope.event_id))}"
+        token = token_urlsafe(24)
+        claimed = await self.redis.set(key, token, nx=True, ex=CLAIM_SECONDS)
+        if not claimed:
+            return bool(await self.redis.get(key) == b"done")
+        try:
+            try:
+                async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
+                    zone = None
+                    if any(isinstance(part, dict) and part.get("format") == "month_word"
+                           for part in event["reply"]["parts"]):
+                        async with self.runtime.client_factory() as client:
+                            zone = await self.runtime.timezone(client, binding)
+                    text = render(event["reply"], {"event": envelope.payload}, zone)
+                    await self.bot.send_message(chat_id=int(recipient.partition(":")[2]), text=text)
+            except Forbidden:
+                LOGGER.warning("binding_relay_terminal_forbidden")
+            except BadRequest as error:
+                if not any(reason in str(error).lower() for reason in (
+                    "chat not found", "user is deactivated", "bot was blocked",
+                )):
+                    raise
+                LOGGER.warning("binding_relay_terminal_chat")
+            if not await self.redis.eval(FINISH, 1, key, token, RETENTION_SECONDS):
+                raise RuntimeError("delivery claim lost")
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.warning("binding_relay_transient_retry")
+            return False
+        finally:
+            # Completed claims remain. Transient failures and cancellation release only our lease.
+            await self.redis.eval(RELEASE, 1, key, token)

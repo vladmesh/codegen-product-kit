@@ -43,6 +43,7 @@ Copier. Update packaging metadata and generated-product coverage with any depend
 | Event adapters | subscribed operations | Regenerated FastStream adapters |
 | Settings manifest registry | `services/<service>/manifest.yaml` | Regenerated backend settings-schema registry |
 | Jobs manifest registry | `services/<service>/manifest.yaml` | Regenerated backend fireable-job registry |
+| Telegram bindings | product `services/tg_bot/bindings/*.yaml`, installed manifests/libraries | Regenerated bot bindings and event relay; manifests/bindings remain product-owned |
 
 `datamodel-code-generator` is a required framework dependency. Schema generation is always the
 first pipeline stage, so a missing dependency aborts generation before any artifact is written.

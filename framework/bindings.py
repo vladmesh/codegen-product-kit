@@ -71,6 +71,8 @@ class OnEmpty(StrictModel):
 
     @model_validator(mode="after")
     def exact_presets(self) -> "OnEmpty":
+        if len({item.label for item in self.presets}) != len(self.presets):
+            raise ValueError("duplicate callback preset labels")
         times = [item.time.model_dump() for item in self.presets]
         if times != [
             {"kind": "offset", "seconds": 300},
@@ -156,7 +158,7 @@ def load_binding(path: Path) -> Binding:
     try:
         return Binding.model_validate(yaml.safe_load(path.read_text()))
     except (OSError, ValueError, yaml.YAMLError) as error:
-        raise BindingError(f"invalid binding {path}: {error}") from error
+        raise BindingError(f"BindingFormatError: invalid binding {path}: {error}") from error
 
 
 def _field(schema: dict[str, Any], name: str) -> dict[str, Any]:
@@ -271,6 +273,8 @@ def _listed_command(command: ListedItems, manifest: PackageManifest) -> None:
     if not Draft202012Validator(field).is_valid(command.filter.equals):
         raise BindingError("invalid listed-item filter value")
     _reply(command.reply_each, {"item": item})
+    if len({button.label for button in command.buttons}) != len(command.buttons):
+        raise BindingError("duplicate callback button labels")
     for button in command.buttons:
         _call(button, manifest, {"item": item})
 
@@ -302,7 +306,11 @@ def validate_binding(binding: Binding, manifest: PackageManifest, catalog: Catal
 
 def validate_product_timezone(value: str) -> None:
     """Later generators must supply one explicit product zone before admitting execution."""
-    if not value or value.startswith(("/", ".")):
+    if (
+        not value
+        or value in {"localtime", "posixrules"}
+        or value.startswith(("/", ".", "posix/", "right/"))
+    ):
         raise BindingError("an explicit product IANA timezone is required")
     try:
         ZoneInfo(value)

@@ -95,3 +95,22 @@ event identity and stream-count assertions. This Redis/PostgreSQL scenario runs 
 
 When a Docker-dependent test cannot run, skip it explicitly at the pytest boundary with a reason;
 do not silently return from the test.
+
+`tests/copier/test_bindings.py` is the focused non-slow bindings subset. It generates the
+backend,tg_bot shape, installs actual local component sources, copies the installed default
+through bind and runs generated handlers with the real parser and fake backend/clock. It covers
+caller headers, settings failures, empty versus None parsing, presets/DST, bounded owned callbacks,
+list/cancel, product overrides and nonmutating refusals. Generated relay unit transport uses
+FastStream TestRedisBroker with fake Redis state, including startup failure cleanup; that proves
+encoding/handler injection but does not prove real stream wiring.
+
+The existing textparse `published_remote` slow lane additionally installs the independently
+published reminders 0.5.0 through default remote/catalog paths, using exact candidate tooling.
+It binds/regenerates, executes the same handler corpus, checks activation/resource/version,
+and runs `binding_redis_scenarios.py` on the CI job's real Redis 7 service with a fake Telegram
+sender. Pre-start publication, duplicate/concurrent consumers, restart, transient reclaim,
+terminal poison and abandoned-claim expiry are required assertions. Its candidate/provenance/
+execution receipt is uploaded as `bindings-remote-redis-smoke-<run-id>` with missing-artifact
+failure. This lane retains the textparse interpreter/image proof and original artifact.
+Workers do not run real Redis, Docker, image/dependency or product typecheck proofs locally;
+the task packet's broad wrapper and its permitted focused subsets supply local evidence.
