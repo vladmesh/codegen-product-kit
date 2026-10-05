@@ -14,6 +14,22 @@ runs use the current repository and commit. This override remains an exact Git r
 used only while generating the workflow candidate. Ordinary users receive the resolved template
 commit in the same requirement position.
 
+The released-product upgrade proof uses no tooling answer override. It copies genuine annotated
+kit `0.7.1` (core 2.1.0, producer `56da5c83cb8d011823ce2cb70345415b223b93ab`), commits the
+unmodified backend,tg_bot output, then runs native `copier update --defaults --trust
+--vcs-ref=<full-candidate-SHA> --conflict=rej` against its saved answers/source. The root requirement
+and lock must move from producer to candidate; installed tooling direct URL and import origin
+must identify the product environment before generation/install. Protected environment/spec/app/
+controller bytes are compared immediately after Copier. Rejections, backups, unresolved markers
+and unmerged paths fail the proof even if Copier exits zero. This supports the unmodified released
+shape, not automatic merging of arbitrary customizations or fabricated intermediate bindings.
+
+The proposed kit core tag `0.8.0` delivers façade 2.2.0/protocol 1; tooling/application distribution
+versions and minimum Copier stay unchanged. [0.8.0 preparation](releases/0.8.0.md) defines the
+reviewed update/setup/add/bind sequence, explicit product timezone value and publication protocol.
+No core tag is published until this card's reviewed merge has green main CI. The separate PO
+operation tags that later merge, separate from immutable package release commits.
+
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
 copies only the service environment and application sources. An audit of `template/services/`,
@@ -1023,5 +1039,10 @@ publication, normal/duplicate ids, concurrent readers, restart, transient retry,
 invalid envelopes/recipients and abandoned-claim expiry. Uploaded
 `bindings-remote-redis-smoke-<run-id>` records candidate, immutable tag targets/trees, installed
 resource/version/activation, generated hash and execution evidence. Local metadata/transport
-fixtures do not establish that remote/real-Redis result. Actual 2.1 Copier upgrade, final core
-release, orchestrator installation and live stand acceptance remain later sprint boundaries.
+fixtures do not establish that remote/real-Redis result. A separate CI-only released core 2.1
+upgrade proof now requires `core-21-upgrade-smoke-<run-id>`, covering the genuine old baseline,
+native conflict-free update to the exact candidate, protected-file hashes, updated answers/lock/
+installed tooling, setup/generation/typecheck/unit tests and subsequent actual published-component
+install/bind/scenarios. The existing Redis matrix is retained. Artifact success must be established
+on the candidate; local broad checks do not attest it. Final core publication, orchestrator
+installation and live stand acceptance remain separate boundaries.

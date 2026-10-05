@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05 (prepared, not published)
+
 ### Fixed
 
+- Generated tg_bot lifecycle unit tests isolate binding startup/shutdown so a product with a
+  default binding passes its unit leg without Redis. Broker assertions remain, with hook order
+  and error cleanup coverage added; runtime and protected product code are unchanged.
 - Textparse refuses textual continuations through contiguous punctuation joiners and
   the bounded approximation qualifiers `ish`, `approx`, `roughly`, `or so`, `give or take`
   and `thereabouts` before resolving any of its three forms. Exact forms and sentence
@@ -22,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI-only native upgrade of an untouched released 0.7.1/core-2.1 backend,tg_bot product to the
+  exact candidate core 2.2/tooling revision, followed by default-remote reminders/textparse
+  installation, binding, generation, typecheck and handler scenarios. Required artifact
+  `core-21-upgrade-smoke-<run-id>` records provenance, clean baseline, conflict absence and
+  protected-file ownership. [0.8.0 release preparation](docs/releases/0.8.0.md) gives the
+  update/install sequence and separate PO publication boundary.
 - `kit bind <package> --default|--file <path>` validates the installed backend package and bot
   library before creating product-owned bindings and a manifest timezone declaration. Existing
   regeneration emits caller-aware Telegram commands/callbacks and a Redis Stream relay with
@@ -34,8 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.5.0 declares typed create/list/cancel operations verified against real OpenAPI, names
   the existing due message's required string recipient, and ships an English binding resource.
   Its finite validator checks references, argument schemas, nonempty/null-result guards,
-  exact presets and original-text context against actual installed manifests. Handlers and
-  tag publication remain later work: [release preparation](docs/releases/reminders-0.5.0.md).
+  exact presets and original-text context against actual installed manifests. The independent
+  package is published; the core tag awaits [0.8.0 preparation](docs/releases/0.8.0.md).
 - Required slow Copier CI adds published textparse default-remote install/interpreter/image
   proof, retaining local fixtures and uploading a candidate-bound provenance receipt.
   Actual reminders 0.3/0.4 source fixtures preserve old installs without relabeling 0.5.
@@ -44,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kit add textparse` resolves its independent tag and verifies/installs a plain dependency
   into tg_bot. The tg_bot image copies local locked wheels before sync. Narrow corpus,
   no-write artifact refusals and a CI-only real service/image proof accompany the source.
-  Tag publication follows merge: [release operation](docs/releases/textparse-0.1.0.md).
+  The independent package is published: [release operation](docs/releases/textparse-0.1.0.md).
 - Additive catalog v1 component signatures: package actions, curated library recommendations,
   default-binding resource references, stateless libraries with declared primary outputs, and
   extensions with parent version requirements. The public pure `primary_output_matches` API

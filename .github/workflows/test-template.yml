@@ -107,6 +107,7 @@ jobs:
           --health-retries 10
     env:
       CODEGEN_TOOLING_REQUIREMENT: "codegen-kit-tooling @ git+${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}@${{ github.event.pull_request.head.sha || github.sha }}"
+      CODEGEN_CORE_UPGRADE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,6 +136,7 @@ jobs:
           CODEGEN_RELEASE_SMOKE_RECEIPT: ${{ runner.temp }}/textparse-remote-receipt.json
           CODEGEN_BINDINGS_SMOKE_RECEIPT: ${{ runner.temp }}/bindings-remote-receipt.json
           CODEGEN_BINDINGS_REDIS_URL: redis://127.0.0.1:6379/14
+          CODEGEN_CORE_UPGRADE_RECEIPT: ${{ runner.temp }}/core-21-upgrade-receipt.json
         run: make test-copier-slow
 
       - name: Preserve published textparse release-smoke receipt
@@ -149,4 +151,11 @@ jobs:
         with:
           name: bindings-remote-redis-smoke-${{ github.run_id }}
           path: ${{ runner.temp }}/bindings-remote-receipt.json
+          if-no-files-found: error
+
+      - name: Preserve released core 2.1 upgrade receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-21-upgrade-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/core-21-upgrade-receipt.json
           if-no-files-found: error

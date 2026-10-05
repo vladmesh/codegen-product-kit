@@ -93,6 +93,27 @@ def test_generated_relay_unit_transport_and_lifecycle(bound_product):
     assert "generated relay unit transport and lifecycle passed" in result.stdout
 
 
+def test_bound_product_handler_unit_tests_need_no_redis(bound_product):
+    """The product's own lifecycle unit test must isolate its installed binding relay."""
+    product = bound_product
+    result = subprocess.run(
+        [
+            str(product / "services/tg_bot/.venv/bin/pytest"),
+            "services/tg_bot/tests/unit/test_command_handler.py",
+            "-q",
+        ],
+        cwd=product,
+        env=__import__("os").environ
+        | {
+            "PYTHONPATH": f"{product}:{product / 'shared'}",
+            "REDIS_URL": "redis://redis.invalid:6379",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_binding_idempotence_timezone_and_product_override(bound_product):
     product = bound_product
     before = _snapshot(product)
