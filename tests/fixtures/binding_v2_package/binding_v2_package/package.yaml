@@ -1,0 +1,100 @@
+protocol_version: 1
+name: binding-notes
+version: 1.0.0
+requires_core: '>=2.4,<3'
+http:
+  prefix: /binding-notes
+events:
+  publishes:
+  - binding-notes.ready
+  messages:
+    binding-notes.ready:
+      model: BindingNoteReady
+      recipient: user_ref
+      schema:
+        type: object
+        properties:
+          user_ref:
+            type: string
+          text:
+            type: string
+        required:
+        - user_ref
+        - text
+        additionalProperties: false
+actions:
+- name: create
+  summary: create
+  operation:
+    method: POST
+    path: ''
+  input:
+    type: object
+    properties:
+      text:
+        type: string
+        minLength: 1
+    required:
+    - text
+    additionalProperties: false
+  output: &id001
+    type: object
+    properties:
+      id:
+        type: string
+      text:
+        type: string
+      state:
+        type: string
+        enum:
+        - active
+        - removed
+    required:
+    - id
+    - text
+    - state
+    additionalProperties: false
+  errors:
+  - not_found
+  - pending
+- name: list
+  summary: list
+  operation:
+    method: GET
+    path: ''
+  input:
+    type: object
+    properties: {}
+    required: []
+    additionalProperties: false
+  output:
+    type: array
+    items: *id001
+- name: remove
+  summary: remove
+  operation:
+    method: DELETE
+    path: /{id}
+  input:
+    type: object
+    properties:
+      id:
+        type: string
+    required:
+    - id
+    additionalProperties: false
+  output: *id001
+- name: digest
+  summary: digest
+  operation:
+    method: GET
+    path: /digest
+  input:
+    type: object
+    properties: {}
+    required: []
+    additionalProperties: false
+  output:
+    type: array
+    items: *id001
+default_binding: binding_v2_package:default.yaml

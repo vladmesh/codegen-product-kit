@@ -165,3 +165,13 @@ YAML and runs catalog-resolved `kit add` through installation/discovery and frag
 Fast Copier activation tests admit the metadata under core 2.3, reject its minimum on core 2.2,
 and run complete generation twice before merging all product env fragments with exact declared
 data. A unit test prevents concrete platform service names from entering `framework/` or `template/`.
+
+`tests/tooling/test_bindings_v2.py` admits the synthetic bilingual grammar and rejects invalid
+locales, keys, sources, contracts and duplicates. Its pinned pre-v2 output fixture verifies v1
+bindings and relay bytes. `tests/copier/test_bindings_v2.py` binds the inert binding-notes fixture
+next to reminders and runs text creation, list/remove, show and localized relay delivery in RU
+and EN, including language changes between list and callback. The bound-product drift/lint
+regression is parameterized for v1, v2-only and mixed v1/v2 and retains the generated ruff/xenon limits.
+The slow `test_v2_bound_product_passes_make_typecheck` runs the product's exact `make typecheck`
+and checks both service banners and all output for errors. It runs in the existing slow
+Test Copier Template leg; no local product typecheck or real Redis run is authorized.

@@ -32,8 +32,9 @@ operation tags that later merge, separate from immutable package release commits
 Patch `0.8.1` keeps these versions and makes every generated Python file's final bytes formatter
 output, so regeneration, the generated-tree drift check and `make lint` agree; see
 [0.8.1 preparation](releases/0.8.1.md).
-The next prepared tag, `0.9.0`, delivers façade 2.3.0 and generic platform environment sources,
-and supersedes the untagged 0.8.2 xenon patch; see [0.9.0 preparation](releases/0.9.0.md).
+The next prepared tag, `0.10.0`, delivers façade 2.4.0 and finite bilingual binding v2;
+see [0.10.0 preparation](releases/0.10.0.md). The 0.9.0 platform environment source contract
+and v1 bindings remain compatible.
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
@@ -514,6 +515,82 @@ schemas remain in the manifest/catalog. Validators admit declarations; generated
 commands, callbacks and the relay execute them in the product interpreter. Recurrence, custom preset values, filter expressions beyond equality, nullable/optional display
 fields, nested field paths, arbitrary time formats, error routing and general binding workflows
 are intentionally unsupported. See [reminders preparation](releases/reminders-0.5.0.md).
+
+#### Finite binding v2
+
+`load_binding` dispatches `binding_version: 2` to a separate finite grammar;
+`validate_binding` reuses the v1 source, argument, reply-display and schema matchers against
+actual installed manifests. V1 validators, parser constraints and generated output remain
+unchanged. V2 needs façade 2.4 or later. A package shipping a v2 default or `actions[].errors`
+must declare `requires_core: ">=2.4,<3"`; package protocol remains 1.
+
+| Data | Contract |
+|---|---|
+| Header | `binding_version: 2`, `package`, `language: {key, scope: product, values: [ru, en]}`; optional v1-shaped `timezone` |
+| Text | Exactly `{ru: <nonempty string>, en: <nonempty string>}` for help, literal reply parts, on_empty, on_invalid_text, on_none, error replies and button labels |
+| Text create | `kind: text_create`, `command`, `help`, `action`, `args` mapping `$text` to exactly one argument, `reply`, `on_empty`, `on_invalid_text`, optional `on_error: {<declared code>: <Text>}` |
+| List | `kind: list`, `command`, `help`, `action`, `args`, optional `filter: {field, equals: <string>}`, `reply_each`, `on_none`, optional `buttons` |
+| Show | `kind: show`, `command`, `help`, `action`, `args`, `reply_each`, `on_none`; no filter or buttons |
+| Button | Localized `label`, `action`, `args`, `reply`; ownership-bound single-use callback using the v1 bounded context machinery |
+| Events | Published `event`, `to` naming its declared recipient, localized `reply` |
+| Reply | Nonempty `parts` list of Text maps or `{source: <reference>, format: month_word}`; omit format for plain string display |
+
+There are no parse functions or presets in v2. `$text` is the original text after the command,
+with spacing preserved. Whitespace-only text takes `on_empty`, oversized or schema-invalid text
+takes `on_invalid_text`, and neither invokes the action. The nonempty guard proves only
+`minLength: 1`; stronger/unmodelled schema constraints still refuse admission conservatively.
+A successful create uses `$result.<field>` in its reply. `on_error` selects a literal localized
+reply only for a declared action error code. Action metadata may declare `errors: [not_found,
+pending]`, a finite list of unique lower-case identifiers. The backend signals it as an HTTP
+4xx body `{"detail": {"code": "not_found"}}`. Undeclared/unmapped codes, malformed errors,
+5xx, transport failures and invalid output schemas use the localized generic failure reply.
+Mutations are attempted once; raw error bodies never enter bot replies.
+
+List and show are no-argument commands; extra text produces their localized help without
+calling the action. Both call an action with an array output and render up to 100 items as
+separate replies. Equality filters validate a required item field and their value against its
+schema. Buttons use `$item.<field>` for action arguments and `$result.<field>` for replies.
+Show has no callbacks. Events use `$event.<field>` for replies and their declared recipient.
+Each field must be required, top-level and type-compatible. `$parsed`, `$preset`, `$clock` and
+`$timezone` are unavailable argument sources in v2. Language and timezone are runtime
+configuration, not implicit action arguments. There are no nested references, expressions,
+interpolation, translation, arbitrary error routing or general workflows.
+
+Unknown keys, missing/extra locales, actions/events/fields/arguments, unavailable branch sources,
+incompatible schemas, duplicate command/event names and duplicate button labels in either
+locale fail admission. Product preflight also refuses reserved `start`/`command`, commands longer
+than 32 characters, duplicate commands/events/packages across bindings, setting ownership
+conflicts and incompatible setting schemas. All v2 bindings share one product language key;
+all timezone declarations in v1/v2 share one product timezone key. Those two keys must differ.
+
+Bind adds `{type: string, enum: [ru, en]}` at the language key in
+`services/tg_bot/manifest.yaml`, through the existing product settings registry. It never writes
+a setting value. Commands, valid callbacks and events read `/settings/get` with
+`contract_version: 1`, the declared key and `scope: product`, without `subject_id`.
+Language is read again on a callback even if it changed after the list was displayed.
+Missing, unavailable, malformed or invalid language yields this fixed bilingual setup reply:
+
+> Настройте язык продукта (ru/en) через /settings/set. / Set the product language (ru/en) through /settings/set.
+
+There is no default language, environment/host locale fallback, user scope or `/lang` command.
+Setup/timezone/stale-selection replies are fixed bilingual literals; other runtime failures use
+RU/EN maps. Invalid callback contexts cannot recover a trustworthy binding and receive the
+fixed bilingual stale-selection reply without executing an action.
+
+`month_word` requires the optional explicit product timezone declaration. RU uses the table
+`января … декабря`, EN uses `January … December`, independent of host locale. For example,
+`7 октября 2026 в 21:00 MSK` and `7 October 2026 at 21:00 MSK` represent the same instant in
+`Europe/Moscow`. Missing/invalid timezone gives a fixed bilingual setup reply; UTC is never
+assumed. Plain-text-only bindings need no timezone.
+
+The event relay retains v1 schema/recipient checks, bounded claims, deduplication, retries,
+terminal refusal and lifecycle cleanup. It reads product language for each delivery; invalid
+configuration sends the setup reply to the declared recipient and retains the original event
+for retry after configuration recovery. V1 and v2 coexist without
+migrating reminders. V1-only output remains exactly `bindings.py` and `binding_relay.py`;
+products with v2 add the generated `bindings_v1.py` companion for the shared runtime. Removing
+v2 removes that companion. Synthetic v2 tests prove both languages using fake transports;
+slow CI supplies the product typecheck and existing real-transport matrix.
 
 #### Primary-output matching
 

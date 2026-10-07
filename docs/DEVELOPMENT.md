@@ -101,6 +101,8 @@ that a kit core tag and a package tag never share a commit.
 See [0.7.1 release and upgrade notes](releases/0.7.1.md) for the generated lifespan unit-test fix.
 See [0.8.1 release and upgrade notes](releases/0.8.1.md) for formatter-stable generated bindings
 under the product's own drift check and lint.
+See [0.10.0 release and upgrade notes](releases/0.10.0.md) for finite RU/EN binding v2,
+product language and façade 2.4.0 with pinned v1 compatibility.
 See [0.9.0 release and upgrade notes](releases/0.9.0.md) for generic platform environment sources,
 façade 2.3.0 and the included untagged 0.8.2 xenon fix.
 See [reminders 0.5.0 preparation](releases/reminders-0.5.0.md) for core 2.2 action admission,

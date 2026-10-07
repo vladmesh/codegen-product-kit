@@ -17,8 +17,8 @@ from packaging.version import Version
 import yaml
 
 from framework.binding_product import (
-    TIMEZONE_SCHEMA,
     binding_files,
+    binding_settings,
     default_binding_resource,
     require_binding_product,
     validate_product_bindings,
@@ -280,10 +280,10 @@ def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None
     )
     changed = False
     for item in selected.values():
-        key = item.timezone.key
-        if key not in specs.settings_schemas:
-            manifest["settings_schema"]["properties"][key] = TIMEZONE_SCHEMA.copy()
-            changed = True
+        for key, schema in binding_settings(item).items():
+            if key not in specs.settings_schemas:
+                manifest["settings_schema"]["properties"][key] = schema
+                changed = True
     prospective = load_specs(
         repo_root,
         manifest_overrides={

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-07 (prepared, not published)
+
+### Added
+
+- Finite Telegram binding v2 beside v1: RU/EN text maps, one explicit product language setting,
+  plain text creation with declared action errors, optional-filter lists and remove buttons,
+  no-argument result-list show, and localized events/date display. Bind declares language in
+  the bot manifest; every valid update reads the product value without a default language.
+  Missing/invalid values produce a bilingual setup reply. `CORE_VERSION` becomes 2.4.0;
+  packages shipping v2 defaults or action error metadata require `>=2.4,<3`.
+- Synthetic bilingual bound-product handler/relay coverage, v2 ruff/xenon drift regression,
+  CI-only product typecheck and pinned pre-v2 generated-file equality. Reminders and every
+  v1 grammar constraint remain unchanged. See [0.10.0 preparation](docs/releases/0.10.0.md).
+
 ## [0.9.0] - 2026-10-07 (prepared, not published; supersedes untagged 0.8.2)
 
 ### Added

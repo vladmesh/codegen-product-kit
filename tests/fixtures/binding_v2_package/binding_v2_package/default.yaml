@@ -1,0 +1,85 @@
+binding_version: 2
+package: binding-notes
+language:
+  key: language
+  scope: product
+  values:
+  - ru
+  - en
+commands:
+- kind: text_create
+  command: note
+  help:
+    ru: Добавить заметку
+    en: Add a note
+  action: binding-notes.create
+  args:
+    text: $text
+  reply:
+    parts:
+    - ru: 'Добавлено: '
+      en: 'Added: '
+    - source: $result.text
+  on_empty:
+    ru: Введите текст
+    en: Enter text
+  on_invalid_text:
+    ru: Неверный текст
+    en: Invalid text
+  on_error:
+    not_found:
+      ru: Не найдено
+      en: Not found
+    pending:
+      ru: Ожидает проверки
+      en: Pending check
+- kind: list
+  command: notes
+  help:
+    ru: Список заметок
+    en: List notes
+  action: binding-notes.list
+  args: {}
+  reply_each:
+    parts:
+    - ru: 'Заметка: '
+      en: 'Note: '
+    - source: $item.text
+  on_none:
+    ru: Нет заметок
+    en: No notes
+  buttons:
+  - label:
+      ru: Удалить
+      en: Remove
+    action: binding-notes.remove
+    args:
+      id: $item.id
+    reply:
+      parts:
+      - ru: 'Удалено: '
+        en: 'Removed: '
+      - source: $result.text
+- kind: show
+  command: digest
+  help:
+    ru: Показать дайджест
+    en: Show digest
+  action: binding-notes.digest
+  args: {}
+  reply_each:
+    parts:
+    - ru: 'Дайджест: '
+      en: 'Digest: '
+    - source: $item.text
+  on_none:
+    ru: Дайджест пуст
+    en: Digest is empty
+events:
+- event: binding-notes.ready
+  to: $event.user_ref
+  reply:
+    parts:
+    - ru: 'Новое: '
+      en: 'New: '
+    - source: $event.text

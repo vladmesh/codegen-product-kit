@@ -882,7 +882,7 @@ def test_runtime_activates_a_package_that_declares_timers(
         activated = runtime.discover_packages(["synthetic"])
 
         assert [package.manifest.name for package in activated] == ["synthetic"]
-        assert runtime.CORE_VERSION == "2.3.0"
+        assert runtime.CORE_VERSION == "2.4.0"
     finally:
         installed_manifest.write_text(original)
 
@@ -905,7 +905,7 @@ def test_generated_runtime_admits_action_binding_and_recipient_metadata(
             events=candidate["events"],
         )
         path.write_text(yaml.safe_dump(data))
-        assert runtime.CORE_VERSION == CORE_VERSION == "2.3.0"
+        assert runtime.CORE_VERSION == CORE_VERSION == "2.4.0"
         assert runtime.PACKAGE_PROTOCOL_VERSION == 1
         assert runtime.discover_packages(["synthetic"])[0].manifest.name == "synthetic"
         # Activation has no tooling dependency and does not resolve or execute these resources.
