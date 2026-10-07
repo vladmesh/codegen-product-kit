@@ -244,3 +244,121 @@ packages:
       - version: 0.5.0
         tag: packages/reminders/v0.5.0
         requires_core: ">=2.2,<3"
+  - name: tg-channels
+    distribution: codegen-kit-tg-channels
+    path: packages/codegen-kit-tg-channels
+    summary: Public Telegram channel lists, digests and timed new-post delivery in RU
+      and EN.
+    capabilities:
+    - читать публичные Telegram-каналы
+    - добавить канал по имени и проверить доступность
+    - дайджест каналов Кипра и новые публикации по таймеру
+    - read public Telegram channels
+    - add, list and remove public channels
+    - deliver new channel posts on a timer
+    - show a channel digest with dates and Telegram links
+    settings:
+    - name: starting_channels
+      summary: Starting list copied once per user; product scope, populated through
+        setting seeds.
+    environment:
+    - name: REDIS_URL
+      required: true
+      summary: Redis timer and recipient event transport.
+    - name: PLATFORM_KEY
+      required: true
+      summary: Declared platform credential.
+    - name: PLATFORM_BASE_URL
+      required: true
+      summary: Declared platform API base URL.
+    actions:
+    - name: add
+      summary: Resolve and add a public channel for the verified caller.
+      operation:
+        method: POST
+        path: ''
+      input:
+        type: object
+        properties:
+          text:
+            type: string
+            minLength: 1
+        required:
+        - text
+        additionalProperties: false
+      output: &id001
+        type: object
+        properties:
+          id:
+            type: string
+          channel:
+            type: string
+        required:
+        - id
+        - channel
+      errors:
+      - invalid_username
+      - pending
+      - not_found
+      - not_a_channel
+      - no_preview
+      - try_later
+      - not_configured
+    - name: list
+      summary: List the verified caller's channels.
+      operation:
+        method: GET
+        path: ''
+      input:
+        type: object
+        properties: {}
+        additionalProperties: false
+      output:
+        type: array
+        items: *id001
+    - name: remove
+      summary: Remove a channel only from the verified caller's list.
+      operation:
+        method: DELETE
+        path: /{id}
+      input:
+        type: object
+        properties:
+          id:
+            type: string
+        required:
+        - id
+        additionalProperties: false
+      output: *id001
+    - name: digest
+      summary: Latest public posts from the verified caller's channels.
+      operation:
+        method: GET
+        path: /digest
+      input:
+        type: object
+        properties: {}
+        additionalProperties: false
+      output:
+        type: array
+        items:
+          type: object
+          properties:
+            channel:
+              type: string
+            date:
+              type: string
+            text:
+              type: string
+            url:
+              type: string
+          required:
+          - channel
+          - date
+          - text
+          - url
+    default_binding: codegen_kit_tg_channels:bindings/default.yaml
+    versions:
+    - version: 0.1.0
+      tag: packages/tg-channels/v0.1.0
+      requires_core: '>=2.4,<3'

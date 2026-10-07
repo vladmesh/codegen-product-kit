@@ -89,7 +89,12 @@ def test_actual_0_7_1_loader_preserves_package_fields_and_selection(source: Path
         spec.loader.exec_module(module)
         catalog = module.parse_catalog(source.read_text())
         assert catalog.format_version == 1
-        assert [item.name for item in catalog.packages] == ["reminders"]
+        expected_names = (
+            ["reminders", "tg-channels"]
+            if source == ROOT / "packages/catalog.yaml"
+            else ["reminders"]
+        )
+        assert [item.name for item in catalog.packages] == expected_names
         assert not hasattr(catalog, "libraries") and not hasattr(catalog, "extensions")
         reminders = catalog.get("reminders")
         modern = load_catalog(source).get("reminders")
@@ -109,6 +114,10 @@ def test_actual_0_7_1_loader_preserves_package_fields_and_selection(source: Path
         assert modern.select("2.1.0").version == "0.4.0"
         if source == ROOT / "packages/catalog.yaml":
             assert reminders.select("2.2.0").version == modern.select("2.2.0").version == "0.5.0"
+            channels = catalog.get("tg-channels")
+            assert channels.select("2.4.0").version == "0.1.0"
+            with pytest.raises(module.IncompatibleCatalogVersionError):
+                channels.select("2.3.0")
     finally:
         del sys.modules[spec.name]
 
