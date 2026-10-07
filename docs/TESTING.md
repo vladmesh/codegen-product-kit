@@ -175,3 +175,5 @@ regression is parameterized for v1, v2-only and mixed v1/v2 and retains the gene
 The slow `test_v2_bound_product_passes_make_typecheck` runs the product's exact `make typecheck`
 and checks both service banners and all output for errors. It runs in the existing slow
 Test Copier Template leg; no local product typecheck or real Redis run is authorized.
+The fast `test_v2_typecheck_dispatch_uses_selected_product` mocks the subprocess and verifies
+that each fixture resolves to its own product directory before the CI-only command is invoked.

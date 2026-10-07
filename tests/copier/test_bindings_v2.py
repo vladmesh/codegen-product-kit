@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -49,15 +50,44 @@ def test_v2_generated_handlers_and_event_delivery(request, fixture, locale):
 @pytest.mark.parametrize("fixture", ["bound_product_v2", "bound_product_v2_only"])
 def test_v2_bound_product_passes_make_typecheck(request, fixture):
     """CI only: retain the product's exact service loop and inspect hidden loop failures."""
+    product = request.getfixturevalue(fixture)
     result = subprocess.run(
         ["make", "typecheck"],
-        cwd=bound_product_v2,
+        cwd=product,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert ">> Typechecking backend" in result.stdout and ">> Typechecking tg_bot" in result.stdout
     assert "error:" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("fixture", ["bound_product_v2", "bound_product_v2_only"])
+def test_v2_typecheck_dispatch_uses_selected_product(tmp_path, monkeypatch, fixture):
+    """Exercise CI test routing without invoking make or creating service environments."""
+    products = {name: tmp_path / name for name in ("bound_product_v2", "bound_product_v2_only")}
+    for product in products.values():
+        product.mkdir()
+    selected = []
+    invoked = []
+
+    def resolve(name):
+        selected.append(name)
+        return products[name]
+
+    def run(argv, *, cwd, capture_output, text):
+        assert argv == ["make", "typecheck"]
+        assert cwd == products[fixture] and cwd.is_dir()
+        assert capture_output and text
+        invoked.append(cwd)
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=">> Typechecking backend\n>> Typechecking tg_bot\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    test_v2_bound_product_passes_make_typecheck(SimpleNamespace(getfixturevalue=resolve), fixture)
+    assert selected == [fixture]
+    assert invoked == [products[fixture]]
 
 
 @pytest.mark.parametrize(
