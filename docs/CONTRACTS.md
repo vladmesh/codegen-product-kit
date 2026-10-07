@@ -29,6 +29,9 @@ versions and minimum Copier stay unchanged. [0.8.0 preparation](releases/0.8.0.m
 reviewed update/setup/add/bind sequence, explicit product timezone value and publication protocol.
 No core tag is published until this card's reviewed merge has green main CI. The separate PO
 operation tags that later merge, separate from immutable package release commits.
+Patch `0.8.1` keeps these versions and makes every generated Python file's final bytes formatter
+output, so regeneration, the generated-tree drift check and `make lint` agree; see
+[0.8.1 preparation](releases/0.8.1.md).
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
