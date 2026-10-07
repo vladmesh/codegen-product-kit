@@ -3,7 +3,7 @@
 import json
 from pathlib import PurePosixPath
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from jsonschema import Draft202012Validator, SchemaError
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -97,6 +97,7 @@ class PackageAction(BaseModel):
     operation: HttpOperation
     input: dict[str, Any]
     output: dict[str, Any]
+    errors: list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]] = Field(default_factory=list)
 
     @field_validator("input", "output")
     @classmethod
@@ -105,6 +106,8 @@ class PackageAction(BaseModel):
 
     @model_validator(mode="after")
     def input_object(self) -> "PackageAction":
+        if len(self.errors) != len(set(self.errors)):
+            raise ValueError("duplicate action error codes")
         if self.input.get("type") != "object" or not isinstance(self.input.get("properties"), dict):
             raise ValueError("action input must have object properties")
         for name in re.findall(r"\{([^}]+)\}", self.operation.path):

@@ -63,6 +63,40 @@ def bound_product(project_backend_tg_bot, tmp_path_factory):
     return product
 
 
+@pytest.fixture(scope="module")
+def bound_product_v2(bound_product, tmp_path_factory):
+    product = tmp_path_factory.mktemp("binding-v2-product") / "product"
+    shutil.copytree(bound_product, product, symlinks=True)
+    result = subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(product / "services/backend/.venv/bin/python"),
+            str(ROOT / "tests/fixtures/binding_v2_package"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = product / "services/backend/manifest.yaml"
+    data = yaml.safe_load(manifest.read_text())
+    data["packages"].append("binding-notes")
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False))
+    assert bind_package("binding-notes", product) == "bound"
+    return product
+
+
+@pytest.fixture(scope="module")
+def bound_product_v2_only(bound_product_v2, tmp_path_factory):
+    product = tmp_path_factory.mktemp("binding-v2-only-product") / "product"
+    shutil.copytree(bound_product_v2, product, symlinks=True)
+    (product / "services/tg_bot/bindings/reminders.yaml").unlink()
+    generate_all(product)
+    return product
+
+
 def test_generated_default_handlers_execute_real_parser(bound_product):
     product = bound_product
     result = subprocess.run(
@@ -129,10 +163,11 @@ def _generated_bytes(product):
     }
 
 
-def test_bound_product_generation_passes_its_own_drift_and_lint(bound_product, tmp_path):
+@pytest.mark.parametrize("fixture", ["bound_product", "bound_product_v2", "bound_product_v2_only"])
+def test_bound_product_generation_passes_its_own_drift_and_lint(request, fixture, tmp_path):
     """Product CI: generation, drift diff, then make lint's ruff and xenon steps, twice."""
     product = tmp_path / "product"
-    shutil.copytree(bound_product, product, symlinks=True)
+    shutil.copytree(request.getfixturevalue(fixture), product, symlinks=True)
     # The product generator resolves ruff from the root venv `make setup` creates; use the
     # kit's pinned ruff there so the real formatter and fixer run, not a silent skip.
     (product / ".venv/bin").mkdir(parents=True)
@@ -162,9 +197,16 @@ def test_bound_product_generation_passes_its_own_drift_and_lint(bound_product, t
     ):
         assert _git(product, *step).returncode == 0
     generate_all(product)
+    serialized = "bindings.py" if fixture == "bound_product" else "bindings_v1.py"
     assert (
-        "DATA = json.loads(" in (product / "services/tg_bot/src/generated/bindings.py").read_text()
+        "DATA = json.loads(" in (product / "services/tg_bot/src/generated" / serialized).read_text()
     )
+    if fixture == "bound_product":
+        for name in ("bindings.py", "binding_relay.py"):
+            expected = ROOT / "tests/fixtures/binding_v1_baseline" / (name + ".txt")
+            assert (
+                product / "services/tg_bot/src/generated" / name
+            ).read_bytes() == expected.read_bytes()
     assert _git(product, "add", "-A").returncode == 0
     assert _git(product, "commit", "-qm", "bound product").returncode == 0
 
@@ -346,7 +388,7 @@ def test_bind_refusals_are_nonmutating(bound_product, tmp_path, bad):  # noqa: P
             path = product / "codegen_kit/packages.py"
             changes[path] = path.read_bytes()
             path.write_text(
-                path.read_text().replace('CORE_VERSION = "2.3.0"', 'CORE_VERSION = "2.1.0"')
+                path.read_text().replace('CORE_VERSION = "2.4.0"', 'CORE_VERSION = "2.1.0"')
             )
         elif bad == "malformed":
             binding_file = tmp_path / "bad.yaml"

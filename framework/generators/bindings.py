@@ -5,6 +5,7 @@ from pathlib import Path
 from pprint import pformat
 
 from framework.binding_product import BindingPlan
+from framework.bindings import BINDING_V2
 from framework.generators.base import BaseGenerator
 
 
@@ -17,6 +18,10 @@ class BindingsGenerator(BaseGenerator):
         if not (self.repo_root / "services/tg_bot").is_dir():
             return []
         output = self.repo_root / "services/tg_bot/src/generated/bindings.py"
+        has_v2 = any(item.binding_version == BINDING_V2 for item in self.plan.bindings)
+        base_output = output.with_name("bindings_v1.py")
+        if not has_v2:
+            base_output.unlink(missing_ok=True)
         if not self.plan.bindings:
             self.write_file(
                 output,
@@ -51,15 +56,22 @@ async def stop(application: object) -> None:
                 )
                 + "}"
             )
+            if has_v2 and not self.plan.libraries:
+                parsers = "dict[str, Any]()"
             self.render_to_file(
                 "bindings.py.j2",
-                output,
+                base_output if has_v2 else output,
                 imports=imports,
                 parsers=parsers,
                 data=pformat(json.dumps(data, sort_keys=True), width=88),
             )
             relay = output.with_name("binding_relay.py")
-            self.render_to_file("binding_relay.py.j2", relay)
+            self.render_to_file(
+                "binding_relay_v2.py.j2" if has_v2 else "binding_relay.py.j2", relay
+            )
+            if has_v2:
+                self.render_to_file("bindings_v2.py.j2", output)
+                return [output, base_output, relay]
             return [output, relay]
         self.format_file(output)
         return [output]

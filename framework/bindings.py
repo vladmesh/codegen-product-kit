@@ -1,7 +1,7 @@
 """Finite binding v1 data and admission against actual installed package contracts."""
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from jsonschema import Draft202012Validator
@@ -16,6 +16,11 @@ from framework.component_matching import (
 )
 from framework.spec.actions import PackageAction
 from framework.spec.packages import PackageManifest
+
+if TYPE_CHECKING:
+    from framework.bindings_v2 import BindingV2, ReplyV2
+
+BINDING_V2 = 2
 
 Reference = Annotated[
     str,
@@ -153,10 +158,18 @@ class Binding(StrictModel):
         return self
 
 
-def load_binding(path: Path) -> Binding:
+def load_binding(path: Path) -> "Binding | BindingV2":
     """Read data only; no library, runtime, channel or package import is executed."""
     try:
-        return Binding.model_validate(yaml.safe_load(path.read_text()))
+        from framework.bindings_v2 import BindingV2
+
+        data = yaml.safe_load(path.read_text())
+        model = (
+            BindingV2
+            if isinstance(data, dict) and data.get("binding_version") == BINDING_V2
+            else Binding
+        )
+        return model.model_validate(data)
     except (OSError, ValueError, yaml.YAMLError) as error:
         raise BindingError(f"BindingFormatError: invalid binding {path}: {error}") from error
 
@@ -192,7 +205,7 @@ def _arguments(
             raise BindingError(f"incompatible argument {name!r} from {reference}")
 
 
-def _reply(reply: Reply, contexts: dict[str, dict[str, Any]]) -> None:
+def _reply(reply: "Reply | ReplyV2", contexts: dict[str, dict[str, Any]]) -> None:
     for part in reply.parts:
         if isinstance(part, DisplayField):
             schema = _source(part.source, contexts)
@@ -279,12 +292,19 @@ def _listed_command(command: ListedItems, manifest: PackageManifest) -> None:
         _call(button, manifest, {"item": item})
 
 
-def validate_binding(binding: Binding, manifest: PackageManifest, catalog: Catalog) -> None:
+def validate_binding(
+    binding: "Binding | BindingV2", manifest: PackageManifest, catalog: Catalog
+) -> None:
     """Admit finite data against the supplied installed manifest, never newest catalog actions.
 
     Nullable parse results take on_empty exclusively. No action is invoked by validation;
     execution of these branches is a later generated-product responsibility.
     """
+    from framework.bindings_v2 import BindingV2, validate_binding_v2
+
+    if isinstance(binding, BindingV2):
+        validate_binding_v2(binding, manifest)
+        return
     if binding.package != manifest.name:
         raise BindingError("binding package does not match installed manifest")
     for command in binding.commands:

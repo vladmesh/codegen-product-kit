@@ -14,17 +14,19 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from framework.bindings import Binding, BindingError, ParsedCreate, load_binding, validate_binding
+from framework.bindings_v2 import BindingV2
 from framework.catalog import Catalog, bundled_catalog
 from framework.spec.loader import AllSpecs
 from framework.spec.package_resolution import ActivePackage
 
 TIMEZONE_SCHEMA = {"type": "string", "format": "x-iana-tz"}
+LANGUAGE_SCHEMA = {"type": "string", "enum": ["ru", "en"]}
 MAX_COMMAND_LENGTH = 32
 
 
 @dataclass
 class BindingPlan:
-    bindings: list[Binding]
+    bindings: list[Binding | BindingV2]
     actions: dict[str, dict]
     events: dict[str, dict]
     libraries: dict[str, str]
@@ -129,7 +131,7 @@ def _library_exports(path, library) -> None:
         ) from error
 
 
-def binding_files(root: Path) -> dict[str, Binding]:
+def binding_files(root: Path) -> dict[str, Binding | BindingV2]:
     return {
         path.name: load_binding(path)
         for path in sorted((root / "services/tg_bot/bindings").glob("*.yaml"))
@@ -169,7 +171,7 @@ def product_core_version(root: Path) -> str:
 
 
 def _binding_package(
-    binding: Binding, packages: dict[str, ActivePackage], core_version: str
+    binding: Binding | BindingV2, packages: dict[str, ActivePackage], core_version: str
 ) -> ActivePackage:
     package = packages.get(binding.package)
     if package is None:
@@ -180,21 +182,42 @@ def _binding_package(
         raise BindingError(
             f"BindingCoreError: {binding.package} is incompatible with core {core_version}"
         )
+    if isinstance(binding, BindingV2) and Version(core_version) < Version("2.4"):
+        raise BindingError("BindingCoreError: binding v2 requires core >=2.4; upgrade first")
     return package
+
+
+def binding_settings(binding: Binding | BindingV2) -> dict[str, dict]:
+    settings = {}
+    if binding.timezone is not None:
+        settings[binding.timezone.key] = TIMEZONE_SCHEMA.copy()
+    if isinstance(binding, BindingV2):
+        if binding.language.key in settings:
+            raise BindingError("BindingLanguageError: language and timezone need distinct keys")
+        settings[binding.language.key] = LANGUAGE_SCHEMA.copy()
+    return settings
+
+
+def _setting_keys(bindings) -> None:
+    if len({binding.timezone.key for binding in bindings if binding.timezone}) > 1:
+        raise BindingError("BindingTimezoneError: all bindings must use one product timezone key")
+    if len({binding.language.key for binding in bindings if isinstance(binding, BindingV2)}) > 1:
+        raise BindingError(
+            "BindingLanguageError: all v2 bindings must use one product language key"
+        )
 
 
 def validate_product_bindings(
     root: Path,
     specs: AllSpecs,
-    bindings: dict[str, Binding] | None = None,
+    bindings: dict[str, Binding | BindingV2] | None = None,
     catalog: Catalog | None = None,
 ) -> BindingPlan:
     selected = bindings if bindings is not None else binding_files(root)
     plan = BindingPlan([], {}, {}, {})
     if not selected:
         return plan
-    if len({binding.timezone.key for binding in selected.values()}) != 1:
-        raise BindingError("BindingTimezoneError: all bindings must use one product timezone key")
+    _setting_keys(selected.values())
     require_binding_product(root)
     core_version = product_core_version(root)
     catalog = catalog or bundled_catalog()
@@ -210,12 +233,15 @@ def validate_product_bindings(
             )
         package_names.add(binding.package)
         validate_binding(binding, package.manifest, catalog)
-        key = binding.timezone.key
-        owner = specs.settings_schema_sources.get(key)
-        if owner not in specs.manifests or specs.settings_schemas.get(key) != TIMEZONE_SCHEMA:
-            raise BindingError(
-                f"BindingTimezoneError: {key} needs a product-owned {TIMEZONE_SCHEMA}"
-            )
+        for key, schema in binding_settings(binding).items():
+            owner = specs.settings_schema_sources.get(key)
+            if owner not in specs.manifests or specs.settings_schemas.get(key) != schema:
+                label = (
+                    "BindingSettingError"
+                    if isinstance(binding, BindingV2)
+                    else "BindingTimezoneError"
+                )
+                raise BindingError(f"{label}: {key} needs a product-owned {schema}")
         _commands(root, binding, catalog, commands, plan)
         for event in binding.events:
             if event.event in events:
@@ -224,6 +250,8 @@ def validate_product_bindings(
             plan.events[event.event] = package.manifest.events.messages[event.event].schema_data
         for action in package.manifest.actions:
             data = action.model_dump()
+            if not action.errors:
+                data.pop("errors")  # Preserve the serialized v1 action contract byte for byte.
             data["operation"]["path"] = package.manifest.http.prefix + action.operation.path
             plan.actions[f"{binding.package}.{action.name}"] = data
         plan.bindings.append(binding)
