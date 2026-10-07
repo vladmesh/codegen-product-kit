@@ -170,8 +170,11 @@ data. A unit test prevents concrete platform service names from entering `framew
 locales, keys, sources, contracts and duplicates. Its pinned pre-v2 output fixture verifies v1
 bindings and relay bytes. `tests/copier/test_bindings_v2.py` binds the inert binding-notes fixture
 next to reminders and runs text creation, list/remove, show and localized relay delivery in RU
-and EN, including language changes between list and callback. The bound-product drift/lint
-regression is parameterized for v1, v2-only and mixed v1/v2 and retains the generated ruff/xenon limits.
+and EN, including language changes between list and callback. Repeated unconfigured, malformed,
+5xx, timeout and transport-failed settings reads exercise commands, callbacks and silent relay
+retries, log throttling and one delivery after recovery, for language and optional timezone.
+The bound-product drift/lint regression is parameterized for v1, v2-only and mixed v1/v2 and
+retains the generated ruff/xenon limits.
 The slow `test_v2_bound_product_passes_make_typecheck` runs the product's exact `make typecheck`
 and checks both service banners and all output for errors. It runs in the existing slow
 Test Copier Template leg; no local product typecheck or real Redis run is authorized.

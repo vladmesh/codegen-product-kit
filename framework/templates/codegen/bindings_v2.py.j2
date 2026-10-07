@@ -1,9 +1,10 @@
 """Finite v2 commands with explicit per-update product language."""
 
+from collections.abc import Callable
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from httpx import HTTPStatusError
+from httpx import HTTPStatusError, RequestError, TimeoutException
 from jsonschema import ValidationError
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
@@ -17,6 +18,7 @@ start = v1.start
 stop = v1.stop
 LANGUAGE_SETUP = "Настройте язык продукта (ru/en) через /settings/set. / Set the product language (ru/en) through /settings/set."
 TIMEZONE_SETUP = "Настройте часовой пояс продукта IANA через /settings/set. / Set a valid product IANA timezone through /settings/set."
+SETTINGS_TEMPORARY = "Настройки временно недоступны. Попробуйте ещё раз. / Settings are temporarily unavailable. Please try again."
 STALE = "Выбор устарел, уже использован или принадлежит другому пользователю/чату. Повторите команду. / This selection expired, was already used, or belongs to another user/chat. Run the command again."
 ERROR = {
     "ru": "Сервер не подтвердил операцию. Проверьте настройки и список перед повтором.",
@@ -34,6 +36,43 @@ class ActionError(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class SettingsReadError(v1.BindingRuntimeError):
+    def __init__(self, key: str, state: str, reason: str, setup: str) -> None:
+        self.key = key
+        self.state = state
+        self.reason = reason
+        super().__init__(setup if state == "setup" else SETTINGS_TEMPORARY)
+
+
+def language_value(value: Any) -> str:
+    if not isinstance(value, str) or value not in ("ru", "en"):
+        raise ValueError("invalid language")
+    return value
+
+
+async def read_setting(client: Any, key: str, validate: Callable[[Any], Any], setup: str) -> Any:
+    """Classify HTTP/transport failures before parsing the product setting contract."""
+    try:
+        response = await client._request("post", "/settings/get", json={
+            "contract_version": 1, "key": key, "scope": "product",
+        })
+        response.raise_for_status()
+    except HTTPStatusError as error:
+        status = error.response.status_code
+        state = "setup" if 400 <= status < 500 else "transient"
+        raise SettingsReadError(key, state, f"http_{status}", setup) from error
+    except RequestError as error:
+        reason = "timeout" if isinstance(error, TimeoutException) else "transport"
+        raise SettingsReadError(key, "transient", reason, setup) from error
+    try:
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("invalid settings response")
+        return validate(v1.settings_value(data, key))
+    except (ValueError, KeyError, TypeError) as error:
+        raise SettingsReadError(key, "setup", "invalid_response_or_value", setup) from error
 
 
 def localized(text: dict[str, str], language: str) -> str:
@@ -63,27 +102,13 @@ def render_v2(reply: dict[str, Any], contexts: dict[str, Any], zone: ZoneInfo | 
 
 class ChannelBindings(v1.ChannelBindings):
     async def language(self, client: Any, binding: dict[str, Any]) -> str:
-        key = binding["language"]["key"]
-        try:
-            response = await client._request("post", "/settings/get", json={
-                "contract_version": 1, "key": key, "scope": "product",
-            })
-            response.raise_for_status()
-            value = v1.settings_value(response.json(), key)
-            if not isinstance(value, str) or value not in ("ru", "en"):
-                raise ValueError("invalid language")
-            return value
-        except Exception as error:
-            raise v1.BindingRuntimeError(LANGUAGE_SETUP) from error
+        return await read_setting(client, binding["language"]["key"], language_value, LANGUAGE_SETUP)
 
     async def configuration(self, client: Any, binding: dict[str, Any]) -> tuple[str, Any]:
         language = await self.language(client, binding)
         zone = None
         if binding["timezone"] is not None:
-            try:
-                zone = await self.timezone(client, binding)
-            except v1.BindingRuntimeError as error:
-                raise v1.BindingRuntimeError(TIMEZONE_SETUP) from error
+            zone = await read_setting(client, binding["timezone"]["key"], v1.timezone_value, TIMEZONE_SETUP)
         return language, zone
 
     async def call_v2(self, client: Any, call: dict[str, Any], contexts: dict[str, Any],
@@ -160,8 +185,7 @@ class ChannelBindings(v1.ChannelBindings):
             return
         if update.effective_user is None or update.effective_chat is None or update.message is None:
             return
-        # Before language admission, failures have one fixed bilingual setup reply.
-        failure = LANGUAGE_SETUP
+        failure = SETTINGS_TEMPORARY
         try:
             async with self.client_factory() as client:
                 language, zone = await self.configuration(client, binding)
@@ -174,7 +198,7 @@ class ChannelBindings(v1.ChannelBindings):
 
     async def callback_v2(self, update: Any, entry: dict[str, Any], choice: dict[str, Any]) -> None:
         query = update.callback_query
-        failure = LANGUAGE_SETUP
+        failure = SETTINGS_TEMPORARY
         try:
             async with self.client_factory() as client:
                 language, zone = await self.configuration(client, entry["binding"])

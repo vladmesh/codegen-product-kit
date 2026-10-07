@@ -16,8 +16,7 @@ from redis.exceptions import ResponseError
 from telegram.error import BadRequest, Forbidden
 
 from shared.generated.events import EventEnvelope, consumer_name
-from services.tg_bot.src.generated.bindings import DATA, check, reference
-from services.tg_bot.src.generated.bindings_v1 import BindingRuntimeError
+from services.tg_bot.src.generated.bindings import DATA, SettingsReadError, check, reference
 
 LOGGER = logging.getLogger(__name__)
 CONSUMER_GROUP = "events:tg_bot"
@@ -26,6 +25,7 @@ CLAIM_SECONDS = 120
 DELIVERY_TIMEOUT_SECONDS = 45
 RECLAIM_IDLE_MS = 5000
 RECLAIM_POLL_MS = 1000
+SETTINGS_LOG_SECONDS = 60
 FINISH = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     redis.call('SET', KEYS[1], 'done', 'EX', ARGV[2])
@@ -122,14 +122,14 @@ class BindingRelay:
     async def send(self, binding: dict[str, Any], event: dict[str, Any],
                    payload: dict[str, Any], recipient: str) -> None:
         async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
-            try:
-                text = await self.runtime.event_text(binding, event, payload)
-            except BindingRuntimeError as error:
-                if binding["binding_version"] == 2:
-                    await self.bot.send_message(chat_id=int(recipient.partition(":")[2]), text=str(error))
-                # A setup reply is not the event: keep its delivery pending for configuration recovery.
-                raise
+            text = await self.runtime.event_text(binding, event, payload)
             await self.bot.send_message(chat_id=int(recipient.partition(":")[2]), text=text)
+
+    async def log_settings_retry(self, key: str, error: SettingsReadError) -> None:
+        # An expiring diagnostic marker limits logs across consumers, without changing delivery claims.
+        if await self.redis.set(f"{key}:settings-log", "logged", nx=True, ex=SETTINGS_LOG_SECONDS):
+            LOGGER.warning("binding_relay_settings_retry event=%s key=%s state=%s reason=%s",
+                           key, error.key, error.state, error.reason)
 
     async def send_or_refuse(self, binding: dict[str, Any], event: dict[str, Any],
                              payload: dict[str, Any], recipient: str) -> None:
@@ -153,6 +153,9 @@ class BindingRelay:
             return True
         except asyncio.CancelledError:
             raise
+        except SettingsReadError as error:
+            await self.log_settings_retry(key, error)
+            return False
         except Exception:
             LOGGER.warning("binding_relay_transient_retry")
             return False

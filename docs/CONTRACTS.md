@@ -568,13 +568,19 @@ Bind adds `{type: string, enum: [ru, en]}` at the language key in
 a setting value. Commands, valid callbacks and events read `/settings/get` with
 `contract_version: 1`, the declared key and `scope: product`, without `subject_id`.
 Language is read again on a callback even if it changed after the list was displayed.
-Missing, unavailable, malformed or invalid language yields this fixed bilingual setup reply:
+For commands and callbacks, missing (404), malformed or invalid language yields this fixed
+bilingual setup reply:
 
 > Настройте язык продукта (ru/en) через /settings/set. / Set the product language (ru/en) through /settings/set.
 
 There is no default language, environment/host locale fallback, user scope or `/lang` command.
-Setup/timezone/stale-selection replies are fixed bilingual literals; other runtime failures use
-RU/EN maps. Invalid callback contexts cannot recover a trustworthy binding and receive the
+Settings transport errors, timeouts and 5xx responses instead yield the fixed bilingual reply:
+
+> Настройки временно недоступны. Попробуйте ещё раз. / Settings are temporarily unavailable. Please try again.
+
+One settings-read helper classifies both language and timezone failures for commands, callbacks
+and the relay. Setup/timezone/temporary/stale-selection replies are fixed bilingual literals;
+other runtime failures use RU/EN maps. Invalid callback contexts cannot recover a trustworthy binding and receive the
 fixed bilingual stale-selection reply without executing an action.
 
 `month_word` requires the optional explicit product timezone declaration. RU uses the table
@@ -584,10 +590,13 @@ fixed bilingual stale-selection reply without executing an action.
 assumed. Plain-text-only bindings need no timezone.
 
 The event relay retains v1 schema/recipient checks, bounded claims, deduplication, retries,
-terminal refusal and lifecycle cleanup. It reads product language for each delivery; invalid
-configuration sends the setup reply to the declared recipient and retains the original event
-for retry after configuration recovery. V1 and v2 coexist without
-migrating reminders. V1-only output remains exactly `bindings.py` and `binding_relay.py`;
+terminal refusal and lifecycle cleanup. It reads product language for each delivery. As in v1
+with a missing timezone, configuration and settings-read failures send nothing, release the
+claim and leave the original event pending for retry after recovery. Logs contain the event
+identity, setting key and classified reason, without setting values, response bodies or transport
+diagnostics. An expiring Redis diagnostic marker limits these logs to once per event per 60
+seconds across consumers; it does not affect delivery claims or acknowledgement. V1 and v2
+coexist without migrating reminders. V1-only output remains exactly `bindings.py` and `binding_relay.py`;
 products with v2 add the generated `bindings_v1.py` companion for the shared runtime. Removing
 v2 removes that companion. Synthetic v2 tests prove both languages using fake transports;
 slow CI supplies the product typecheck and existing real-transport matrix.
