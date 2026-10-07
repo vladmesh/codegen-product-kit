@@ -29,7 +29,10 @@ async def add_channel(payload: ChannelInput, user_ref: CallerRef) -> ChannelView
 
 @router.get("", response_model=list[ChannelView])
 async def list_channels(user_ref: CallerRef) -> list[ChannelView]:
-    return await service().list(user_ref)
+    try:
+        return await service().list(user_ref)
+    except ActionError as error:
+        raise HTTPException(status_code=409, detail={"code": error.code}) from None
 
 
 @router.get("/digest", response_model=list[PostView])

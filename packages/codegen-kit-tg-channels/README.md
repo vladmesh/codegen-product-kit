@@ -37,16 +37,30 @@ The core fires `tg-channels.tick` every 60 seconds. A single locked database row
 polls and subscription changes across backend processes. Each poll reads one page (200
 changes), persists its cursor with seen post ids and delivery outbox rows, and continues
 the backlog on later ticks. The cursor covers the union of all users' channels. HTTP 409
-restarts from the saved `since` instant (initially 72 hours ago, clipped to the 29-day
-retention window); stored `(channel, id)` identities prevent repeat notifications. HTTP 429
+restarts from the saved `since` instant. The first poll reads up to 72 hours of history and
+marks old posts seen without sending them as new publications. Every successful poll advances
+`since` to its tick instant minus 24 hours, clamped to the platform's 30-day retention horizon.
+That margin covers the platform's slowest regular six-hour poll interval and leaves room for
+delayed fetches; a 409 restart also clips an older saved instant to that margin after a long
+interruption, so a changed channel union rescans a bounded window. Stored `(channel, id)`
+identities prevent repeat notifications. HTTP 429
 sets a durable retry deadline from `Retry-After` and retains the cursor. HTTP 401/403 stops
 future platform polls durably and writes a fixed credential-free error log. Correcting the
 deployment credential also requires an operator to clear `tg_channels.poll_state.stopped`;
 the bot has no administrative credential or recovery command.
 
-Edits and tombstones mark their identities seen but never emit a new-post event. Each new
-post has one durable `tg-channels.post` delivery row per subscribed user, addressed by the
-core recipient `user_ref`. Publication occurs after commit, with a deterministic UUID;
+Delivery eligibility is enforced in `accept_page`: the post must not be deleted, its
+`(channel, id)` must not have been seen for this product, and its publication time must be at
+or after that user's subscription instant for that channel minus a fixed ten-minute slack.
+The slack accommodates small clock differences around subscription, not historical backfill.
+Subscription instants are recorded for both seeded and manually added channels. Removing and
+adding a channel again records a new instant; repeating an add preserves the original one.
+Migration 0002 assigns its execution time to existing subscriptions in unreleased installations.
+Seeded channels on the first poll notify only for posts since subscription, within that slack.
+Older posts and tombstones are marked seen silently. A first-seen post carrying Telegram's
+edited flag is delivered once if eligible; later versions of any seen post never notify again.
+Each eligible post has one durable `tg-channels.post` delivery row per subscribed user, addressed
+by the core recipient `user_ref`. Publication occurs after commit, with a deterministic UUID;
 crash recovery may retry the same transport event and the generated relay deduplicates that
 identity. This is one logical notification, not exactly-once transport. Committed pending
 deliveries survive a platform outage and may still arrive after a user removes a channel.

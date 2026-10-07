@@ -89,6 +89,7 @@ def test_platform_entries_and_installed_binding_resources(channel_product):
         "contracts/openapi.json",
         "migrations/env.py",
         "migrations/versions/0001_channels.py",
+        "migrations/versions/0002_subscription_time.py",
     ):
         assert (installed / relative).read_bytes() == (source_root / relative).read_bytes()
 

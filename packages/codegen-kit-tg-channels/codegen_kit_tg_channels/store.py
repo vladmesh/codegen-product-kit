@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import json
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -14,6 +14,7 @@ from codegen_kit_tg_channels.models import PostPage
 from codegen_kit_tg_channels.service import ActionError, username
 
 CHANNEL_LIMIT = 50
+SUBSCRIPTION_SLACK = timedelta(minutes=10)
 
 
 class Store:
@@ -44,10 +45,11 @@ class Store:
             raise ActionError("try_later")
         await session.execute(
             sql(
-                "INSERT INTO subscriptions (user_ref, channel) VALUES (:user_ref, :channel) "
+                "INSERT INTO subscriptions (user_ref, channel, subscribed_at) "
+                "VALUES (:user_ref, :channel, :subscribed_at) "
                 "ON CONFLICT DO NOTHING"
             ),
-            {"user_ref": user_ref, "channel": channel},
+            {"user_ref": user_ref, "channel": channel, "subscribed_at": datetime.now(UTC)},
         )
 
     async def add(self, user_ref: str, channel: str) -> None:
@@ -81,11 +83,13 @@ class Store:
                 {"user_ref": user_ref, "channel": channel},
             )
 
-    async def subscriptions(self, session: Any) -> dict[str, list[str]]:
-        rows = (await session.execute(sql("SELECT channel, user_ref FROM subscriptions"))).all()
-        result: dict[str, list[str]] = {}
+    async def subscriptions(self, session: Any) -> dict[str, dict[str, datetime]]:
+        rows = (
+            await session.execute(sql("SELECT channel, user_ref, subscribed_at FROM subscriptions"))
+        ).all()
+        result: dict[str, dict[str, datetime]] = {}
         for row in rows:
-            result.setdefault(row.channel, []).append(row.user_ref)
+            result.setdefault(row.channel, {})[row.user_ref] = row.subscribed_at
         return result
 
     async def save_state(self, session: Any, state: dict[str, Any]) -> None:
@@ -98,7 +102,11 @@ class Store:
         )
 
     async def accept_page(
-        self, session: Any, page: PostPage, subscribers: dict[str, list[str]], at: datetime
+        self,
+        session: Any,
+        page: PostPage,
+        subscribers: dict[str, dict[str, datetime]],
+        at: datetime,
     ) -> None:
         for post in sorted(page.items, key=lambda item: item.seq):
             if post.channel not in subscribers:
@@ -110,10 +118,12 @@ class Store:
                 ),
                 {"channel": post.channel, "post_id": post.id},
             )
-            if inserted is None or post.edited or post.deleted:
+            if inserted is None or post.deleted:
                 continue
             payload = post.view().model_dump()
-            for user_ref in subscribers[post.channel]:
+            for user_ref, subscribed_at in subscribers[post.channel].items():
+                if post.date < subscribed_at - SUBSCRIPTION_SLACK:
+                    continue
                 event_id = uuid5(NAMESPACE_URL, f"tg-channels:{post.channel}:{post.id}:{user_ref}")
                 await session.execute(
                     sql(

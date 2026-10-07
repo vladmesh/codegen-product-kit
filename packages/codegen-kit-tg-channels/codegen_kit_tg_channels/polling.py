@@ -8,6 +8,8 @@ from typing import Any
 from codegen_kit_tg_channels.client import ReaderClient, ServiceError
 
 LOGGER = logging.getLogger(__name__)
+RESTART_MARGIN = timedelta(hours=24)
+RETENTION_HORIZON = timedelta(days=30)
 
 
 class Poller:
@@ -16,7 +18,7 @@ class Poller:
         self.client = client
         self.publish = publish
 
-    async def _page(self, channels: list[str], state: dict[str, Any]) -> Any:
+    async def _page(self, channels: list[str], state: dict[str, Any], at: datetime) -> Any:
         try:
             return await self.client.posts(
                 channels, since=state["since_at"], cursor=state["cursor"]
@@ -26,6 +28,7 @@ class Poller:
                 raise
         # The set of channels is part of the opaque cursor. Restart and rely on stored ids.
         state["cursor"] = None
+        state["since_at"] = max(state["since_at"], at - RESTART_MARGIN, at - RETENTION_HORIZON)
         return await self.client.posts(channels, since=state["since_at"])
 
     async def poll(self, at: datetime) -> None:
@@ -37,10 +40,10 @@ class Poller:
             if not subscribers:
                 return
             state["since_at"] = max(
-                state["since_at"] or at - timedelta(hours=72), at - timedelta(days=29)
+                state["since_at"] or at - timedelta(hours=72), at - RETENTION_HORIZON
             )
             try:
-                page = await self._page(sorted(subscribers), state)
+                page = await self._page(sorted(subscribers), state, at)
             except ServiceError as error:
                 if error.status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
                     state["stopped"] = True
@@ -51,6 +54,9 @@ class Poller:
             else:
                 await self.store.accept_page(session, page, subscribers, at)
                 state["cursor"] = page.next_cursor
+                state["since_at"] = max(
+                    state["since_at"], at - RESTART_MARGIN, at - RETENTION_HORIZON
+                )
                 state["retry_at"] = None
             await self.store.save_state(session, state)
 

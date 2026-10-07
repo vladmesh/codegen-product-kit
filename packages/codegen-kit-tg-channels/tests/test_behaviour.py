@@ -21,6 +21,7 @@ class MemorySession:
     def __init__(self):
         self.users = set()
         self.subscriptions = set()
+        self.subscribed_at = {}
         self.seeds = None
         self.seen = set()
         self.deliveries = {}
@@ -44,13 +45,20 @@ class MemorySession:
             if self.seeds is None:
                 self.seeds = json.loads(args["channels"])
         elif query.startswith("SELECT channel, user_ref"):
-            rows = [SimpleNamespace(channel=c, user_ref=u) for u, c in self.subscriptions]
+            rows = [
+                SimpleNamespace(channel=c, user_ref=u, subscribed_at=self.subscribed_at[u, c])
+                for u, c in self.subscriptions
+            ]
         elif query.startswith("INSERT INTO subscriptions"):
-            self.subscriptions.add((args["user_ref"], args["channel"]))
+            identity = (args["user_ref"], args["channel"])
+            self.subscriptions.add(identity)
+            self.subscribed_at.setdefault(identity, args["subscribed_at"])
         elif query.startswith("SELECT channel FROM subscriptions"):
             rows = sorted(c for u, c in self.subscriptions if u == args["user_ref"])
         elif query.startswith("DELETE FROM subscriptions"):
-            self.subscriptions.discard((args["user_ref"], args["channel"]))
+            identity = (args["user_ref"], args["channel"])
+            self.subscriptions.discard(identity)
+            self.subscribed_at.pop(identity, None)
         elif query.startswith("INSERT INTO seen_posts"):
             identity = (args["channel"], args["post_id"])
             if identity not in self.seen:
@@ -97,6 +105,20 @@ def store(modules):
 
     result.transaction = transaction
     return result, memory
+
+
+def filter_since(body, request):
+    """Mirror the publication-date filter on a real first/restart feed request."""
+    if "since" not in request.url.params:
+        return body
+    since = datetime.fromisoformat(request.url.params["since"].replace("Z", "+00:00"))
+    return body | {
+        "items": [
+            item
+            for item in body["items"]
+            if datetime.fromisoformat(item["date"].replace("Z", "+00:00")) >= since
+        ]
+    }
 
 
 @pytest.mark.parametrize(
@@ -271,7 +293,9 @@ def test_digest_latest_trimmed_links_fold_edits_and_deletions_without_product_cu
     assert requests[1].url.params["cursor"] == "opaque-next"
 
 
-def test_poll_union_recipient_dedup_edits_tombstones_and_recovery(modules):
+def test_poll_union_recipient_dedup_edits_tombstones_and_recovery(modules, monkeypatch):
+    at = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+    monkeypatch.setattr(modules.store, "datetime", SimpleNamespace(now=lambda tz: at))
     requests = []
     replies = [
         page([post(), post(id=8, seq=2, edited=True), post(id=9, seq=3, deleted=True)]),
@@ -283,7 +307,7 @@ def test_poll_union_recipient_dedup_edits_tombstones_and_recovery(modules):
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200, json=replies[len(requests) - 1])
+        return httpx.Response(200, json=filter_since(replies[len(requests) - 1], request))
 
     async def exercise():
         repository, memory = store(modules)
@@ -295,23 +319,23 @@ def test_poll_union_recipient_dedup_edits_tombstones_and_recovery(modules):
         )
         publish = AsyncMock(side_effect=RuntimeError("publisher crash"))
         poller = modules.polling.Poller(repository, client, publish)
-        at = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
         with pytest.raises(RuntimeError, match="publisher crash"):
             await poller.tick(at)
         assert memory.state["cursor"] == "opaque-next"
-        assert len(memory.deliveries) == 2
+        assert len(memory.deliveries) == 4
         original_id = publish.call_args.kwargs["event_id"]
         publish.side_effect = None
         # A fresh poller uses committed cursor/outbox, not in-memory delivery state.
         await modules.polling.Poller(repository, client, publish).tick(at + timedelta(minutes=1))
         assert original_id in [call.kwargs["event_id"] for call in publish.call_args_list[1:]]
-        assert len(memory.deliveries) == 4
+        assert len(memory.deliveries) == 6
         assert {r.payload["user_ref"] for r in memory.deliveries.values()} == {
             "telegram:123",
             "telegram:456",
         }
         assert {r.payload["url"] for r in memory.deliveries.values()} == {
             "https://t.me/cyproplan/7",
+            "https://t.me/cyproplan/8",
             "https://t.me/cyproplan/10",
         }
         assert all(row.emitted_at for row in memory.deliveries.values())
@@ -331,7 +355,10 @@ def test_409_restarts_from_since_without_redelivery(modules):
 
     def respond(request):
         requests.append(request)
-        return replies[len(requests) - 1]
+        reply = replies[len(requests) - 1]
+        if reply.status_code == 200:
+            return httpx.Response(200, json=filter_since(reply.json(), request))
+        return reply
 
     async def exercise():
         repository, memory = store(modules)

@@ -52,6 +52,39 @@ def test_real_api_replies_errors_pending_acceptance_and_user_owned_removal(modul
     asyncio.run(exercise())
 
 
+def test_seed_initialization_at_union_limit_returns_declared_error_for_all_actions(modules):
+    async def exercise():
+        repository, memory = store(modules)
+        for index in range(50):
+            await repository.add("telegram:456", f"channel{index}")
+        await repository.seed(memory, "tg_channels.starting_channels", ["cyproplan"])
+        client = modules.client.ReaderClient(
+            "https://service.test",
+            KEY,
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=channel())),
+        )
+        modules.api._service = modules.service.ChannelsService(repository, client)
+        app = FastAPI()
+        app.include_router(modules.api.router, prefix="/tg-channels")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://backend.test"
+        ) as http:
+            for method, path, kwargs in [
+                ("GET", "/tg-channels", {}),
+                ("DELETE", "/tg-channels/cyproplan", {}),
+                ("GET", "/tg-channels/digest", {}),
+                ("POST", "/tg-channels", {"json": {"text": "cyproplan"}}),
+            ]:
+                reply = await http.request(method, path, **kwargs)
+                assert reply.status_code == 409
+                assert reply.json() == {"detail": {"code": "try_later"}}
+                assert "telegram:123" not in memory.users
+            assert len(memory.subscriptions) == 50
+        await client.close()
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("failure", [None, "BUSYGROUP", "NOAUTH", "start"])
 def test_consumer_initializes_group_registers_reclaim_and_cleans_up(  # noqa: C901
     modules, monkeypatch, failure
