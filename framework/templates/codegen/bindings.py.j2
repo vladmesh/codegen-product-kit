@@ -242,7 +242,7 @@ class ChannelBindings:
     def callback_owner(self, update: Any, entry: dict[str, Any]) -> bool:
         if update.effective_user is None or update.effective_chat is None:
             return False
-        return (update.callback_query.from_user.id == update.effective_user.id
+        return bool(update.callback_query.from_user.id == update.effective_user.id
                 and entry["user"] == update.effective_user.id
                 and entry["chat"] == update.effective_chat.id)
 
