@@ -29,7 +29,9 @@ from framework.catalog import (
     package_tag,
     parse_catalog,
 )
+from framework.contracts.env_contract import merge_env_contract_fragments
 from framework.generators.package_contract import PackageContractGenerator
+from framework.generators.package_environment import PackageEnvironmentGenerator
 from framework.spec.events import EventsSpec
 from framework.spec.loader import AllSpecs, load_manifest
 from framework.spec.models import ModelsSpec
@@ -317,6 +319,7 @@ def backend_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
             packages=active,
         )
         PackageContractGenerator(specs, root).generate()
+        PackageEnvironmentGenerator(specs, root).generate()
 
     monkeypatch.setattr(cli, "_run", run)
     monkeypatch.setattr(cli, "generate_all", regenerate)
@@ -596,3 +599,79 @@ def test_wheel_install_names_unknown_packages_from_the_tooling_catalog(tmp_path:
 
     with pytest.raises(UnknownPackageError, match="known packages: reminders"):
         cli.add_package("weather", artifact, product)
+
+
+def test_kit_add_carries_a_fictional_platform_service_from_package_yaml(
+    tmp_path: Path,
+    product: Path,
+    backend_site: tuple[Path, list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build/install/resolve the declared wheel and generate the actual environment fragment."""
+    repository = tmp_path / "platform-source"
+    package = repository / "packages/platform-probe"
+    shutil.copytree(KIT_ROOT / "tests/fixtures/platform_package", package)
+    (package / "_build").mkdir()
+    shutil.copy2(OFFLINE_BACKEND, package / "_build/offline_backend.py")
+    project = package / "pyproject.toml"
+    project.write_text(project.read_text().replace(HATCH_BUILD_SYSTEM, OFFLINE_BUILD_SYSTEM))
+    manifest_data = yaml.safe_load((package / "platform_package/package.yaml").read_text())
+    document = _document()
+    probe = dict(
+        _reminders(document),
+        name="platform-probe",
+        distribution="codegen-kit-platform-probe",
+        path="packages/platform-probe",
+        settings=[],
+        environment=[
+            {"name": item["name"], "required": item["required"], "summary": "Probe value"}
+            for item in manifest_data["environment"]
+        ],
+        versions=[
+            {
+                "version": "1.0.0",
+                "tag": package_tag("platform-probe", "1.0.0"),
+                "requires_core": ">=2.3,<3",
+            }
+        ],
+    )
+    document["packages"] = [probe]
+    (repository / "packages/catalog.yaml").write_text(yaml.safe_dump(document))
+    _git("init", "--quiet", "--initial-branch=main", cwd=repository)
+    _commit(repository, "Platform declaration fixture")
+    _tag(repository, package_tag("platform-probe", "1.0.0"))
+
+    _kit(
+        monkeypatch,
+        "add",
+        "platform-probe",
+        "--catalog-source",
+        str(repository),
+        "--product-root",
+        str(product),
+    )
+
+    site, commands = backend_site
+    assert commands[-1] == ["uv", "sync", "--project", "services/backend", "--frozen"]
+    assert yaml.safe_load((site / "platform_package/package.yaml").read_text()) == manifest_data
+    assert [item["name"] for item in _active_packages(product)] == ["platform-probe"]
+    output = product / "services/backend/packages/env.contract.yaml"
+    first = output.read_bytes()
+    contract = merge_env_contract_fragments([yaml.safe_load(first)])
+    for requirement in manifest_data["environment"]:
+        entry = contract.entries[requirement["name"]]
+        source = requirement.get("source")
+        if source is None:
+            assert entry.source == "user_secret"
+        else:
+            expected = {
+                "source": source["kind"],
+                **{k: v for k, v in source.items() if k != "kind"},
+            }
+            assert {key: entry.model_dump()[key] for key in expected} == expected
+            assert entry.sensitive == (source["kind"] == "platform_key")
+    cli.generate_all(product)
+    assert output.read_bytes() == first
+    assert b"geo-lookup:read" in contract.to_json_bytes()
+    assert contract.entries["PLATFORM_PROBE_KEY"].quota == {"lookups_per_day": 100}
+    assert contract.entries["PLATFORM_PROBE_URL"].url == "https://platform.example.test/geo-lookup"

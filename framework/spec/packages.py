@@ -6,12 +6,13 @@ import ast
 from pathlib import Path
 import re
 import sys
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from jsonschema import Draft202012Validator, SchemaError
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import yaml
 
+from framework.contracts.env_contract import PlatformBaseUrlFields, PlatformKeyFields
 from framework.spec.actions import PackageAction, resource_reference
 from framework.spec.manifests import _validate_declaration_schema, empty_declaration_schema
 
@@ -156,11 +157,29 @@ class EventsDeclaration(BaseModel):
         return self
 
 
+class PlatformKeySource(PlatformKeyFields):
+    """Package-owned platform grant request."""
+
+    kind: Literal["platform_key"]
+
+
+class PlatformBaseUrlSource(PlatformBaseUrlFields):
+    """Package-owned platform endpoint declaration."""
+
+    kind: Literal["platform_base_url"]
+
+
+PackageEnvironmentSource = Annotated[
+    PlatformKeySource | PlatformBaseUrlSource, Field(discriminator="kind")
+]
+
+
 class EnvironmentDeclaration(BaseModel):
     """One environment variable required by the package."""
 
     name: str
     required: bool = True
+    source: PackageEnvironmentSource | None = None
     model_config = {"extra": "forbid"}
 
     @field_validator("name")

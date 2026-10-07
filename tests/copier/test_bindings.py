@@ -346,7 +346,7 @@ def test_bind_refusals_are_nonmutating(bound_product, tmp_path, bad):  # noqa: P
             path = product / "codegen_kit/packages.py"
             changes[path] = path.read_bytes()
             path.write_text(
-                path.read_text().replace('CORE_VERSION = "2.2.0"', 'CORE_VERSION = "2.1.0"')
+                path.read_text().replace('CORE_VERSION = "2.3.0"', 'CORE_VERSION = "2.1.0"')
             )
         elif bad == "malformed":
             binding_file = tmp_path / "bad.yaml"

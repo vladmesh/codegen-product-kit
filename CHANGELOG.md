@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-10-07 (prepared, not published)
+## [0.9.0] - 2026-10-07 (prepared, not published; supersedes untagged 0.8.2)
+
+### Added
+
+- Generic package environment sources `platform_key` and `platform_base_url` carry service,
+  scopes, quota and HTTPS endpoint data from `package.yaml` into the product env contract.
+  Conflicting package or product sources fail generation; unspecified requirements retain
+  their existing behavior. No concrete platform service appears in kit core. The committed
+  env JSON schema adds both forms under contract v1. `CORE_VERSION` becomes 2.3.0; packages
+  declaring the new block require `>=2.3,<3`, while existing compatible manifests need no change.
+  [0.9.0 preparation](docs/releases/0.9.0.md) records the combined release and upgrade path.
 
 ### Fixed
 
@@ -17,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Copier regression runs the generated Makefile's ruff and xenon steps after each of two
   drift-free regenerations. No lint exclusions or thresholds change. No package release or
   `requires_core` change is needed.
-  [0.8.2 preparation](docs/releases/0.8.2.md) records the defect, evidence and update path.
+  The untagged [0.8.2 preparation](docs/releases/0.8.2.md) is superseded by 0.9.0 so one core tag
+  carries both this fix and the platform environment declaration.
 
 ## [0.8.1] - 2026-10-07 (prepared, not published)
 

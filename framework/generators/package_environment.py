@@ -15,6 +15,7 @@ from framework.contracts.env_contract import (
     validate_env_contract_fragment,
 )
 from framework.generators.base import BaseGenerator
+from framework.spec.packages import PackageEnvironmentSource
 
 
 class PackageEnvironmentContractError(ValueError):
@@ -90,6 +91,43 @@ class PackageEnvironmentGenerator(BaseGenerator):
                 "declaration: it is optional but the package requirement is required"
             )
 
+    def _requirements(self) -> dict[str, tuple[bool, set[str], PackageEnvironmentSource | None]]:
+        requirements: dict[str, tuple[bool, set[str], PackageEnvironmentSource | None]] = {}
+        for package in self.specs.packages:
+            for requirement in package.manifest.environment:
+                required, owners, source = requirements.get(requirement.name, (False, set(), None))
+                if (
+                    source is not None
+                    and requirement.source is not None
+                    and source != requirement.source
+                ):
+                    conflicting_owners = ", ".join(sorted(owners | {package.name}))
+                    raise PackageEnvironmentContractError(
+                        f"Package environment requirement {requirement.name!r} has conflicting "
+                        f"platform sources across packages {conflicting_owners}"
+                    )
+                requirements[requirement.name] = (
+                    required or requirement.required,
+                    owners | {package.name},
+                    source if source is not None else requirement.source,
+                )
+        return requirements
+
+    @staticmethod
+    def _platform_fields(source: PackageEnvironmentSource) -> dict[str, object]:
+        return {"source": source.kind, **source.model_dump(mode="json", exclude={"kind"})}
+
+    @classmethod
+    def _require_matching_source(
+        cls, name: str, source: PackageEnvironmentSource, entry: EnvContractEntry
+    ) -> None:
+        declared = entry.model_dump(mode="json")
+        if any(declared.get(key) != value for key, value in cls._platform_fields(source).items()):
+            raise PackageEnvironmentContractError(
+                f"Package environment requirement {name!r} cannot reuse the product "
+                "declaration: conflicting platform source"
+            )
+
     def generate(self) -> list[Path]:
         output = self.repo_root / "services/backend/packages/env.contract.yaml"
         if not self.specs.packages:
@@ -117,21 +155,16 @@ class PackageEnvironmentGenerator(BaseGenerator):
                 "existing product declarations conflict"
             ) from error
 
-        requirements: dict[str, tuple[bool, set[str]]] = {}
-        for package in self.specs.packages:
-            for requirement in package.manifest.environment:
-                current_required, owners = requirements.get(requirement.name, (False, set()))
-                requirements[requirement.name] = (
-                    current_required or requirement.required,
-                    owners | {package.name},
-                )
+        requirements = self._requirements()
 
-        entries: dict[str, object] = {}
+        entries: dict[str, dict[str, object]] = {}
         for name in sorted(requirements):
-            required, owners = requirements[name]
+            required, owners, source = requirements[name]
             product_entry = product_contract.entries.get(name)
             if product_entry is not None:
                 self._require_compatible(name, required, product_entry)
+                if source is not None:
+                    self._require_matching_source(name, source, product_entry)
                 entries[name] = product_entry.model_dump(mode="json", exclude_unset=True)
             else:
                 package_names = ", ".join(sorted(owners))
@@ -141,13 +174,16 @@ class PackageEnvironmentGenerator(BaseGenerator):
                     else f"Environment value required by packages {package_names}"
                 )
                 entries[name] = {
-                    "source": "user_secret",
+                    "source": "user_secret" if source is None else source.kind,
                     "environments": ["local", "production"],
                     "consumers": ["backend"],
                     "required": required,
                     "description": description,
-                    "sensitive": True,
+                    "sensitive": source is None or source.kind == "platform_key",
                 }
+                if source is not None:
+                    entries[name].update(self._platform_fields(source))
+        validate_env_contract_fragment({"version": "1", "owner": "packages", "entries": entries})
         content = yaml.safe_dump(
             {"version": "1", "owner": "packages", "entries": entries},
             sort_keys=False,

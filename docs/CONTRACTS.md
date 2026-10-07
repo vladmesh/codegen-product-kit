@@ -32,6 +32,8 @@ operation tags that later merge, separate from immutable package release commits
 Patch `0.8.1` keeps these versions and makes every generated Python file's final bytes formatter
 output, so regeneration, the generated-tree drift check and `make lint` agree; see
 [0.8.1 preparation](releases/0.8.1.md).
+The next prepared tag, `0.9.0`, delivers façade 2.3.0 and generic platform environment sources,
+and supersedes the untagged 0.8.2 xenon patch; see [0.9.0 preparation](releases/0.9.0.md).
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
@@ -68,6 +70,8 @@ package that declares timers or depends on the caller identity requires `>=2.1`,
 without them is unchanged. Version `2.2.0` admits optional `actions`, `default_binding`, and
 message `recipient` metadata. Tooling validates these contracts; runtime activation executes
 none of them and imports no tooling, channel or parser code. Reminders 0.5.0 requires `>=2.2,<3`.
+Version `2.3.0` admits optional `environment[].source` platform grant and endpoint declarations.
+Packages using these fields require `>=2.3,<3`; earlier manifests and compatible ranges are unchanged.
 The unchanged wheel can therefore
 be installed into another generated product with the same compatible core without rebuilding it.
 
@@ -94,7 +98,7 @@ rejects unknown fields. Its fields are:
 | `settings_schema`, `jobs_schema` | Draft 2020-12 schemas merged under the normalized package-name prefix | Enforced and merged during generation with named duplicate refusal |
 | `timers` | Optional `[{job, every_seconds}]`: local `jobs_schema` jobs the core fires once per period with the slot instant as `at` (core `2.1.0`) | Enforced at the manifest model; refusals have `InvalidPackageTimerError`; recorded in the generated `JOB_TIMERS` |
 | `setting_seeds` | Optional ordered `{key, scope: product}` bindings to package-owned local setting names | Enforced against `settings_schema`; duplicate, unknown-key, unsupported-scope, malformed, and unknown nested fields are refused |
-| `environment` | Named environment requirements and whether each is required | Enforced in the generated package environment-contract fragment |
+| `environment` | Named environment requirements, requiredness, and optional discriminated platform `source` (core 2.3) | Enforced in the generated package environment-contract fragment; see [Environment contract v1](#environment-contract-v1) |
 | `resources` | Named distribution resource paths | Enforced as existing, non-traversing distribution resources |
 | `actions` | Optional list of stable `{name, summary, operation: {method, path}, input, output}` records (core 2.2) | Tooling rejects unknown keys, duplicate/malformed names, methods/paths and invalid inline typed schemas; activation admits metadata only |
 | `default_binding` | Optional non-traversing `module:path` resource (core 2.2) | Tooling validates syntax; wheel/source tests prove shipping; activation does not load it |
@@ -739,6 +743,63 @@ not carry this deployment capability.
 Environment variables remain startup, connectivity, platform, and secret configuration. A value
 derived from the Product Brief or intended for a user to change belongs in a manifest-declared
 setting instead.
+
+## Environment contract v1
+
+`framework/contracts/env_contract.py` is the self-contained, exportable contract model.
+`EnvContractFragment.model_json_schema()` produces the committed
+`tests/fixtures/env-contract.schema.json`. `ENV_CONTRACT_VERSION` remains `"1"`: the new sources
+are additive alternatives in the existing discriminated union. Consumers must support a source
+before resolving it; an unknown source fails closed.
+
+A package can declare a platform grant and endpoint entirely in its own `package.yaml`:
+
+```yaml
+environment:
+  - name: PLATFORM_KEY
+    required: true
+    source:
+      kind: platform_key
+      service: example-service
+      scopes: ["example-service:read"]
+      quota: {requests_per_day: 100}
+  - name: PLATFORM_BASE_URL
+    required: true
+    source:
+      kind: platform_base_url
+      service: example-service
+      url: https://platform.example.test/example-service
+```
+
+Generation writes `services/backend/packages/env.contract.yaml` with `source: platform_key`
+or `source: platform_base_url` and the exact declared data fields. Both entries carry
+`environments: [local, production]`, `consumers: [backend]`, the merged requiredness and a package
+description. Keys are always sensitive; endpoints are always non-secret. The key form requests
+orchestrator issuance of a product Bearer credential for the declared grant, rather than user
+input. No credential value, key prefix, concrete service registry, endpoint or grant default
+is built into core. Resolution and issuance belong to the orchestrator.
+
+`service` is a string matching `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`, not a known-service enum.
+`scopes` is an explicit list of nonempty strings, and `quota` is an explicit mapping of nonempty
+names to non-negative integers; booleans, strings and fractional values are refused. Empty lists
+and maps declare an empty grant rather than an inferred grant. `url` must be an absolute HTTPS
+URL without credentials. HTTPS is also required in local and test declarations; fixtures use
+reserved test hosts and do not require an HTTP exception. Unknown fields or source kinds fail.
+
+An absent or null package `source` preserves existing behavior: reuse a compatible product entry,
+or emit `user_secret` if none exists. Unspecified requirements may share a variable with an
+explicit platform declaration. Explicit sources for the same variable must match exactly across
+packages, including service, scopes, quota or URL; requiredness is combined with logical OR.
+An existing product entry must cover local and production, include backend as a consumer, and
+satisfy requiredness. For an explicit platform requirement it must also match every source data
+field. A differently classified or differently granted product variable is refused rather than
+overwritten. Compatible product entries are copied unchanged so canonical merging still sees
+identical declarations. Output is deterministic and conflicts fail before the packages fragment
+is written.
+
+Required application environment values still have no runtime defaults. Package protocol stays
+`1`; the new source block requires façade `CORE_VERSION = "2.3.0"` and a corresponding package
+`requires_core` lower bound. Existing packages without the block need no new release.
 
 ## Durable product events v1
 
