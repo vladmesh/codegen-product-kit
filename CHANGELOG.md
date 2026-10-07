@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-10-05 (prepared, not published)
+## [0.8.1] - 2026-10-07 (prepared, not published)
+
+### Fixed
+
+- Generated Python is formatted again after the generator's `ruff check --fix`, so a product with
+  a non-empty binding passes its own CI: regeneration, the generated-tree drift check and
+  `make lint`'s format check now agree on `services/tg_bot/src/generated/bindings.py`, whose
+  `pformat` parentheses UP034 had stripped into unformatted layout. A non-slow copier test
+  pins the sequence twice against a real bound product, real generator and pinned ruff.
+  [0.8.1 preparation](docs/releases/0.8.1.md) gives the defect, versions and update path.
+
+## [0.8.0] - 2026-10-05
 
 ### Fixed
 

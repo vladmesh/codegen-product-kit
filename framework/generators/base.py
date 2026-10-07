@@ -68,7 +68,12 @@ class BaseGenerator(ABC):
         atomic_write_text(path, final_content)
 
     def format_file(self, path: Path) -> None:
-        """Format generated file with ruff."""
+        """Format generated file with ruff.
+
+        Lint fixes can leave layout the formatter rejects (UP034 drops the parentheses
+        ``pformat`` puts around a long string), so the formatter runs again last: the
+        written bytes are what the product's ``ruff format --check`` accepts.
+        """
         ruff = self.repo_root / ".venv" / "bin" / "ruff"
         if not ruff.exists():
             executable = shutil.which("ruff")
@@ -80,3 +85,4 @@ class BaseGenerator(ABC):
         ruff_check_cmd = [ruff_str, "check", "--no-cache", "--fix", str(path)]
         subprocess.run(ruff_format_cmd, check=True, capture_output=True)  # noqa: S603
         subprocess.run(ruff_check_cmd, check=False, capture_output=True)  # noqa: S603
+        subprocess.run(ruff_format_cmd, check=True, capture_output=True)  # noqa: S603

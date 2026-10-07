@@ -1,6 +1,8 @@
 """Generated bindings from actual locally installed components; remote proof is CI-only."""
 
 from pathlib import Path
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -112,6 +114,74 @@ def test_bound_product_handler_unit_tests_need_no_redis(bound_product):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _git(product, *args):
+    return subprocess.run(["git", *args], cwd=product, capture_output=True, text=True, check=False)
+
+
+def _generated_bytes(product):
+    trees = [product / "shared/shared/generated", *product.glob("services/*/src/generated")]
+    return {
+        str(path.relative_to(product)): path.read_bytes()
+        for tree in trees
+        for path in sorted(tree.rglob("*.py"))
+    }
+
+
+def test_bound_product_generation_passes_its_own_drift_and_ruff_lint(bound_product, tmp_path):
+    """Product CI: generate-from-spec, drift diff, then make lint's ruff steps, twice."""
+    product = tmp_path / "product"
+    shutil.copytree(bound_product, product, symlinks=True)
+    # The product generator resolves ruff from the root venv `make setup` creates; use the
+    # kit's pinned ruff there so the real formatter and fixer run, not a silent skip.
+    ruff = Path(sys.executable).with_name("ruff")
+    assert ruff.is_file(), ruff
+    (product / ".venv/bin").mkdir(parents=True)
+    (product / ".venv/bin/ruff").symlink_to(ruff)
+    (product / ".gitignore").write_text(".venv/\n**/.venv/\n__pycache__/\n")
+    lint = re.search(r"^lint:\n((?:\t.*\n)+)", (product / "Makefile").read_text(), re.M)
+    assert lint is not None
+    ruff_steps = [
+        line.strip().replace("$(VENV)", ".venv/bin")
+        for line in lint.group(1).splitlines()
+        if line.strip().startswith("$(VENV)/ruff ")
+    ]
+    assert [step.split()[1] for step in ruff_steps] == ["format", "check"]
+
+    for step in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test User"),
+    ):
+        assert _git(product, *step).returncode == 0
+    generate_all(product)
+    assert (
+        "DATA = json.loads(" in (product / "services/tg_bot/src/generated/bindings.py").read_text()
+    )
+    assert _git(product, "add", "-A").returncode == 0
+    assert _git(product, "commit", "-qm", "bound product").returncode == 0
+
+    outputs = []
+    for _ in range(2):
+        generate_all(product)
+        outputs.append(_generated_bytes(product))
+        drift = _git(
+            product,
+            "diff",
+            "--exit-code",
+            "--",
+            "shared/shared/generated/",
+            "services/*/src/generated/",
+        )
+        assert drift.returncode == 0, drift.stdout + drift.stderr
+        for step in ruff_steps:
+            result = subprocess.run(
+                shlex.split(step), cwd=product, capture_output=True, text=True, check=False
+            )
+            assert result.returncode == 0, f"{step}\n{result.stdout}{result.stderr}"
+    assert outputs[0] == outputs[1]
+    assert "services/tg_bot/src/generated/bindings.py" in outputs[0]
 
 
 def test_binding_idempotence_timezone_and_product_override(bound_product):
