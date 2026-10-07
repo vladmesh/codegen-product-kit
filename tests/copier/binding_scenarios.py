@@ -169,7 +169,32 @@ def run_handlers():  # noqa: C901, PLR0915
             reply = await command("/remind task in 2 minutes")
             assert "timezone" in reply.args[0] and len(items) == before
         failure["settings"] = 0
-        for value in ("", "Invalid/Zone", None, "localtime", "posixrules"):
+        for field, value in (
+            ("contract_version", True),
+            ("contract_version", 1.0),
+            ("contract_version", 2),
+            ("scope", "user"),
+            ("key", "other"),
+            ("subject_id", "telegram:123"),
+        ):
+            original_setting = dict(setting)
+            setting[field] = value
+            before = len(items)
+            reply = await command("/remind task in 2 minutes")
+            assert "timezone" in reply.args[0] and len(items) == before
+            setting.clear()
+            setting.update(original_setting)
+        for value in (
+            "",
+            "Invalid/Zone",
+            None,
+            "localtime",
+            "posixrules",
+            "/UTC",
+            ".UTC",
+            "posix/UTC",
+            "right/UTC",
+        ):
             setting["value"] = value
             reply = await command("/remind task in 2 minutes")
             assert "timezone" in reply.args[0]

@@ -40,6 +40,26 @@ return 0
 """
 
 
+def validated_event(event: dict[str, Any], body: Any) -> tuple[Any, str]:
+    check({
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "event_id": {"type": "string", "format": "uuid"},
+            "occurred_at": {"type": "string", "format": "date-time"},
+            "schema_version": {"type": "integer", "const": 1},
+            "payload": DATA["events"][event["event"]],
+        },
+        "required": ["event_id", "occurred_at", "schema_version", "payload"],
+    }, body)
+    envelope = EventEnvelope[dict[str, Any]].model_validate(body)
+    if type(body["schema_version"]) is not int or envelope.schema_version != 1:
+        raise ValueError("unsupported version")
+    recipient = reference(event["to"], {"event": envelope.payload})
+    if not isinstance(recipient, str) or re.fullmatch(r"telegram:[1-9][0-9]{0,15}", recipient) is None:
+        raise ValueError("unsupported recipient")
+    return envelope, recipient
+
+
 class BindingRelay:
     def __init__(self, bot: Any, runtime: Any, *, reclaim_idle_ms: int = RECLAIM_IDLE_MS,
                  reclaim_poll_ms: int = RECLAIM_POLL_MS) -> None:
@@ -98,51 +118,34 @@ class BindingRelay:
                 await self.redis.aclose()
                 self.redis = None
 
-    async def deliver(self, binding: dict[str, Any], event: dict[str, Any], body: Any) -> bool:
-        try:
-            check({
-                "type": "object", "additionalProperties": False,
-                "properties": {
-                    "event_id": {"type": "string", "format": "uuid"},
-                    "occurred_at": {"type": "string", "format": "date-time"},
-                    "schema_version": {"type": "integer", "const": 1},
-                    "payload": DATA["events"][event["event"]],
-                },
-                "required": ["event_id", "occurred_at", "schema_version", "payload"],
-            }, body)
-            envelope = EventEnvelope[dict[str, Any]].model_validate(body)
-            if type(body["schema_version"]) is not int or envelope.schema_version != 1:
-                raise ValueError("unsupported version")
-            recipient = reference(event["to"], {"event": envelope.payload})
-            if not isinstance(recipient, str) or re.fullmatch(r"telegram:[1-9][0-9]{0,15}", recipient) is None:
-                raise ValueError("unsupported recipient")
-        except Exception:
-            LOGGER.warning("binding_relay_terminal_invalid_event")
-            return True
+    async def send(self, binding: dict[str, Any], event: dict[str, Any],
+                   payload: dict[str, Any], recipient: str) -> None:
+        async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
+            zone = None
+            if any(isinstance(part, dict) and part.get("format") == "month_word"
+                   for part in event["reply"]["parts"]):
+                async with self.runtime.client_factory() as client:
+                    zone = await self.runtime.timezone(client, binding)
+            text = render(event["reply"], {"event": payload}, zone)
+            await self.bot.send_message(chat_id=int(recipient.partition(":")[2]), text=text)
 
-        key = f"bindings:{CONSUMER_GROUP}:{UUID(str(envelope.event_id))}"
-        token = token_urlsafe(24)
-        claimed = await self.redis.set(key, token, nx=True, ex=CLAIM_SECONDS)
-        if not claimed:
-            return bool(await self.redis.get(key) == b"done")
+    async def send_or_refuse(self, binding: dict[str, Any], event: dict[str, Any],
+                             payload: dict[str, Any], recipient: str) -> None:
         try:
-            try:
-                async with asyncio.timeout(DELIVERY_TIMEOUT_SECONDS):
-                    zone = None
-                    if any(isinstance(part, dict) and part.get("format") == "month_word"
-                           for part in event["reply"]["parts"]):
-                        async with self.runtime.client_factory() as client:
-                            zone = await self.runtime.timezone(client, binding)
-                    text = render(event["reply"], {"event": envelope.payload}, zone)
-                    await self.bot.send_message(chat_id=int(recipient.partition(":")[2]), text=text)
-            except Forbidden:
-                LOGGER.warning("binding_relay_terminal_forbidden")
-            except BadRequest as error:
-                if not any(reason in str(error).lower() for reason in (
-                    "chat not found", "user is deactivated", "bot was blocked",
-                )):
-                    raise
-                LOGGER.warning("binding_relay_terminal_chat")
+            await self.send(binding, event, payload, recipient)
+        except Forbidden:
+            LOGGER.warning("binding_relay_terminal_forbidden")
+        except BadRequest as error:
+            if not any(reason in str(error).lower() for reason in (
+                "chat not found", "user is deactivated", "bot was blocked",
+            )):
+                raise
+            LOGGER.warning("binding_relay_terminal_chat")
+
+    async def complete_claim(self, binding: dict[str, Any], event: dict[str, Any],
+                             envelope: Any, recipient: str, key: str, token: str) -> bool:
+        try:
+            await self.send_or_refuse(binding, event, envelope.payload, recipient)
             if not await self.redis.eval(FINISH, 1, key, token, RETENTION_SECONDS):
                 raise RuntimeError("delivery claim lost")
             return True
@@ -154,3 +157,16 @@ class BindingRelay:
         finally:
             # Completed claims remain. Transient failures and cancellation release only our lease.
             await self.redis.eval(RELEASE, 1, key, token)
+
+    async def deliver(self, binding: dict[str, Any], event: dict[str, Any], body: Any) -> bool:
+        try:
+            envelope, recipient = validated_event(event, body)
+        except Exception:
+            LOGGER.warning("binding_relay_terminal_invalid_event")
+            return True
+        key = f"bindings:{CONSUMER_GROUP}:{UUID(str(envelope.event_id))}"
+        token = token_urlsafe(24)
+        claimed = await self.redis.set(key, token, nx=True, ex=CLAIM_SECONDS)
+        if not claimed:
+            return bool(await self.redis.get(key) == b"done")
+        return await self.complete_claim(binding, event, envelope, recipient, key, token)

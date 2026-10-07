@@ -129,25 +129,31 @@ def _generated_bytes(product):
     }
 
 
-def test_bound_product_generation_passes_its_own_drift_and_ruff_lint(bound_product, tmp_path):
-    """Product CI: generate-from-spec, drift diff, then make lint's ruff steps, twice."""
+def test_bound_product_generation_passes_its_own_drift_and_lint(bound_product, tmp_path):
+    """Product CI: generation, drift diff, then make lint's ruff and xenon steps, twice."""
     product = tmp_path / "product"
     shutil.copytree(bound_product, product, symlinks=True)
     # The product generator resolves ruff from the root venv `make setup` creates; use the
     # kit's pinned ruff there so the real formatter and fixer run, not a silent skip.
-    ruff = Path(sys.executable).with_name("ruff")
-    assert ruff.is_file(), ruff
     (product / ".venv/bin").mkdir(parents=True)
-    (product / ".venv/bin/ruff").symlink_to(ruff)
+    for tool in ("ruff", "xenon"):
+        executable = Path(sys.executable).with_name(tool)
+        assert executable.is_file(), executable
+        (product / f".venv/bin/{tool}").symlink_to(executable)
     (product / ".gitignore").write_text(".venv/\n**/.venv/\n__pycache__/\n")
     lint = re.search(r"^lint:\n((?:\t.*\n)+)", (product / "Makefile").read_text(), re.M)
     assert lint is not None
-    ruff_steps = [
+    lint_steps = [
         line.strip().replace("$(VENV)", ".venv/bin")
         for line in lint.group(1).splitlines()
-        if line.strip().startswith("$(VENV)/ruff ")
+        if line.strip().startswith(("$(VENV)/ruff ", "$(VENV)/xenon "))
     ]
-    assert [step.split()[1] for step in ruff_steps] == ["format", "check"]
+    assert [step.split()[0] for step in lint_steps] == [
+        ".venv/bin/ruff",
+        ".venv/bin/ruff",
+        ".venv/bin/xenon",
+    ]
+    assert [step.split()[1] for step in lint_steps[:2]] == ["format", "check"]
 
     for step in (
         ("init", "-q"),
@@ -175,7 +181,7 @@ def test_bound_product_generation_passes_its_own_drift_and_ruff_lint(bound_produ
             "services/*/src/generated/",
         )
         assert drift.returncode == 0, drift.stdout + drift.stderr
-        for step in ruff_steps:
+        for step in lint_steps:
             result = subprocess.run(
                 shlex.split(step), cwd=product, capture_output=True, text=True, check=False
             )

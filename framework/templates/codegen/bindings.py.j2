@@ -87,6 +87,38 @@ def check(schema: dict[str, Any], value: Any) -> None:
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
 
 
+def settings_value(data: dict[str, Any], key: str) -> Any:
+    expected = {"contract_version": 1, "scope": "product", "key": key}
+    if type(data["contract_version"]) is not int:
+        raise ValueError("invalid settings response")
+    if any(data[name] != value for name, value in expected.items()):
+        raise ValueError("invalid settings response")
+    if data.get("subject_id") is not None:
+        raise ValueError("invalid settings response")
+    return data["value"]
+
+
+def timezone_value(value: Any) -> ZoneInfo:
+    if not isinstance(value, str) or not value or value in {"localtime", "posixrules"}:
+        raise ValueError("invalid timezone")
+    if value.startswith(("/", ".", "posix/", "right/")):
+        raise ValueError("invalid timezone")
+    return ZoneInfo(value)
+
+
+def command_text(update: Any) -> str:
+    # Splitting once retains task spacing and wording rather than joining context.args.
+    message = update.message.text or ""
+    return re.split(r"\s", message, maxsplit=1)[1] if re.search(r"\s", message) else ""
+
+
+def item_choices(command: dict[str, Any], item: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"call": button, "contexts": {"item": {
+        source.partition(".")[2]: item[source.partition(".")[2]]
+        for source in button["args"].values()
+    }}} for button in command["buttons"]]
+
+
 class ChannelBindings:
     def __init__(self, client_factory: Any, clock: Any = None, monotonic: Any = None) -> None:
         self.client_factory = client_factory
@@ -101,15 +133,7 @@ class ChannelBindings:
                 "contract_version": 1, "key": binding["timezone"]["key"], "scope": "product",
             })
             response.raise_for_status()
-            data = response.json()
-            if (type(data["contract_version"]) is not int or data["contract_version"] != 1 or data["scope"] != "product"
-                    or data["key"] != binding["timezone"]["key"] or data.get("subject_id") is not None):
-                raise ValueError("invalid settings response")
-            value = data["value"]
-            if (not isinstance(value, str) or not value or value in {"localtime", "posixrules"}
-                    or value.startswith(("/", ".", "posix/", "right/"))):
-                raise ValueError("invalid timezone")
-            return ZoneInfo(value)
+            return timezone_value(settings_value(response.json(), binding["timezone"]["key"]))
         except Exception as error:
             raise BindingRuntimeError("Set a valid product IANA timezone through /settings/set before using these commands.") from error
 
@@ -150,14 +174,42 @@ class ChannelBindings:
         check(action["output"], result)
         return result
 
+    async def parsed_create(self, client: Any, binding: dict[str, Any], command: dict[str, Any],
+                            update: Any, text: str, zone: ZoneInfo) -> None:
+        now = self.clock()
+        if now.utcoffset() is None:
+            raise BindingRuntimeError("An aware clock is required.")
+        parsed = PARSERS[command["parse"]["function"]](
+            text, lang=command["parse"]["lang"], now=now, tz=zone.key,
+        )
+        if parsed is None:
+            choices = [{"call": preset, "contexts": {"text": text}, "time": preset["time"]}
+                       for preset in command["on_empty"]["presets"]]
+            markup = self.remember(update, binding, choices)
+            await update.message.reply_text(bounded(command["on_empty"]["text"]), reply_markup=markup)
+            return
+        if not isinstance(parsed.get("rest"), str) or not parsed["rest"].strip():
+            await update.message.reply_text(bounded(command["on_invalid_text"]))
+            return
+        result = await self.call(client, command, {"parsed": parsed}, update.effective_user.id, zone)
+        await update.message.reply_text(render(command["reply"], {"result": result}, zone))
+
+    async def list_items(self, client: Any, binding: dict[str, Any], command: dict[str, Any],
+                         update: Any, text: str, zone: ZoneInfo) -> None:
+        items = await self.call(client, command, {}, update.effective_user.id, zone)
+        items = [item for item in items if item[command["filter"]["field"]] == command["filter"]["equals"]]
+        if not items:
+            await update.message.reply_text(bounded(command["on_none"]))
+        for item in items[:100]:
+            markup = self.remember(update, binding, item_choices(command, item))
+            await update.message.reply_text(render(command["reply_each"], {"item": item}, zone), reply_markup=markup)
+
     async def command(self, binding: dict[str, Any], command: dict[str, Any], update: Any, context: Any) -> None:
         if (update.effective_user is None or update.effective_chat is None
                 or update.message is None):
             return
         try:
-            # Splitting once retains task spacing and wording rather than joining context.args.
-            message = update.message.text or ""
-            text = re.split(r"\s", message, maxsplit=1)[1] if re.search(r"\s", message) else ""
+            text = command_text(update)
             if command["kind"] == "parsed_create" and not text.strip():
                 await update.message.reply_text(bounded(command["on_invalid_text"]))
                 return
@@ -165,60 +217,44 @@ class ChannelBindings:
                 raise BindingRuntimeError("Please shorten the task to 4000 characters.")
             async with self.client_factory() as client:
                 zone = await self.timezone(client, binding)
-                if command["kind"] == "parsed_create":
-                    now = self.clock()
-                    if now.utcoffset() is None:
-                        raise BindingRuntimeError("An aware clock is required.")
-                    parsed = PARSERS[command["parse"]["function"]](
-                        text, lang=command["parse"]["lang"], now=now, tz=zone.key,
-                    )
-                    if parsed is None:
-                        choices = [{"call": preset, "contexts": {"text": text},
-                                    "time": preset["time"]}
-                                   for preset in command["on_empty"]["presets"]]
-                        markup = self.remember(update, binding, choices)
-                        await update.message.reply_text(bounded(command["on_empty"]["text"]), reply_markup=markup)
-                        return
-                    if not isinstance(parsed.get("rest"), str) or not parsed["rest"].strip():
-                        await update.message.reply_text(bounded(command["on_invalid_text"]))
-                        return
-                    result = await self.call(client, command, {"parsed": parsed}, update.effective_user.id, zone)
-                    await update.message.reply_text(render(command["reply"], {"result": result}, zone))
-                else:
-                    items = await self.call(client, command, {}, update.effective_user.id, zone)
-                    items = [item for item in items if item[command["filter"]["field"]] == command["filter"]["equals"]]
-                    if not items:
-                        await update.message.reply_text(bounded(command["on_none"]))
-                    for item in items[:100]:
-                        choices = [{"call": button, "contexts": {"item": {
-                            source.partition(".")[2]: item[source.partition(".")[2]]
-                            for source in button["args"].values()
-                        }}} for button in command["buttons"]]
-                        markup = self.remember(update, binding, choices)
-                        await update.message.reply_text(render(command["reply_each"], {"item": item}, zone), reply_markup=markup)
+                handler = self.parsed_create if command["kind"] == "parsed_create" else self.list_items
+                await handler(client, binding, command, update, text, zone)
         except BindingRuntimeError as error:
             await update.message.reply_text(bounded(str(error)))
         except Exception:
             await update.message.reply_text(ERROR_REPLY)
 
+    def callback_choice(self, update: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        query = update.callback_query
+        data = query.data if isinstance(query.data, str) else ""
+        match = re.fullmatch(r"b1:([A-Za-z0-9_-]{24}):(\d{1,3})", data)
+        entry = self.pending.get(match[1]) if match else None
+        if match is None or entry is None:
+            return None
+        if not self.callback_owner(update, entry):
+            return None
+        if entry["expires"] <= self.monotonic() or int(match[2]) >= len(entry["choices"]):
+            return None
+        # Consume before the first await: concurrent/duplicate selections cannot re-enter.
+        del self.pending[match[1]]
+        return entry, entry["choices"][int(match[2])]
+
+    def callback_owner(self, update: Any, entry: dict[str, Any]) -> bool:
+        if update.effective_user is None or update.effective_chat is None:
+            return False
+        return (update.callback_query.from_user.id == update.effective_user.id
+                and entry["user"] == update.effective_user.id
+                and entry["chat"] == update.effective_chat.id)
+
     async def callback(self, update: Any, context: Any) -> None:
         query = update.callback_query
         if query is None:
             return
-        data = query.data if isinstance(query.data, str) else ""
-        match = re.fullmatch(r"b1:([A-Za-z0-9_-]{24}):(\d{1,3})", data)
-        entry = self.pending.get(match[1]) if match else None
-        if (match is None or entry is None or update.effective_user is None or update.effective_chat is None
-                or query.from_user.id != update.effective_user.id
-                or entry["expires"] <= self.monotonic()
-                or entry["user"] != update.effective_user.id
-                or entry["chat"] != update.effective_chat.id
-                or int(match[2]) >= len(entry["choices"])):
+        selection = self.callback_choice(update)
+        if selection is None:
             await query.answer(STALE_REPLY, show_alert=True)
             return
-        # Consume before the first await: concurrent/duplicate selections cannot re-enter.
-        del self.pending[match[1]]
-        choice = entry["choices"][int(match[2])]
+        entry, choice = selection
         await query.answer()
         try:
             async with self.client_factory() as client:
