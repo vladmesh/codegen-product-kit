@@ -882,7 +882,7 @@ def test_runtime_activates_a_package_that_declares_timers(
         activated = runtime.discover_packages(["synthetic"])
 
         assert [package.manifest.name for package in activated] == ["synthetic"]
-        assert runtime.CORE_VERSION == "2.2.0"
+        assert runtime.CORE_VERSION == "2.3.0"
     finally:
         installed_manifest.write_text(original)
 
@@ -905,11 +905,84 @@ def test_generated_runtime_admits_action_binding_and_recipient_metadata(
             events=candidate["events"],
         )
         path.write_text(yaml.safe_dump(data))
-        assert runtime.CORE_VERSION == CORE_VERSION == "2.2.0"
+        assert runtime.CORE_VERSION == CORE_VERSION == "2.3.0"
         assert runtime.PACKAGE_PROTOCOL_VERSION == 1
         assert runtime.discover_packages(["synthetic"])[0].manifest.name == "synthetic"
         # Activation has no tooling dependency and does not resolve or execute these resources.
         assert "from framework" not in (project_backend / "codegen_kit/packages.py").read_text()
+    finally:
+        path.write_text(original)
+
+
+def test_runtime_admits_platform_environment_metadata_and_requires_new_core(
+    project_backend: Path, installed_synthetic: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load_runtime(project_backend, installed_synthetic, monkeypatch)
+    path = installed_synthetic / "synthetic_package/package.yaml"
+    original = path.read_text()
+    fixture = KIT_ROOT / "tests/fixtures/platform_package/platform_package/package.yaml"
+    declaration = yaml.safe_load(fixture.read_text())
+    try:
+        data = yaml.safe_load(original)
+        data["environment"] = declaration["environment"]
+        data["requires_core"] = declaration["requires_core"]
+        path.write_text(yaml.safe_dump(data))
+        assert runtime.discover_packages(["synthetic"])[0].manifest.name == "synthetic"
+        monkeypatch.setattr(runtime, "CORE_VERSION", "2.2.0")
+        with pytest.raises(runtime.IncompatibleCoreVersionError, match="requires core >=2.3,<3"):
+            runtime.discover_packages(["synthetic"])
+    finally:
+        path.write_text(original)
+
+
+def test_complete_product_generation_preserves_platform_declaration_data(
+    project_backend: Path,
+    installed_synthetic: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from framework.contracts.env_contract import merge_env_contract_fragments
+    from framework.generate import generate_all
+
+    product = tmp_path / "platform-product"
+    shutil.copytree(
+        project_backend,
+        product,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".git"),
+    )
+    product_manifest = product / "services/backend/manifest.yaml"
+    data = yaml.safe_load(product_manifest.read_text())
+    data["packages"] = ["synthetic"]
+    product_manifest.write_text(yaml.safe_dump(data))
+    path = installed_synthetic / "synthetic_package/package.yaml"
+    original = path.read_text()
+    fixture = KIT_ROOT / "tests/fixtures/platform_package/platform_package/package.yaml"
+    declaration = yaml.safe_load(fixture.read_text())
+    monkeypatch.setattr(
+        "framework.spec.package_resolution.backend_site_packages", lambda _root: installed_synthetic
+    )
+    try:
+        data = yaml.safe_load(original)
+        data["environment"] = declaration["environment"]
+        data["requires_core"] = declaration["requires_core"]
+        path.write_text(yaml.safe_dump(data))
+        generate_all(product)
+        fragments = [yaml.safe_load(p.read_text()) for p in product.rglob("env.contract.yaml")]
+        contract = merge_env_contract_fragments(fragments)
+        for requirement in declaration["environment"]:
+            entry = contract.entries[requirement["name"]]
+            source = requirement.get("source")
+            if source is not None:
+                assert entry.source == source["kind"]
+                for key, value in source.items():
+                    if key != "kind":
+                        assert entry.model_dump()[key] == value
+            else:
+                assert entry.source == "user_secret"
+        output = product / "services/backend/packages/env.contract.yaml"
+        first = output.read_bytes()
+        generate_all(product)
+        assert output.read_bytes() == first
     finally:
         path.write_text(original)
 

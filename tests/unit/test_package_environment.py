@@ -19,7 +19,14 @@ from framework.spec.package_resolution import ActivePackage
 from framework.spec.packages import parse_package_manifest
 
 
-def _package(root: Path, name: str, variable: str, *, required: bool = True) -> ActivePackage:
+def _package(
+    root: Path,
+    name: str,
+    variable: str,
+    *,
+    required: bool = True,
+    source: dict[str, object] | None = None,
+) -> ActivePackage:
     manifest = parse_package_manifest(
         {
             "protocol_version": 1,
@@ -27,7 +34,7 @@ def _package(root: Path, name: str, variable: str, *, required: bool = True) -> 
             "version": "1.0.0",
             "requires_core": ">=2,<3",
             "http": {"prefix": f"/{name}"},
-            "environment": [{"name": variable, "required": required}],
+            "environment": [{"name": variable, "required": required, "source": source}],
         }
     )
     return ActivePackage(
@@ -178,3 +185,108 @@ def test_conflicting_product_fragments_fail_before_package_merge(tmp_path: Path)
     ) as caught:
         PackageEnvironmentGenerator(specs, tmp_path).generate()
     assert "incompatible environment contract declarations" not in str(caught.value)
+
+
+def _platform_source() -> dict[str, object]:
+    fixture = Path(__file__).parents[1] / "fixtures/platform_package/platform_package/package.yaml"
+    return yaml.safe_load(fixture.read_text())["environment"][0]["source"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"service": "other-service"},
+        {"scopes": ["other:read"]},
+        {"quota": {"lookups_per_day": 200}},
+        {"kind": "platform_base_url", "url": "https://platform.example.test/other"},
+    ],
+)
+def test_conflicting_package_platform_sources_fail_without_overwriting_output(
+    tmp_path: Path, overrides: dict[str, object]
+) -> None:
+    first = _platform_source()
+    second = {**first, **overrides}
+    if second["kind"] == "platform_base_url":
+        second.pop("scopes")
+        second.pop("quota")
+    output = _write_fragment(tmp_path, "services/backend/packages/env.contract.yaml", {})
+    previous = output.read_bytes()
+    packages = [
+        _package(tmp_path, "alpha", "PLATFORM_KEY", source=first),
+        _package(tmp_path, "beta", "PLATFORM_KEY", source=second),
+    ]
+    for ordered in (packages, list(reversed(packages))):
+        with pytest.raises(
+            PackageEnvironmentContractError, match="PLATFORM_KEY.*conflicting.*alpha, beta"
+        ):
+            PackageEnvironmentGenerator(_specs(tmp_path, *ordered), tmp_path).generate()
+        assert output.read_bytes() == previous
+
+
+def test_matching_platform_requirement_and_unspecified_requirement_merge_deterministically(
+    tmp_path: Path,
+) -> None:
+    source = _platform_source()
+    packages = [
+        _package(tmp_path, "alpha", "PLATFORM_KEY", required=False, source=source),
+        _package(tmp_path, "beta", "PLATFORM_KEY", source=source),
+        _package(tmp_path, "gamma", "PLATFORM_KEY"),
+    ]
+    PackageEnvironmentGenerator(_specs(tmp_path, *packages), tmp_path).generate()
+    first = (tmp_path / "services/backend/packages/env.contract.yaml").read_bytes()
+    PackageEnvironmentGenerator(_specs(tmp_path, *reversed(packages)), tmp_path).generate()
+    assert (tmp_path / "services/backend/packages/env.contract.yaml").read_bytes() == first
+    entry = _generated(tmp_path)["entries"]["PLATFORM_KEY"]
+    assert entry["source"] == "platform_key"
+    assert entry["required"] is True
+    assert entry["sensitive"] is True
+    assert entry["quota"] == source["quota"]
+
+
+@pytest.mark.parametrize("source", ["user_secret", "literal", "platform_key"])
+def test_product_only_variable_cannot_override_package_platform_source(
+    tmp_path: Path, source: str
+) -> None:
+    platform = _platform_source()
+    entry = {
+        "source": source,
+        "environments": ["local", "production"],
+        "consumers": ["backend"],
+        "required": True,
+        "description": "Product-owned variable",
+    }
+    if source == "literal":
+        entry["value"] = "product-value"
+    elif source == "platform_key":
+        entry.update({key: value for key, value in platform.items() if key != "kind"})
+        entry["quota"] = {"lookups_per_day": 200}
+    _write_fragment(tmp_path, "infra/env.contract.yaml", {"PLATFORM_KEY": entry})
+    specs = _specs(tmp_path, _package(tmp_path, "probe", "PLATFORM_KEY", source=platform))
+    with pytest.raises(
+        PackageEnvironmentContractError, match="PLATFORM_KEY.*conflicting platform source"
+    ):
+        PackageEnvironmentGenerator(specs, tmp_path).generate()
+    assert not (tmp_path / "services/backend/packages/env.contract.yaml").exists()
+
+
+def test_matching_product_platform_declaration_is_reused_exactly(tmp_path: Path) -> None:
+    platform = _platform_source()
+    declaration = {
+        **{key: value for key, value in platform.items() if key != "kind"},
+        "source": platform["kind"],
+        "environments": ["local", "production", "test"],
+        "consumers": ["backend", "tg_bot"],
+        "required": True,
+        "description": "Product-owned platform key",
+    }
+    product = _write_fragment(tmp_path, "infra/env.contract.yaml", {"PLATFORM_KEY": declaration})
+    specs = _specs(tmp_path, _package(tmp_path, "probe", "PLATFORM_KEY", source=platform))
+    PackageEnvironmentGenerator(specs, tmp_path).generate()
+    generated = _generated(tmp_path)
+    assert generated["entries"]["PLATFORM_KEY"] == declaration
+    assert (
+        merge_env_contract_fragments([yaml.safe_load(product.read_text()), generated])
+        .entries["PLATFORM_KEY"]
+        .source
+        == "platform_key"
+    )

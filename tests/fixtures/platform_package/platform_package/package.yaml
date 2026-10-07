@@ -1,0 +1,22 @@
+protocol_version: 1
+name: platform-probe
+version: 1.0.0
+requires_core: ">=2.3,<3"
+http:
+  prefix: /platform-probe
+environment:
+  - name: PLATFORM_PROBE_KEY
+    required: true
+    source:
+      kind: platform_key
+      service: geo-lookup
+      scopes: ["geo-lookup:read"]
+      quota: {lookups_per_day: 100}
+  - name: PLATFORM_PROBE_URL
+    required: true
+    source:
+      kind: platform_base_url
+      service: geo-lookup
+      url: https://platform.example.test/geo-lookup
+  - name: PLATFORM_PROBE_USER_TOKEN
+    required: true

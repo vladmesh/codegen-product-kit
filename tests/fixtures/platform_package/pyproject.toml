@@ -1,0 +1,17 @@
+[project]
+name = "codegen-kit-platform-probe"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[project.entry-points."codegen_kit.packages"]
+platform-probe = "platform_package:package"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["platform_package"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"platform_package/package.yaml" = "platform_package/package.yaml"

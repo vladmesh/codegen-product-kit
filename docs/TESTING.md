@@ -130,7 +130,7 @@ that mapping removed. There is no current-tooling override on the released copy,
 attestation, patched baseline, skip, or fresh-copy substitute for update.
 
 The test commits generated 0.7.1 output as-is, verifies core 2.1/old lock/runtime tooling and clean
-baseline, executes real Copier update with conflict rejection, then reads candidate core 2.2,
+baseline, executes real Copier update with conflict rejection, then reads candidate core 2.3,
 answers, lock, installed direct URL/import origin and protected-file hashes. Product setup,
 validation, generation, typecheck and unit tests precede actual reminders 0.5/textparse 0.1
 installation and default bind. The existing fake-backend/clock handler corpus is reused for the
@@ -156,3 +156,12 @@ unit test mocks both publisher broker and binding hooks, asserting all awaits an
 error cases require broker cleanup and propagation. The real relay lifecycle remains covered by
 the separate fake transport and CI Redis scenarios, without changing production behavior or the
 genuine old released baseline.
+
+Platform environment declarations have focused unit coverage in `test_platform_environment.py`
+and `test_package_environment.py`: manifest/schema export, validation, sensitivity, deterministic
+merging, conflicting package/product sources and the unchanged unspecified-source fallback.
+`test_package_catalog.py` builds a real offline platform-probe wheel from its fictional-service
+YAML and runs catalog-resolved `kit add` through installation/discovery and fragment generation.
+Fast Copier activation tests admit the metadata under core 2.3, reject its minimum on core 2.2,
+and run complete generation twice before merging all product env fragments with exact declared
+data. A unit test prevents concrete platform service names from entering `framework/` or `template/`.
