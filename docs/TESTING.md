@@ -104,6 +104,12 @@ list/cancel, product overrides and nonmutating refusals. Generated relay unit tr
 FastStream TestRedisBroker with fake Redis state, including startup failure cleanup; that proves
 encoding/handler injection but does not prove real stream wiring.
 
+`test_bound_product_generation_passes_its_own_drift_and_lint` also runs the ruff format,
+ruff check and xenon commands read from the bound product's generated Makefile after each
+of two regenerations and generated-tree drift checks. The actual reminders default binding
+and real textparse library must pass the unchanged product complexity thresholds, with
+byte-identical output across both runs. Xenon is a kit dev dependency for this non-slow proof.
+
 The existing textparse `published_remote` slow lane additionally installs the independently
 published reminders 0.5.0 through default remote/catalog paths, using exact candidate tooling.
 It binds/regenerates, executes the same handler corpus, checks activation/resource/version,

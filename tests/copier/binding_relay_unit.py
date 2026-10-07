@@ -12,7 +12,7 @@ async def scenario():  # noqa: PLR0915, C901
     from faststream.redis.parser import BinaryMessageFormatV1
     from services.tg_bot.src.generated import binding_relay as r, bindings as b
     from shared.generated.events import EventEnvelope
-    from telegram.error import Forbidden, TimedOut
+    from telegram.error import BadRequest, Forbidden, TimedOut
 
     class MemoryRedis:
         def __init__(self):
@@ -97,6 +97,33 @@ async def scenario():  # noqa: PLR0915, C901
     body = envelope("concurrent")
     await asyncio.gather(*(relay.deliver(binding, event, body) for _ in range(8)))
     assert bot.send_message.await_count == before + 1
+
+    for reason in ("Chat not found", "User is deactivated", "Bot was blocked"):
+        body = envelope(reason)
+        bot.send_message.side_effect = BadRequest(reason)
+        assert await relay.deliver(binding, event, body)
+        key = f"bindings:{r.CONSUMER_GROUP}:{body['event_id']}"
+        assert store.values[key] == b"done"
+    body = envelope("nonterminal bad request")
+    bot.send_message.side_effect = BadRequest("Other Telegram error")
+    assert not await relay.deliver(binding, event, body)
+    assert f"bindings:{r.CONSUMER_GROUP}:{body['event_id']}" not in store.values
+    body = envelope("cancelled")
+    bot.send_message.side_effect = asyncio.CancelledError()
+    try:
+        await relay.deliver(binding, event, body)
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("delivery cancellation swallowed")
+    assert f"bindings:{r.CONSUMER_GROUP}:{body['event_id']}" not in store.values
+    bot.send_message.side_effect = None
+    before = bot.send_message.await_count
+    for version in (True, 1.0, 2):
+        body = envelope()
+        body["schema_version"] = version
+        assert await relay.deliver(binding, event, body)
+    assert bot.send_message.await_count == before
 
     # Exercise actual FastStream subscription, binary encoding, decoding and message injection.
     broker = RedisBroker("redis://redis.invalid", message_format=BinaryMessageFormatV1, logger=None)

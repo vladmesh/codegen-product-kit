@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-07 (prepared, not published)
+
+### Fixed
+
+- Generated Telegram bindings and relay now meet the product's existing xenon complexity
+  thresholds. Command kinds, timezone validation, callback ownership and relay delivery use
+  focused helpers without changing commands, retries, claims or replies. The real bound-product
+  Copier regression runs the generated Makefile's ruff and xenon steps after each of two
+  drift-free regenerations. No lint exclusions or thresholds change. No package release or
+  `requires_core` change is needed.
+  [0.8.2 preparation](docs/releases/0.8.2.md) records the defect, evidence and update path.
+
 ## [0.8.1] - 2026-10-07 (prepared, not published)
 
 ### Fixed
