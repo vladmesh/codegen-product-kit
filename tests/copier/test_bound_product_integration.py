@@ -1,5 +1,6 @@
 """CI-only published, bound products run their unchanged integration Make target."""
 
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -35,10 +36,42 @@ def test_published_bound_product_passes_own_integration(
         result = subprocess.run(
             command, cwd=product, env=environment, capture_output=True, text=True
         )
+        if command == ["make", "test-integration"]:
+            logs = Path(os.environ.get("CODEGEN_BOUND_INTEGRATION_LOG_DIR", str(tmp_path / "logs")))
+            logs.mkdir(parents=True, exist_ok=True)
+            (logs / f"{package}.log").write_text(result.stdout + result.stderr)
+            (logs / f"{package}.json").write_text(
+                json.dumps(
+                    {
+                        "candidate": candidate,
+                        "package": package,
+                        "components": {name: versions[name] for name in components},
+                        "command": command,
+                        "exit_code": result.returncode,
+                        "test_contract_sha256": {
+                            str(path.relative_to(product)): sha256(content).hexdigest()
+                            for path, content in contract.items()
+                        },
+                        "platform": "explicit inert key and reserved .invalid URL"
+                        if package == "tg-channels"
+                        else None,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
         assert result.returncode == 0, f"{command}\n{result.stdout}{result.stderr}"
         return result.stdout
 
     run(["make", "setup"])
+    contract = {
+        path: path.read_bytes()
+        for path in [
+            product / "Makefile",
+            product / "infra/compose.tests.integration.yml",
+            *sorted((product / "tests/integration").glob("*.py")),
+        ]
+    }
     python = str(product / ".venv/bin/python")
     tooling = json.loads(
         run(
@@ -108,4 +141,9 @@ def test_published_bound_product_passes_own_integration(
     assert re.search(r"^test-integration:\n", makefile, re.M)
     assert "--exit-code-from integration-tests" in makefile
     # No replacement pytest command, altered tests or alternate Compose stack.
-    run(["make", "test-integration"])
+    assert {path: path.read_bytes() for path in contract} == contract
+    output = run(["make", "test-integration"])
+    summary = re.search(r"\b\d+ passed\b[^\n]*", output)
+    assert summary is not None, output
+    assert {path: path.read_bytes() for path in contract} == contract
+    print(f"{package}: own make test-integration: {summary.group(0)}")

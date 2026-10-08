@@ -932,6 +932,31 @@ class TestComposeServices:
 class TestIntegrationCompose:
     """Validate compose.tests.integration.yml semantics (not just YAML validity)."""
 
+    @pytest.mark.parametrize("fixture", ["project_backend", "project_backend_tg_bot"])
+    def test_generation_masks_host_environments_with_image_environments(self, request, fixture):
+        """Binding preflight sees installed product environments even under the bind mount."""
+        import yaml
+
+        product = request.getfixturevalue(fixture)
+        compose = yaml.safe_load((product / "infra/compose.tests.integration.yml").read_text())
+        volumes = compose["services"]["integration-tests"]["volumes"]
+        dockerfile = (product / "services/backend/Dockerfile").read_text()
+        dev, runtime = dockerfile.split("\nFROM base AS runtime\n", maxsplit=1)
+        for environment in (".venv", "services/backend/.venv"):
+            assert f"/workspace/{environment}" in volumes
+            assert f"COPY --from=dev-deps /app/{environment} /workspace/{environment}" in dev
+        assert "/workspace" not in runtime
+        bot_environment = "/workspace/services/tg_bot/.venv"
+        if fixture == "project_backend_tg_bot":
+            assert bot_environment in volumes
+            sync = "uv sync --project services/tg_bot --frozen --no-install-project --no-dev"
+            wheels = "COPY services/tg_bot/packages ./services/tg_bot/packages"
+            assert dev.index(wheels) < dev.index(sync)
+            assert ("COPY --from=dev-deps /app/services/tg_bot/.venv " + bot_environment) in dev
+        else:
+            assert bot_environment not in volumes
+            assert "services/tg_bot" not in dev
+
     def test_backend_path_uses_image_venv(self, project_backend: Path):
         """Backend PATH must reference /app/ (image venv), not /workspace/ (host venv).
 

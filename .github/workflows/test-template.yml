@@ -137,7 +137,16 @@ jobs:
           CODEGEN_BINDINGS_SMOKE_RECEIPT: ${{ runner.temp }}/bindings-remote-receipt.json
           CODEGEN_BINDINGS_REDIS_URL: redis://127.0.0.1:6379/14
           CODEGEN_CORE_UPGRADE_RECEIPT: ${{ runner.temp }}/core-21-upgrade-receipt.json
+          CODEGEN_BOUND_INTEGRATION_LOG_DIR: ${{ runner.temp }}/bound-product-integration
         run: make test-copier-slow
+
+      - name: Preserve bound product integration output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bound-product-integration-${{ github.run_id }}
+          path: ${{ runner.temp }}/bound-product-integration
+          if-no-files-found: error
 
       - name: Preserve published textparse release-smoke receipt
         uses: actions/upload-artifact@v4

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-08 (prepared, not published)
+
+### Fixed
+
+- Bound backend,tg_bot products run generation in their integration container against
+  image-built, product-owned virtualenvs. Anonymous volumes mask host environments under
+  `/workspace`; the backend dev image includes the bot's locked dependencies and local library
+  wheels for binding validation. The runtime image and product integration test contract remain
+  unchanged. Published reminders 0.5.0/textparse 0.1.0 and tg-channels 0.1.0 default bindings
+  have CI-only coverage through the product's own `make test-integration`, with retained output
+  and contract hashes. Channels retains its platform declarations and uses explicit inert test
+  values without platform calls. See [0.10.1 preparation](docs/releases/0.10.1.md).
+
 ## [0.10.0] - 2026-10-07 (prepared, not published)
 
 ### Added
