@@ -180,3 +180,17 @@ and checks both service banners and all output for errors. It runs in the existi
 Test Copier Template leg; no local product typecheck or real Redis run is authorized.
 The fast `test_v2_typecheck_dispatch_uses_selected_product` mocks the subprocess and verifies
 that each fixture resolves to its own product directory before the CI-only command is invoked.
+
+`test_bound_product_integration.py` adds two CI-only slow cases for the generated backend,tg_bot
+product's unchanged `make test-integration`: published reminders 0.5.0/textparse 0.1.0 and
+published tg-channels 0.1.0, installed through the default live catalog and default-bound with
+exact candidate tooling. Channels verifies its platform environment declarations and supplies
+an explicit inert key and reserved `.invalid` URL in its disposable `.env`. Startup makes no
+platform request; the core integration tests never create channel subscriptions or invoke
+channel actions, so timer polling has no platform work. No real platform is required.
+The test checks Makefile, integration Compose and test bytes before and after execution;
+the required `bound-product-integration-<run-id>` artifact preserves complete command output,
+exit status, candidate/component identities and contract hashes, including failed runs.
+Fast Compose tests cover image-seeded workspace environment volumes and the bot wheel/sync
+ordering for both backend-only and backend,tg_bot shapes. Workers do not run these Docker or
+published-package proofs locally.
