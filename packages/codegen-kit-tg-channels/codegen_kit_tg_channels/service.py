@@ -41,14 +41,21 @@ def service_error(error: ServiceError) -> ActionError:
 
 
 class ChannelsService:
-    def __init__(self, store: Any, client: ReaderClient) -> None:
+    def __init__(self, store: Any, client: ReaderClient | None) -> None:
         self.store = store
+        # None when the platform environment is absent: platform reads answer not_configured.
         self.client = client
+
+    def _platform(self) -> ReaderClient:
+        if self.client is None:
+            raise ActionError("not_configured")
+        return self.client
 
     async def add(self, user_ref: str, text: str) -> ChannelView:
         channel = username(text)
+        client = self._platform()
         try:
-            resolved = await self.client.resolve(channel)
+            resolved = await client.resolve(channel)
         except ServiceError as error:
             raise service_error(error) from None
         if resolved.status not in ("ok", "pending"):
@@ -74,13 +81,14 @@ class ChannelsService:
         channels = await self.store.list(user_ref)
         if not channels:
             return []
+        client = self._platform()
         since = datetime.now(UTC) - timedelta(hours=72)
         cursor = None
         latest: dict[tuple[str, int], Post] = {}
         try:
             # Bounded work: at most 20 requests, with the remaining feed left for timer polling.
             for _ in range(20):
-                page = await self.client.posts(channels, since=since, cursor=cursor)
+                page = await client.posts(channels, since=since, cursor=cursor)
                 for post in page.items:
                     if post.channel in channels:
                         identity = (post.channel, post.id)

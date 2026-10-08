@@ -13,25 +13,29 @@ RETENTION_HORIZON = timedelta(days=30)
 
 
 class Poller:
-    def __init__(self, store: Any, client: ReaderClient, publish: Any) -> None:
+    def __init__(self, store: Any, client: ReaderClient | None, publish: Any) -> None:
         self.store = store
         self.client = client
         self.publish = publish
 
-    async def _page(self, channels: list[str], state: dict[str, Any], at: datetime) -> Any:
+    async def _page(
+        self, client: ReaderClient, channels: list[str], state: dict[str, Any], at: datetime
+    ) -> Any:
         try:
-            return await self.client.posts(
-                channels, since=state["since_at"], cursor=state["cursor"]
-            )
+            return await client.posts(channels, since=state["since_at"], cursor=state["cursor"])
         except ServiceError as error:
             if error.status != HTTPStatus.CONFLICT:
                 raise
         # The set of channels is part of the opaque cursor. Restart and rely on stored ids.
         state["cursor"] = None
         state["since_at"] = max(state["since_at"], at - RESTART_MARGIN, at - RETENTION_HORIZON)
-        return await self.client.posts(channels, since=state["since_at"])
+        return await client.posts(channels, since=state["since_at"])
 
     async def poll(self, at: datetime) -> None:
+        client = self.client
+        if client is None:
+            # Not configured: startup warned once; no platform request and no state change.
+            return
         async with self.store.transaction() as session:
             state = await self.store.lock_poll(session)
             if state["stopped"] or (state["retry_at"] and state["retry_at"] > at):
@@ -43,7 +47,7 @@ class Poller:
                 state["since_at"] or at - timedelta(hours=72), at - RETENTION_HORIZON
             )
             try:
-                page = await self._page(sorted(subscribers), state, at)
+                page = await self._page(client, sorted(subscribers), state, at)
             except ServiceError as error:
                 if error.status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
                     state["stopped"] = True

@@ -1,4 +1,4 @@
-# tg-channels 0.1.0
+# tg-channels 0.1.1
 
 In-process public Telegram channel reading through the platform's `tg-reader` Product API v1.
 There is no model, translation or content extraction. Text is delivered as plain text.
@@ -16,6 +16,16 @@ product's environment contract; they are not user secrets. The package's `.env.e
 documents all required values. The platform
 issues the key for `tg-reader:read` and supplies the base URL. No stand or production setup
 is performed by installing this package. There are no required-setting application defaults.
+
+Without platform values the package still starts, for example in the product's own
+integration-test Compose, which never receives them. If `PLATFORM_BASE_URL` or `PLATFORM_KEY`
+is unset or empty, startup logs one warning naming the missing variables (never values) and
+runs not configured: `add` (after local username validation) and a `digest` of a non-empty list
+answer the declared `not_configured` error, the existing «Сервис не настроен.» / «Service is
+not configured.» reply. `list`, `remove` and a digest of an empty list are local and keep
+working. Timer ticks still publish committed deliveries but make no platform request and leave
+the poll state unchanged. No URL or key is invented; restart with both values to configure it.
+`ReaderClient.from_environment()` still refuses missing values for callers that require them.
 
 The starting list is supplied through the existing product setting-seed contract, by writing
 the product setting through `/settings/set` with the core settings write capability:

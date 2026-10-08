@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- tg-channels 0.1.1 (package release, prepared, not published): the package starts without
+  `PLATFORM_BASE_URL`/`PLATFORM_KEY`, logging one warning that names the missing variables.
+  Platform actions answer the existing `not_configured` error, local list/remove keep working
+  and the timer makes no platform request. Configured behaviour is unchanged. The slow
+  published-package lane installs the candidate commit's tg-channels release with no platform
+  values in the product `.env`. No core, template or `CORE_VERSION` change. See
+  [tg-channels 0.1.1](docs/releases/tg-channels-0.1.1.md).
+
 ## [0.10.1] - 2026-10-08 (prepared, not published)
 
 ### Fixed

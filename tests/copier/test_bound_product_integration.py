@@ -1,15 +1,69 @@
-"""CI-only published, bound products run their unchanged integration Make target."""
+"""CI-only released, bound products run their unchanged integration Make target."""
 
 from hashlib import sha256
+import io
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import tarfile
 
 import pytest
 import yaml
+
+from framework.catalog import parse_catalog
+from framework.package_source import fetch_package_source, read_catalog
+from tests.tooling.test_package_catalog import _commit, _git, _tag
+
+ROOT = Path(__file__).parents[2]
+CHANNELS_PATH = "packages/codegen-kit-tg-channels"
+UNCONFIGURED_WARNING = "tg-channels platform access is not configured"
+
+
+def _candidate_channels_source(candidate: str, tmp_path: Path) -> tuple[str, list[str]]:
+    """Release the candidate commit's tg-channels from a scratch catalog source.
+
+    The catalog newest entry is the candidate's own release, whose tag the PO publishes only after
+    merge. Its tree is exported from the exact candidate commit and tagged only in the scratch
+    source. Returns that version and the ``kit add`` catalog arguments.
+    """
+    paths = ["packages/catalog.yaml", CHANNELS_PATH]
+    archive = subprocess.run(  # noqa: S603
+        ["git", "archive", "--format=tar", candidate, "--", *paths],  # noqa: S607
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+    )
+    source = tmp_path / "candidate-catalog"
+    source.mkdir()
+    _git("init", "--quiet", cwd=source)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as exported:
+        exported.extractall(source, filter="data")
+    catalog = parse_catalog((source / "packages/catalog.yaml").read_text(), "candidate catalog")
+    newest = catalog.get("tg-channels").newest()
+    manifest = source / CHANNELS_PATH / "codegen_kit_tg_channels/package.yaml"
+    assert yaml.safe_load(manifest.read_text())["version"] == newest.version
+    _commit(source, f"Candidate tg-channels {newest.version} at {candidate}")
+    _tag(source, newest.tag)
+    return newest.version, ["--catalog-source", str(source)]
+
+
+def test_candidate_channels_source_releases_exactly_the_candidate_commit(tmp_path: Path) -> None:
+    candidate = _git("rev-parse", "HEAD", cwd=ROOT).strip()
+    version, arguments = _candidate_channels_source(candidate, tmp_path)
+    assert arguments[0] == "--catalog-source"
+    channels = read_catalog(arguments[1], "HEAD").get("tg-channels")
+    release = channels.select("2.4.0")
+    assert release.version == version and release.tag == f"packages/tg-channels/v{version}"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    exported = fetch_package_source(arguments[1], channels, release, workdir)
+    for name in ("pyproject.toml", "codegen_kit_tg_channels/__init__.py"):
+        expected = _git("show", f"{candidate}:{CHANNELS_PATH}/{name}", cwd=ROOT)
+        assert (exported / name).read_text() == expected
 
 
 @pytest.mark.slow
@@ -17,7 +71,8 @@ import yaml
 def test_published_bound_product_passes_own_integration(
     project_backend_tg_bot: Path, tmp_path: Path, package: str
 ) -> None:
-    # Never substitute local component sources for these independently published tags.
+    # Reminders/textparse use their published tags. tg-channels uses the exact candidate commit's
+    # package release (see _candidate_channels_source); no working-tree source is substituted.
     assert os.environ.get("CI") == "true", "Published integration proof runs in CI only"
     requirement = os.environ["CODEGEN_TOOLING_REQUIREMENT"]
     assert " @ git+" in requirement
@@ -25,6 +80,10 @@ def test_published_bound_product_passes_own_integration(
     assert re.fullmatch(r"[0-9a-f]{40}", candidate)
     product = tmp_path / "product"
     shutil.copytree(project_backend_tg_bot, product)
+    versions = {"reminders": "0.5.0", "textparse": "0.1.0"}
+    sources: dict[str, list[str]] = {}
+    if package == "tg-channels":
+        versions[package], sources[package] = _candidate_channels_source(candidate, tmp_path)
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -52,7 +111,14 @@ def test_published_bound_product_passes_own_integration(
                             str(path.relative_to(product)): sha256(content).hexdigest()
                             for path, content in contract.items()
                         },
-                        "platform": "explicit inert key and reserved .invalid URL"
+                        "package_source": f"candidate {candidate} (scratch tag only)"
+                        if package == "tg-channels"
+                        else "published catalog tags",
+                        "platform": "absent: no PLATFORM_KEY/PLATFORM_BASE_URL in product .env"
+                        if package == "tg-channels"
+                        else None,
+                        "unconfigured_warning_logged": UNCONFIGURED_WARNING
+                        in result.stdout + result.stderr
                         if package == "tg-channels"
                         else None,
                     },
@@ -85,11 +151,19 @@ def test_published_bound_product_passes_own_integration(
         )
     )
     assert tooling["vcs_info"]["commit_id"] == candidate
-    versions = {"reminders": "0.5.0", "textparse": "0.1.0", "tg-channels": "0.1.0"}
     components = ["textparse", package] if package == "reminders" else [package]
     for component in components:
         installed = run(
-            [python, "-m", "framework.cli", "add", component, "--product-root", str(product)]
+            [
+                python,
+                "-m",
+                "framework.cli",
+                "add",
+                component,
+                *sources.get(component, []),
+                "--product-root",
+                str(product),
+            ]
         )
         version = versions[component]
         assert f"{component} {version} (packages/{component}/v{version})" in installed
@@ -131,11 +205,9 @@ def test_published_bound_product_passes_own_integration(
             "resolve_per_day": 200,
         }
         assert entries["PLATFORM_BASE_URL"]["url"] == "https://platform.vladmesh.dev/tg-reader"
-        # Startup validates explicit values but does not call the platform. The unchanged
-        # product suite never adds a channel; timer polling has no subscriptions to fetch.
-        # The reserved .invalid endpoint cannot reach a real platform even on a long run.
-        env_file += "\nPLATFORM_KEY=integration-only-inert-key\n"
-        env_file += "PLATFORM_BASE_URL=https://platform.invalid/tg-reader\n"
+        # Like a real product CI, the integration environment has no platform values: the
+        # package starts not configured and its timer makes no platform request.
+        assert not re.search(r"^\s*PLATFORM_", env_file, re.M)
     (product / ".env").write_text(env_file)
     makefile = (product / "Makefile").read_text()
     assert re.search(r"^test-integration:\n", makefile, re.M)

@@ -182,12 +182,16 @@ The fast `test_v2_typecheck_dispatch_uses_selected_product` mocks the subprocess
 that each fixture resolves to its own product directory before the CI-only command is invoked.
 
 `test_bound_product_integration.py` adds two CI-only slow cases for the generated backend,tg_bot
-product's unchanged `make test-integration`: published reminders 0.5.0/textparse 0.1.0 and
-published tg-channels 0.1.0, installed through the default live catalog and default-bound with
-exact candidate tooling. Channels verifies its platform environment declarations and supplies
-an explicit inert key and reserved `.invalid` URL in its disposable `.env`. Startup makes no
-platform request; the core integration tests never create channel subscriptions or invoke
-channel actions, so timer polling has no platform work. No real platform is required.
+product's unchanged `make test-integration`, default-bound with exact candidate tooling:
+published reminders 0.5.0/textparse 0.1.0 through the default live catalog, and the candidate
+commit's tg-channels release. For channels, the test exports the candidate commit's catalog and
+package tree into a scratch catalog source, checks the catalog newest entry against the
+package manifest, creates the release tag only there and installs with `--catalog-source`; it
+proves the unpublished release, not a published tag. Channels verifies its platform environment
+declarations and, as in a real product CI, the product `.env` has no `PLATFORM_KEY` or
+`PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. The fast
+`test_candidate_channels_source_releases_exactly_the_candidate_commit` checks that scratch
+release against the real catalog reader and package-source export.
 The test checks Makefile, integration Compose and test bytes before and after execution;
 the required `bound-product-integration-<run-id>` artifact preserves complete command output,
 exit status, candidate/component identities and contract hashes, including failed runs.
