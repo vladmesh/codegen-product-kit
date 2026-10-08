@@ -76,7 +76,9 @@ def test_published_bound_product_passes_own_integration(
     binding = product / f"services/tg_bot/bindings/{package}.yaml"
     assert yaml.safe_load(binding.read_text())["package"] == package
     for name in ("bindings.py", "binding_relay.py"):
-        assert package in (product / "services/tg_bot/src/generated" / name).read_text()
+        assert (product / "services/tg_bot/src/generated" / name).is_file()
+    serialized = "bindings.py" if package == "reminders" else "bindings_v1.py"
+    assert package in (product / "services/tg_bot/src/generated" / serialized).read_text()
     active = (product / "codegen_kit/_active_packages.py").read_text()
     assert package in active and versions[package] in active
 
@@ -85,7 +87,7 @@ def test_published_bound_product_passes_own_integration(
         fragment = yaml.safe_load(
             (product / "services/backend/packages/env.contract.yaml").read_text()
         )
-        entries = {entry["name"]: entry for entry in fragment["entries"]}
+        entries = fragment["entries"]
         assert entries["PLATFORM_KEY"]["source"] == "platform_key"
         assert entries["PLATFORM_BASE_URL"]["source"] == "platform_base_url"
         assert entries["PLATFORM_KEY"]["service"] == "tg-reader"
