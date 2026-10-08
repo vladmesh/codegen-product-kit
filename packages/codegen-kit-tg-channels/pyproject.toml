@@ -1,6 +1,6 @@
 [project]
 name = "codegen-kit-tg-channels"
-version = "0.1.0"
+version = "0.1.1"
 description = "Public Telegram channel lists, digests and timed post delivery"
 requires-python = ">=3.11"
 dependencies = [

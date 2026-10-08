@@ -11,6 +11,12 @@ from pydantic import BaseModel, SecretStr, ValidationError
 from codegen_kit_tg_channels.models import PostPage, ResolvedChannel
 
 ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
+PLATFORM_ENVIRONMENT = ("PLATFORM_BASE_URL", "PLATFORM_KEY")
+
+
+def missing_environment() -> list[str]:
+    """Names, never values, of the unset platform variables."""
+    return [name for name in PLATFORM_ENVIRONMENT if not os.getenv(name)]
 
 
 class ServiceError(Exception):
@@ -37,15 +43,12 @@ class ReaderClient:
 
     @classmethod
     def from_environment(cls) -> "ReaderClient":
-        values = {}
-        for name in ("PLATFORM_BASE_URL", "PLATFORM_KEY"):
-            value = os.getenv(name)
-            if not value:
-                raise RuntimeError(
-                    f"{name} is not set; please add it to your environment variables"
-                )
-            values[name] = value
-        return cls(values["PLATFORM_BASE_URL"], values["PLATFORM_KEY"])
+        missing = missing_environment()
+        if missing:
+            raise RuntimeError(
+                f"{missing[0]} is not set; please add it to your environment variables"
+            )
+        return cls(os.environ["PLATFORM_BASE_URL"], os.environ["PLATFORM_KEY"])
 
     async def close(self) -> None:
         await self._http.aclose()
