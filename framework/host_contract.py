@@ -70,6 +70,11 @@ BYPASS_NAMES = frozenset(
 )
 #: Names that reach a PTB Application; ``<application>.handlers`` is the core registry itself.
 APPLICATION_NAMES = frozenset({"application", "app"})
+#: Annotations that type a name as the bot application.
+APPLICATION_TYPES = frozenset({"Application", "CoreApplication"})
+#: Builtins that read, replace or delete an attribute named by a string.
+_ATTRIBUTE_FUNCTIONS = frozenset({"getattr", "setattr", "delattr"})
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 #: tg_bot paths that are not product handler code: environments, tests, wheels and the
 #: generated tree, which product CI drift-checks against the generator instead.
 _SKIPPED_ROOTS = frozenset({".venv", "tests", "packages"})
@@ -373,28 +378,133 @@ def _bypass_names(node: ast.AST) -> Iterable[str]:
         yield node.value
 
 
-def _reaches_application(node: ast.AST) -> bool:
-    """Whether an expression chain names a PTB Application (``context.application``, ``app``)."""
-    while isinstance(node, ast.Attribute | ast.Subscript | ast.Call):
-        if isinstance(node, ast.Attribute) and node.attr in APPLICATION_NAMES:
-            return True
-        node = node.func if isinstance(node, ast.Call) else node.value
-    return isinstance(node, ast.Name) and node.id in APPLICATION_NAMES
-
-
-def _registry_access(node: ast.AST) -> bool:
-    """``<application>.handlers`` or ``getattr(<application>, "handlers")``: the registry."""
-    if isinstance(node, ast.Attribute):
-        return node.attr == "handlers" and _reaches_application(node.value)
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "getattr"
-        and len(node.args) >= 2  # noqa: PLR2004
-        and _reaches_application(node.args[0])
-        and isinstance(node.args[1], ast.Constant)
-        and node.args[1].value == "handlers"
+def _annotates_application(node: ast.expr | None) -> bool:
+    while isinstance(node, ast.Subscript):
+        node = node.value
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.rpartition(".")[2].partition("[")[0] in APPLICATION_TYPES
+    return (isinstance(node, ast.Name) and node.id in APPLICATION_TYPES) or (
+        isinstance(node, ast.Attribute) and node.attr in APPLICATION_TYPES
     )
+
+
+def _scope_nodes(scope: ast.AST) -> Iterable[ast.AST]:
+    """The nodes of one scope, without the bodies of the functions and classes it defines."""
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, _SCOPES):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+@dataclass
+class _ApplicationAliases:
+    """Names and attributes that hold the bot application, following ordinary aliases.
+
+    ``context.application``, ``app`` and ``application`` reach it directly; ``bot =
+    context.application``, ``bot: Application = ...``, a parameter typed ``Application``,
+    ``with ... as bot``, ``(bot := ...)`` and ``self.bot = context.application`` make an alias.
+    Names are scoped like Python's: a function sees its own and its enclosing functions' names,
+    and a parameter of the same name shadows them. Attribute aliases hold module-wide.
+    """
+
+    attributes: set[str] = field(default_factory=set)
+
+    def reaches(self, node: ast.AST, names: Collection[str]) -> bool:
+        while isinstance(node, ast.Attribute | ast.Subscript | ast.Call):
+            if isinstance(node, ast.Attribute) and (
+                node.attr in APPLICATION_NAMES or node.attr in self.attributes
+            ):
+                return True
+            node = node.func if isinstance(node, ast.Call) else node.value
+        return isinstance(node, ast.Name) and (node.id in APPLICATION_NAMES or node.id in names)
+
+    def _bind(self, target: ast.AST, names: set[str]) -> None:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute):
+            self.attributes.add(target.attr)
+
+    def _targets(self, node: ast.AST, names: Collection[str]) -> Iterable[ast.AST]:
+        """The targets one statement binds to the application."""
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if self.reaches(node.value, names):
+                    yield target
+                elif isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple):
+                    for item, value in zip(target.elts, node.value.elts, strict=False):
+                        if self.reaches(value, names):
+                            yield item
+        elif isinstance(node, ast.AnnAssign) and (
+            _annotates_application(node.annotation)
+            or (node.value is not None and self.reaches(node.value, names))
+        ):
+            yield node.target
+        elif isinstance(node, ast.NamedExpr) and self.reaches(node.value, names):
+            yield node.target
+        elif (
+            isinstance(node, ast.withitem)
+            and node.optional_vars is not None
+            and self.reaches(node.context_expr, names)
+        ):
+            yield node.optional_vars
+
+    def scope_names(self, scope: ast.AST, inherited: Collection[str]) -> set[str]:
+        names = set(inherited)
+        if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            arguments = scope.args
+            for argument in (
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+                *filter(None, (arguments.vararg, arguments.kwarg)),
+            ):
+                names.discard(argument.arg)
+                if _annotates_application(argument.annotation):
+                    names.add(argument.arg)
+        while True:
+            before = (len(names), len(self.attributes))
+            for node in _scope_nodes(scope):
+                for target in list(self._targets(node, names)):
+                    self._bind(target, names)
+            if before == (len(names), len(self.attributes)):
+                return names
+
+    def registry_access(self, node: ast.AST, names: Collection[str]) -> bool:
+        """``<application>.handlers`` read, assigned or deleted, or reached by attribute name."""
+        if isinstance(node, ast.Attribute):
+            return node.attr == "handlers" and self.reaches(node.value, names)
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in _ATTRIBUTE_FUNCTIONS
+            and len(node.args) >= 2  # noqa: PLR2004
+            and self.reaches(node.args[0], names)
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == "handlers"
+        )
+
+
+def registry_accesses(module: ast.Module) -> list[int]:
+    """Lines of a module that reach the application's handler registry, through any alias."""
+    aliases = _ApplicationAliases()
+    while True:
+        known = set(aliases.attributes)
+        lines: set[int] = set()
+        pending: list[tuple[ast.AST, frozenset[str]]] = [(module, frozenset())]
+        while pending:
+            scope, inherited = pending.pop()
+            names = aliases.scope_names(scope, inherited)
+            # A class body's names are not visible to its methods, as in Python.
+            visible = inherited if isinstance(scope, ast.ClassDef) else frozenset(names)
+            for node in _scope_nodes(scope):
+                if isinstance(node, _SCOPES):
+                    pending.append((node, visible))
+                elif aliases.registry_access(node, names):
+                    lines.add(node.lineno)
+        if aliases.attributes == known:
+            return sorted(lines)
 
 
 def _product_sources(root: Path) -> list[Path]:
@@ -434,27 +544,26 @@ def registration_bypasses(root: Path) -> list[Violation]:
                 )
             )
             continue
-        seen: set[tuple[int, str]] = set()
+        seen: set[tuple[int, str]] = {(line, "handlers") for line in registry_accesses(module)}
+        violations.extend(
+            Violation(
+                code="registration_bypass",
+                owner=PRODUCT_OWNER,
+                symbol="application.handlers",
+                location=Location(relative, line),
+                conflict=(
+                    "the application's handlers are the core command registry; reading, "
+                    "replacing or deleting them, also through an alias of the application, "
+                    "replaces commands, access or the unknown-input reply"
+                ),
+                action=(
+                    "remove the access to application.handlers; declare commands as "
+                    f"{PRODUCT_COMMAND_TYPE}(name, handler) in COMMANDS of {PRODUCT_COMMANDS}"
+                ),
+            )
+            for line, _ in sorted(seen)
+        )
         for node in ast.walk(module):
-            if _registry_access(node) and (node.lineno, "handlers") not in seen:
-                seen.add((node.lineno, "handlers"))
-                violations.append(
-                    Violation(
-                        code="registration_bypass",
-                        owner=PRODUCT_OWNER,
-                        symbol="application.handlers",
-                        location=Location(relative, node.lineno),
-                        conflict=(
-                            "the application's handlers are the core command registry; reading "
-                            "or changing them replaces commands, access or the unknown-input reply"
-                        ),
-                        action=(
-                            "remove the access to application.handlers; declare commands as "
-                            f"{PRODUCT_COMMAND_TYPE}(name, handler) in COMMANDS of "
-                            f"{PRODUCT_COMMANDS}"
-                        ),
-                    )
-                )
             for name in _bypass_names(node):
                 line = getattr(node, "lineno", None) or 0
                 if name not in BYPASS_NAMES or (line, name) in seen:

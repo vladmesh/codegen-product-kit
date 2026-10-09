@@ -217,6 +217,7 @@ def build_application() -> Application:
 {% if 'backend' in modules %}
     application = (
         ApplicationBuilder()
+        .application_class(commands.CoreApplication)
         .token(_get_token())
         .post_init(post_init)
         .post_shutdown(post_shutdown)
@@ -230,7 +231,12 @@ def build_application() -> Application:
         client_factory=BackendClient,
     )
 {% else %}
-    application = ApplicationBuilder().token(_get_token()).build()
+    application = (
+        ApplicationBuilder()
+        .application_class(commands.CoreApplication)
+        .token(_get_token())
+        .build()
+    )
     commands.register(
         application,
         access=enforce_access,

@@ -156,7 +156,10 @@ apply through product files, or `incompatible` with a stable reason code.
 and `/command`, product `COMMANDS` from `src/commands.py`, bound module commands, then the core
 unknown-input reply. Declare product commands only as `ProductCommand("name", handler)` entries
 and run `make generate-from-spec`. Collisions, reserved names, other declaration forms and any
-direct `add_handler`/`CommandHandler`/`MessageHandler` use fail generation and `make lint`.
+direct `add_handler`/`CommandHandler`/`MessageHandler` use, or any access to the application's
+`handlers` registry (also through an alias such as `bot = context.application`), fail
+generation and `make lint`. Keep `ApplicationBuilder().application_class(commands.CoreApplication)`
+in `src/main.py`: registration refuses another application class and seals the registry field.
 Callbacks keep bounded opaque context for ten minutes, tied to initiating user/chat/action,
 and are consumed before any await. Restart/expiry requires rerunning the command. Commands
 and callbacks always call `request_as_telegram_user` with the real update user, never an owner

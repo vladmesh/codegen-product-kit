@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged. The runner proof requires the core language owner and checks RU/EN unknown input and
   `/channel` through the fake Bot API. The core language is enforced in product scope by the
   generated settings router, so upgraded products whose controllers Copier keeps enforce it too;
-  registered bot handlers are final at runtime; preflight and `kit bind` require valid product
+  registered bot handlers and the application's `handlers` field are final at runtime (the bot
+  is built with PTB's `application_class(CoreApplication)`), and the hard lint follows ordinary
+  aliases of the application such as `bot = context.application`; preflight and `kit bind` require valid product
   environments and `kit add` refuses an existing foreign one (it still prepares a missing one);
   both validate the retained effective binding, and malformed manifests fail
   closed as typed results. The generated durable-event integration test runs in its own Redis

@@ -107,7 +107,8 @@ generated tg_bot command registry (`framework/templates/codegen/commands.py.j2`)
 `kit add`/`kit bind`, the product's `make lint` and the read-only `kit check-install`
 (`framework/preflight.py`) share it. Product commands are `ProductCommand` entries in the
 product-owned `template/services/tg_bot/src/commands.py`; tg_bot code must not register handlers
-directly. When the generated registry changes, re-render
+directly or reach `<application>.handlers`, also through an alias. The bot is built with
+`application_class(CoreApplication)`, whose `handlers` field the registry seals. When the generated registry changes, re-render
 `template/services/tg_bot/src/generated/commands.py.jinja` from `render_registry` (a test compares
 both shapes). See `docs/CONTRACTS.md#core-host-contract-v1`.
 

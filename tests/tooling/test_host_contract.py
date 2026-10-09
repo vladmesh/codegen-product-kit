@@ -385,3 +385,85 @@ def test_binding_timezone_naming_core_language_is_refused(tmp_path: Path) -> Non
         {"tg-channels.yaml": tmp_path / "elsewhere.yaml"},
     )
     assert [item.owner for item in prospective.violations] == ["package:tg-channels"]
+
+
+#: The reviewer's author source: a supported ProductCommand whose handler replaces the registry
+#: through an ordinary alias of ``context.application``.
+ALIAS_REPLACEMENT = (
+    "from telegram import Update\n"
+    "from telegram.ext import ContextTypes\n"
+    "from services.tg_bot.src.generated.commands import ProductCommand\n\n"
+    "async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:\n"
+    "    bot = context.application\n"
+    "    bot.handlers = {}\n\n"
+    'COMMANDS = (ProductCommand("ping", ping),)\n'
+)
+
+
+#: A product handler that keeps the application under an ordinary local name.
+PING = "async def ping(update, context):\n"
+ALIAS = PING + "    bot = context.application\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "line"),
+    [
+        (ALIAS + "    del bot.handlers\n", 3),
+        (PING + "    a = context.application\n    b = a\n    b.handlers = {}\n", 4),
+        ("def wipe(bot: Application) -> None:\n    bot.handlers = {}\n", 2),
+        (PING + "    bot: 'Application' = context.bot_data['app']\n    bot.handlers = {}\n", 3),
+        (ALIAS + "    setattr(bot, 'handlers', {})\n", 3),
+        (ALIAS + "    delattr(bot, 'handlers')\n", 3),
+        (PING + "    if (bot := context.application):\n        bot.handlers = {}\n", 3),
+        (PING + "    bot, n = context.application, 1\n    bot.handlers = {}\n", 3),
+        (ALIAS + "\n    def later():\n        bot.handlers = {}\n", 5),
+        (
+            "class Hook:\n    def __init__(self, context):\n"
+            "        self.bot = context.application\n\n"
+            "    def wipe(self):\n        self.bot.handlers = {}\n",
+            6,
+        ),
+    ],
+)
+def test_registry_reached_through_an_application_alias_fails_closed(
+    tmp_path: Path, source: str, line: int
+) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/ping.py").write_text(source)
+    [violation] = evaluate(product).violations
+    assert (violation.code, violation.symbol) == ("registration_bypass", "application.handlers")
+    assert violation.location == host_contract.Location("services/tg_bot/src/ping.py", line)
+
+
+def test_alias_replacement_in_a_declared_command_is_refused_before_writes(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/commands.py").write_text(ALIAS_REPLACEMENT)
+    contract = evaluate(product)
+    [violation] = contract.violations
+    assert (violation.code, violation.owner) == ("registration_bypass", "product")
+    assert violation.location == host_contract.Location(host_contract.PRODUCT_COMMANDS, 7)
+    assert [item.command for item in contract.commands][-1] == "ping"  # The declaration is valid.
+    with pytest.raises(HostContractError, match="registration_bypass"):
+        write_registry(product, contract.require_valid())
+    with pytest.raises(BindingError, match="registration_bypass"):
+        render_registry(contract)
+    assert not (product / host_contract.REGISTRY).exists()
+    with pytest.raises(HostContractError, match="registration_bypass"):
+        check_product(product)
+
+
+def test_unrelated_handlers_and_a_shadowing_parameter_stay_admitted(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/logic.py").write_text(
+        "async def ping(update, context):\n"
+        "    bot = context.application\n"
+        "    bot.bot_data['seen'] = True\n\n"
+        "    def reset(bot):\n"
+        "        bot.handlers = []\n\n"
+        "    sender = context.bot\n"
+        "    sender.handlers = None\n"
+        "    queue = Queue()\n"
+        "    queue.handlers.clear()\n"
+        "    queue.callback = ping\n"
+    )
+    assert evaluate(product).violations == []

@@ -4,8 +4,10 @@ Built-in, product and bound module commands come from the validated host contrac
 order, and unknown commands or text are answered by core in the core ``language`` setting.
 Declare a product command as ``ProductCommand("name", handler)`` in ``COMMANDS`` of
 ``services/tg_bot/src/commands.py`` and run ``make generate-from-spec``; product CI fails when
-this file and the declarations disagree. After registration the handler groups and every
-registered handler are final: adding, removing or replacing one raises CommandRegistryError.
+this file and the declarations disagree. The bot is built with
+``ApplicationBuilder().application_class(CoreApplication)``. After registration the handler
+groups, every registered handler and the application's ``handlers`` field itself are final:
+adding, removing, replacing or deleting one raises CommandRegistryError.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from typing import Any, NoReturn
 
 from telegram import Update
 from telegram.ext import (
+    Application,
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
@@ -112,14 +115,43 @@ class FrozenHandlers(dict[int, tuple[Any, ...]]):
     __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _refuse
 
 
+#: Fields of the bot application that core registration makes final.
+_REGISTRY_FIELDS = frozenset({"handlers", "_core_registry_sealed"})
+
+
+class CoreApplication(Application[Any, Any, Any, Any, Any, Any]):
+    """The bot application, built through PTB's ``ApplicationBuilder.application_class``.
+
+    PTB fills ``handlers`` as usual until :func:`register` seals the registry. From then on
+    replacing or deleting the field raises CommandRegistryError, whatever name the application
+    is reached through; every other attribute and the callback context stay ordinary.
+    """
+
+    __slots__ = ("_core_registry_sealed",)
+
+    def _registry_sealed(self) -> bool:
+        return bool(getattr(self, "_core_registry_sealed", False))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in _REGISTRY_FIELDS and self._registry_sealed():
+            raise CommandRegistryError(f"the core command registry is final; {name!r} is sealed")
+        super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in _REGISTRY_FIELDS and self._registry_sealed():
+            raise CommandRegistryError(f"the core command registry is final; {name!r} is sealed")
+        super().__delattr__(name)
+
+
 def _freeze(application: Any) -> None:
-    """Seal every registered handler and fix the groups, so later changes fail closed."""
+    """Seal every handler, fix the groups, then seal the field holding them, in that order."""
     application.handlers = FrozenHandlers(
         {
             group: tuple(_seal(item) for item in items)
             for group, items in application.handlers.items()
         }
     )
+    application._core_registry_sealed = True
 
 
 class _ModuleApplication:
@@ -181,6 +213,11 @@ def register(
     client_factory: Any = None,
 ) -> None:
     """Register access, every registry command and the core unknown-input fallback."""
+    if not isinstance(application, CoreApplication) or application._registry_sealed():
+        raise CommandRegistryError(
+            "build the bot with ApplicationBuilder().application_class(CoreApplication) and "
+            "register its commands exactly once"
+        )
     if sorted(builtins) != sorted(owned_by("core")):
         raise CommandRegistryError(f"core built-ins must be exactly {owned_by('core')}")
     handlers = {**builtins, **product_handlers()}

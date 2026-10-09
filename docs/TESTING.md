@@ -282,8 +282,15 @@ The runner proof adds the RU/EN unknown-input and `/channel` checks through its 
 
 Review 11 repairs are covered in the same suites. Tooling tests refuse unpacked, duplicate and
 extra `ProductCommand` arguments before any registry write while admitting the positional and
-named forms the runtime accepts; flag `context.application.handlers` callback/clear/remove and
-`getattr(application, "handlers")` but not ordinary `handlers`, `callback` or `clear` fields;
+named forms the runtime accepts; flag `context.application.handlers` callback/clear/remove,
+`getattr(application, "handlers")` and, since review 41, replacement or deletion through ordinary
+aliases (`bot = context.application`, chains, typed names, `setattr`/`delattr`, `:=`, closures,
+`self.bot`), including the reviewer's exact `ProductCommand` source as glue and a refused `kit add`
+before writes, but not ordinary `handlers`, `callback` or `clear` fields, `context.bot` or a
+shadowing parameter. `tests/copier/command_registry_scenarios.py` drives a real PTB 21.4
+`CoreApplication` offline: a plain `Application` is refused, a declared product command's
+alias replacement and deletion raise and leave the registry object identical, and `/start`,
+allowed/denied access and the RU/EN unknown reply still work;
 fail closed on list, invalid-YAML and incomplete manifests; and classify a retained binding that
 names core language as its timezone, or another language key, as product glue at its file and
 line (as a package default: incompatible). Preflight fixtures are real empty virtualenvs

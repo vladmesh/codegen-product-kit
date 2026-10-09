@@ -932,14 +932,26 @@ reassignment or augmentation. Product tg_bot code outside `src/generated/`, `tes
 and environments may not mention `BaseHandler`, `CommandHandler`, `ConversationHandler`,
 `MessageHandler`, `PrefixHandler`, `StringCommandHandler`, `StringRegexHandler`, `TypeHandler`,
 `add_handler`, `add_handlers` or `remove_handler` as a name, attribute, import or string, nor
-reach the registry itself as `<application>.handlers` (or `getattr(<application>, "handlers")`),
-where the chain names `application` or `app`, as `context.application` does; these would register,
-replace or remove a command, the access check or the unknown-input reply. Other attributes
-called `handlers`, `callback` or `clear` in product logic are not restricted. At runtime the
-registry is final: after registration every handler group is a fixed tuple and every registered
-handler is sealed, so adding, removing or clearing handlers, or replacing a handler's callback,
-raises (`CommandRegistryError`, or `AttributeError` from PTB's list operations) inside the
-offending handler and the core access, commands and unknown-input reply keep working. This
+reach the registry itself as `<application>.handlers`, read, assigned or deleted, or through
+`getattr`/`setattr`/`delattr(<application>, "handlers")`. `<application>` is a chain that names
+`application` or `app` (as `context.application` does) or an ordinary alias of one, scoped as
+Python scopes names: `bot = context.application`, chained `b = bot`, tuple and `:=` assignment,
+`with ... as bot`, a name or parameter typed `Application`/`CoreApplication`, and an attribute
+assigned the application (`self.bot = context.application`, module-wide); a parameter of the
+same name shadows an outer alias. These would register, replace or remove a command, the access
+check or the unknown-input reply. Other attributes called `handlers`, `callback` or `clear` in
+product logic, and `context.bot` (the Bot API client), are not restricted.
+
+At runtime the bot is built with PTB's `ApplicationBuilder().application_class(CoreApplication)`
+(`CoreApplication` is in the generated registry) and `register` refuses any other application or
+a second registration. Registration runs in one order: access (group -1), core built-ins,
+product commands, module commands and callbacks, the core unknown-input reply, then the seal:
+every handler group becomes a fixed tuple, every registered handler is sealed and finally the
+application's `handlers` field itself. From then on adding, removing or clearing handlers,
+replacing a handler's callback, or assigning or deleting `handlers` through any name raises
+(`CommandRegistryError`, or `AttributeError` from PTB's list operations) inside the offending
+handler, and the core access, commands and unknown-input reply keep working. The callback context
+and every other application attribute (`bot_data`, `bot`, `job_queue`, …) stay ordinary. This
 protects the registry; it is not a Python sandbox. Product callbacks and other update types are not
 contributable in this version. Other product logic is not linted by this contract.
 

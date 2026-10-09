@@ -3,7 +3,9 @@
 Run with a bound product's tg_bot interpreter. Product, built-in and module commands, the
 core unknown fallback in RU, EN and unset language, registration order and fail-closed
 registry drift are exercised through ``Application.process_update`` with only the Bot API
-send and the backend HTTP transport replaced.
+send and the backend HTTP transport replaced. The application is the generated
+``CoreApplication``; a declared product command that replaces or deletes its ``handlers``
+through an ordinary alias is refused, and access, ``/start`` and the unknown reply still work.
 """
 
 import asyncio
@@ -23,6 +25,7 @@ async def scenario(locale):  # noqa: C901, PLR0915
     from telegram import Chat, Message, MessageEntity, Update, User
     from telegram.ext import (
         ApplicationBuilder,
+        ApplicationHandlerStop,
         CallbackQueryHandler,
         CommandHandler,
         MessageHandler,
@@ -76,7 +79,17 @@ async def scenario(locale):  # noqa: C901, PLR0915
         self._bot_user = bot_user
         return bot_user
 
-    def update(text, bot):
+    outsider = User(id=999, is_bot=False, first_name="Outsider")
+
+    def build():
+        return (
+            ApplicationBuilder()
+            .application_class(commands.CoreApplication)
+            .token("test:token")
+            .build()
+        )
+
+    def update(text, bot, sender=user):
         counter[0] += 1
         entities = []
         if text.startswith("/"):
@@ -85,7 +98,7 @@ async def scenario(locale):  # noqa: C901, PLR0915
             message_id=counter[0],
             date=datetime.now(UTC),
             chat=Chat(id=123, type="private"),
-            from_user=user,
+            from_user=sender,
             text=text,
             entities=entities,
         )
@@ -96,8 +109,17 @@ async def scenario(locale):  # noqa: C901, PLR0915
         patch("telegram.Bot.get_me", new=get_me),
         patch("telegram.Bot.send_message", new=send_message),
     ):
-        application = ApplicationBuilder().token("test:token").build()
+        # Only the core application class can be registered, and only once.
+        plain = ApplicationBuilder().token("test:token").build()
         builtins = {"start": handle_start, "command": handle_command}
+        try:
+            commands.register(plain, access=allow, builtins=builtins, bindings=bindings)
+        except commands.CommandRegistryError as error:
+            assert "application_class" in str(error), error
+        else:
+            raise AssertionError("a plain Application was registered")
+        assert plain.handlers == {}, plain.handlers
+        application = build()
         commands.register(
             application,
             access=allow,
@@ -147,7 +169,7 @@ async def scenario(locale):  # noqa: C901, PLR0915
         await application.shutdown()
 
         # Fail closed: a product declaration the registry does not hold refuses startup.
-        drifted = ApplicationBuilder().token("test:token").build()
+        drifted = build()
         original = product.COMMANDS
         product.COMMANDS = (*original, commands.ProductCommand("unregistered", allow))
         try:
@@ -171,7 +193,7 @@ async def scenario(locale):  # noqa: C901, PLR0915
                 application.add_handler(CommandHandler("channel", allow))
                 application.add_handler(MessageHandler(None, allow))
 
-        rogue = ApplicationBuilder().token("test:token").build()
+        rogue = build()
         try:
             commands.register(
                 rogue, access=allow, builtins=builtins, bindings=Rogue, client_factory=FakeClient
@@ -185,13 +207,30 @@ async def scenario(locale):  # noqa: C901, PLR0915
         # unknown reply, clear or extend the registry. Every change fails closed.
         attempts = {}
         rogue_calls = []
+        denied = []
+
+        async def gate(update, context):
+            if update.effective_user is not None and update.effective_user.id == outsider.id:
+                denied.append(update.update_id)
+                await update.effective_message.reply_text("access denied")
+                raise ApplicationHandlerStop
 
         async def rogue(update, context):
             rogue_calls.append(update)
 
         async def mutate(update, context):
             app = context.application
+            bot = context.application  # An ordinary alias, as a product author would write.
+
+            def replace():
+                bot.handlers = {}
+
+            def delete():
+                del bot.handlers
+
             changes = {
+                "replace": replace,
+                "delete": delete,
                 "callback": lambda: setattr(app.handlers[0][-1], "callback", rogue),
                 "clear": app.handlers.clear,
                 "group": lambda: app.handlers.__setitem__(5, []),
@@ -213,16 +252,17 @@ async def scenario(locale):  # noqa: C901, PLR0915
             for item in original
         )
         try:
-            mutated = ApplicationBuilder().token("test:token").build()
+            mutated = build()
             commands.register(
                 mutated,
-                access=allow,
+                access=gate,
                 builtins=builtins,
                 bindings=bindings,
                 client_factory=FakeClient,
             )
         finally:
             product.COMMANDS = original
+        registry = mutated.handlers
         registered_before = {
             group: [(id(item), item.callback) for item in items]
             for group, items in mutated.handlers.items()
@@ -231,8 +271,18 @@ async def scenario(locale):  # noqa: C901, PLR0915
         before = len(sent)
         await mutated.process_update(update(f"/{target}", mutated.bot))
         assert sent[before:] == ["mutation attempted"], sent[before:]
-        assert set(attempts) == {"callback", "clear", "group", "remove_handler", "add_handler"}
+        assert set(attempts) == {
+            "replace",
+            "delete",
+            "callback",
+            "clear",
+            "group",
+            "remove_handler",
+            "add_handler",
+        }
         assert "applied" not in attempts.values(), attempts
+        assert attempts["replace"] == attempts["delete"] == "CommandRegistryError", attempts
+        assert mutated.handlers is registry
         assert {
             group: [(id(item), item.callback) for item in items]
             for group, items in mutated.handlers.items()
@@ -242,6 +292,12 @@ async def scenario(locale):  # noqa: C901, PLR0915
         await mutated.process_update(update("/start", mutated.bot))
         assert sent[before] == unknown[locale], sent[before:]
         assert sent[before + 1].startswith("Привет!")
+        # Core access still runs first: an outsider is stopped before any command or reply.
+        before = len(sent)
+        await mutated.process_update(update("/start", mutated.bot, outsider))
+        await mutated.process_update(update("text from outsider", mutated.bot, outsider))
+        assert sent[before:] == ["access denied", "access denied"], sent[before:]
+        assert denied == [counter[0] - 1, counter[0]], denied
         assert rogue_calls == []
         await mutated.shutdown()
     print(f"registry {locale}: commands, module binding and unknown fallback passed")

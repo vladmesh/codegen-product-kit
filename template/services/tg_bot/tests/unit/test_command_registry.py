@@ -18,7 +18,9 @@ from services.tg_bot.src.generated import bindings, commands
 
 
 def _register(**overrides: Any) -> Application:
-    application = ApplicationBuilder().token("123:test").build()
+    application = (
+        ApplicationBuilder().application_class(commands.CoreApplication).token("123:test").build()
+    )
     builtins = {name: AsyncMock() for name in commands.owned_by("core")}
     arguments: dict[str, Any] = {"access": AsyncMock(), "builtins": builtins, "bindings": bindings}
     arguments.update(overrides)
@@ -50,6 +52,33 @@ def test_registered_handlers_are_final() -> None:
     with pytest.raises(AttributeError):
         application.remove_handler(fallback)
     assert application.handlers[0][-1] is fallback
+
+
+def test_the_registry_field_itself_is_final_through_any_alias() -> None:
+    application = _register()
+    registry = application.handlers
+    bot = application
+    with pytest.raises(commands.CommandRegistryError):
+        bot.handlers = {}
+    with pytest.raises(commands.CommandRegistryError):
+        del bot.handlers
+    with pytest.raises(commands.CommandRegistryError):
+        setattr(bot, "_core_registry_sealed", False)  # noqa: B010 - the seal is final too.
+    assert application.handlers is registry
+    # Everything else on the application stays ordinary product state.
+    bot.bot_data["handlers"] = "product value"
+    assert application.bot_data["handlers"] == "product value"
+
+
+def test_registration_needs_the_core_application_exactly_once() -> None:
+    plain = ApplicationBuilder().token("123:test").build()
+    builtins = {name: AsyncMock() for name in commands.owned_by("core")}
+    with pytest.raises(commands.CommandRegistryError, match="application_class"):
+        commands.register(plain, access=AsyncMock(), builtins=builtins, bindings=bindings)
+    assert plain.handlers == {}
+    application = _register()
+    with pytest.raises(commands.CommandRegistryError, match="exactly once"):
+        commands.register(application, access=AsyncMock(), builtins=builtins, bindings=bindings)
 
 
 def test_unknown_input_uses_core_language_or_both() -> None:

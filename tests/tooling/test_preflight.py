@@ -457,3 +457,37 @@ def test_kit_add_prepares_a_missing_environment_but_refuses_a_foreign_one(
     with pytest.raises(BindingError, match="tg_bot must own a product virtualenv"):
         cli.add_package("tg-channels", wheel, product)
     assert installs == [wheel] and _state(product) == before
+
+
+#: A declared product command that replaces the core registry through an application alias.
+ALIAS_REPLACEMENT = (
+    "from services.tg_bot.src.generated.commands import ProductCommand\n\n\n"
+    "async def ping(update, context):\n"
+    "    bot = context.application\n"
+    "    bot.handlers = {}\n\n\n"
+    'COMMANDS = (ProductCommand("ping", ping),)\n'
+)
+
+
+def test_registry_replacement_through_an_alias_is_glue_and_refuses_kit_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product = _product(tmp_path / "product")
+    (product / "services/tg_bot/src/commands.py").write_text(ALIAS_REPLACEMENT)
+    [item] = _check(product).glue
+    assert (item["code"], item["owner"], item["path"], item["line"]) == (
+        "registration_bypass",
+        "product",
+        "services/tg_bot/src/commands.py",
+        6,
+    )
+    assert item["symbol"] == "application.handlers"
+    assert item["action"].startswith("remove the access to application.handlers")
+    wheel = _wheel(tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(cli, "_run", lambda command, root: calls.append(command))
+    monkeypatch.setattr(cli, "generate_all", lambda root: calls.append(root))
+    before = _state(product)
+    with pytest.raises(BindingError, match="registration_bypass"):
+        cli.add_package("tg-channels", wheel, product)
+    assert calls == [] and _state(product) == before
