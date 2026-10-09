@@ -118,6 +118,14 @@ latest entry after that publication would skip the event. Early registration pre
 delivery observation while retaining the crash exit, pending database state, replacement exit,
 event identity and stream-count assertions. This Redis/PostgreSQL scenario runs in CI only.
 
+The generated product's `tests/integration/test_durable_events.py` owns the shared `job_fired`
+stream while it runs, but the product's live backend core timer also publishes there at every
+slot boundary of an installed package timer (multiples of its period since the epoch). Both
+tests that read `job_fired` therefore start, from the generated `JOB_TIMERS`, only when no
+boundary falls within the next 15 seconds (less for shorter periods), and their `flushdb` drops
+earlier fires. With reminders and tg-channels installed, a run crossing such a minute boundary
+otherwise reads a core-timer event as a second delivery; their assertions are unchanged.
+
 When a Docker-dependent test cannot run, skip it explicitly at the pytest boundary with a reason;
 do not silently return from the test.
 

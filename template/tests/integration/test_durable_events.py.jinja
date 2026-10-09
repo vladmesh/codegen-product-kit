@@ -6,6 +6,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import time
 from types import ModuleType
 from typing import Any
 from uuid import uuid4
@@ -18,12 +19,18 @@ from redis.asyncio import Redis
 
 from services.backend.src.core.db import AsyncSessionLocal
 from services.backend.src.core.idempotent_consumer import consume_once
+from services.backend.src.generated.jobs_schemas import JOB_TIMERS
 from shared.generated.events import EventEnvelope, get_broker, publish_event, publish_job_fired
 from shared.generated.schemas import JobFired, Status, UserAccess
 
 STREAM = "job_fired"
 GROUP = "events:integration"
 pytestmark = pytest.mark.asyncio(loop_scope="module")
+#: The product's live core timer also publishes `job_fired`, at every slot boundary of an
+#: installed package timer (the multiples of its period since the epoch). A test that owns the
+#: stream starts with no boundary inside its window; earlier fires are removed by its flushdb.
+TIMER_QUIET_SECONDS = 15
+TIMER_SETTLE_SECONDS = 2
 
 
 def _event() -> JobFired:
@@ -36,6 +43,20 @@ def _event() -> JobFired:
         fired_by_run="integration-run",
         accepted_at="2026-09-05T00:00:00Z",
     )
+
+
+async def _outside_timer_slots() -> None:
+    """Wait until no core timer slot boundary falls inside the next quiet window."""
+    if not JOB_TIMERS:
+        return
+    shortest = min(JOB_TIMERS.values())
+    quiet = min(TIMER_QUIET_SECONDS, shortest - TIMER_SETTLE_SECONDS - 1)
+    while True:
+        now = time.time()
+        nearest = min(period - now % period for period in JOB_TIMERS.values())
+        if nearest >= quiet:
+            return
+        await asyncio.sleep(nearest + TIMER_SETTLE_SECONDS)
 
 
 async def _read(
@@ -113,6 +134,7 @@ async def _wait_for_stream_length(redis: Redis, stream: str, length: int) -> Non
 
 
 async def test_stream_backlog_recovery_and_idempotent_redelivery() -> None:
+    await _outside_timer_slots()
     redis = Redis.from_url(os.environ["REDIS_URL"])
     await redis.flushdb()
     await redis.xgroup_create(STREAM, GROUP, id="0-0", mkstream=True)
@@ -211,6 +233,7 @@ async def test_publish_event_uses_the_real_stream_transport() -> None:
 
 async def test_generated_adapter_guards_live_and_reclaimed_delivery(tmp_path: Path) -> None:
     adapter = _load_generated_adapter(tmp_path)
+    await _outside_timer_slots()
     redis = Redis.from_url(os.environ["REDIS_URL"])
     await redis.flushdb()
 
