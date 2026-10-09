@@ -438,3 +438,22 @@ def test_kit_add_refuses_a_retained_binding_conflict_before_any_write(
     with pytest.raises(BindingError, match="binding_setting_conflict"):
         cli.add_package("tg-channels", wheel, product)
     assert calls == [] and _state(product) == before
+
+
+def test_kit_add_prepares_a_missing_environment_but_refuses_a_foreign_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normal add creates a missing service environment; one that exists must be the product's."""
+    product = _product(tmp_path / "product")
+    shutil.rmtree(product / "services/backend/.venv")
+    wheel = _wheel(tmp_path)
+    installs: list[Path] = []
+    monkeypatch.setattr(cli, "_install_wheel", lambda package, path, root: installs.append(path))
+    cli.add_package("tg-channels", wheel, product)
+    assert installs == [wheel]
+
+    _host_venv(product, tmp_path, tmp_path)
+    before = _state(product)
+    with pytest.raises(BindingError, match="tg_bot must own a product virtualenv"):
+        cli.add_package("tg-channels", wheel, product)
+    assert installs == [wheel] and _state(product) == before

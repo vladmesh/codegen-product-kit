@@ -11,11 +11,17 @@ from fastapi import (
     Body,
 {% endif %}
     Depends,
+{% if core_setting_scopes %}
+    HTTPException,
+{% endif %}
 {% if needs_path %}
     Path,
 {% endif %}
 {% if needs_query %}
     Query,
+{% endif %}
+{% if core_setting_scopes %}
+    status,
 {% endif %}
 )
 {% if needs_broker %}
@@ -38,6 +44,19 @@ from shared.generated.schemas import (
 {% endif %}
 
 from ..protocols import {{ protocol_name }}
+{% if core_setting_scopes %}
+from ..settings_schemas import SETTINGS_SCHEMA_SCOPES
+
+
+def _require_core_scope(key: str, scope: object) -> None:
+    """A core-owned setting exists only in its canonical scope; refused before storage."""
+    required = SETTINGS_SCHEMA_SCOPES.get(key)
+    if required is not None and getattr(scope, "value", scope) != required:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Setting is only available in {required} scope",
+        )
+{% endif %}
 
 
 def create_router(
@@ -68,6 +87,9 @@ def create_router(
         session: AsyncSession = Depends(get_session),  # noqa: B008
         controller: {{ protocol_name }} = Depends(get_controller),  # noqa: B008
     ) -> {{ handler.computed_return_type }}:
+{% if core_setting_scopes and handler.input_model %}
+        _require_core_scope(payload.key, payload.scope)
+{% endif %}
 {% if handler.output_model %}
         result = await controller.{{ handler.name }}(
 {% else %}

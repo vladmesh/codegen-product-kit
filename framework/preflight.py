@@ -34,7 +34,6 @@ from framework.binding_product import (
     binding_sources,
     library_evidence,
     product_core_version,
-    require_binding_product,
     require_service_environment,
 )
 from framework.bindings import BindingError, ParsedCreate, load_binding, validate_binding
@@ -359,12 +358,16 @@ def admit(root: Path, metadata: PackageMetadata) -> None:
     """Refuse an install whose product would break the host contract, before any write.
 
     The order is the preflight's: environment, effective (retained or default) binding,
-    then core language references and command claims.
+    then core language references and command claims. The install itself prepares a service
+    environment that is not there yet; one that is there must be the product's own.
     """
 
     host_contract.evaluate(root).require_valid()
     if metadata.binding is not None and (root / host_contract.TG_BOT).is_dir():
-        require_binding_product(root)
+        for service in ("backend", "tg_bot"):
+            environment = root / f"services/{service}/.venv"
+            if environment.exists() or environment.is_symlink():
+                require_service_environment(root, service)
         binding, _ = effective_binding(root, metadata)
         if binding is not None:
             validate_binding(binding, metadata.manifest, bundled_catalog())

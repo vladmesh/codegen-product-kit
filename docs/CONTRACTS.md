@@ -886,8 +886,10 @@ and reads its value. There is no default value, no seeding and no environment fa
 manifest or package that declares the same key, even with an equal schema, is a competing owner
 and fails generation with its source; bindings reference the core key. Generation also emits
 `SETTINGS_SCHEMA_SCOPES` (`{"language": "product"}`) from the same core metadata, and the
-settings controller refuses a core setting in any other scope with 422 on both get and set,
-before the repository is touched; other settings keep both scopes.
+generated settings router (`services/backend/src/generated/routers/settings.py`) refuses a core
+setting in any other scope with 422 on both get and set, before the product-owned controller or
+the repository is reached; other settings keep both scopes. The check lives in generated code
+because Copier keeps a product's controllers on update, so an upgraded product enforces it too.
 
 ## Core host contract v1
 
@@ -970,7 +972,9 @@ to the product, its environments, locks, settings or database. Evaluation order 
 check-install, `kit add` and `kit bind`: the product's service environments are validated with
 the read-only ownership/provenance check normal bind uses (the virtualenv must live inside the
 product and its interpreter must answer an isolated, bytecode-free query; a host venv, a
-placeholder or an unusable interpreter is refused), then the effective binding is chosen (a
+placeholder or an unusable interpreter is refused; check-install and `kit bind` also refuse a
+missing one, while `kit add`, which prepares a missing service environment itself, validates
+those that exist), then the effective binding is chosen (a
 retained `services/tg_bot/bindings/<package>.yaml` wins over the package default) and validated
 against the exact package manifest, then core language and timezone references (through
 `binding_settings`) and command claims are resolved. No environment is created or synced.

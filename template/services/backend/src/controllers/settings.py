@@ -13,10 +13,7 @@ from codegen_kit.packages import ActivatedPackage, SettingSeedPackage
 from services.backend.src.app.models.setting import Setting, SettingScope
 from services.backend.src.app.repositories.setting import SettingRepository
 from services.backend.src.generated.protocols import SettingsControllerProtocol
-from services.backend.src.generated.settings_schemas import (
-    SETTINGS_SCHEMA_SCOPES,
-    SETTINGS_SCHEMAS,
-)
+from services.backend.src.generated.settings_schemas import SETTINGS_SCHEMAS
 from shared.generated.schemas import Scope as ContractScope, SettingGet, SettingSet, SettingValue
 
 CORE_SETTINGS_CONTRACT_VERSION = 1
@@ -41,16 +38,6 @@ def _subject_id(scope: ContractScope | str, subject_id: int | None) -> int:
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail="subject_id is required only for user-scoped settings",
     )
-
-
-def _require_scope(key: str, scope: ContractScope | str) -> None:
-    """A core-owned setting exists only in its canonical scope; refuse others before storage."""
-    required = SETTINGS_SCHEMA_SCOPES.get(key)
-    if required is not None and _contract_scope(scope).value != required:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Setting is only available in {required} scope",
-        )
 
 
 def _schema_for(key: str) -> dict[str, Any]:
@@ -94,7 +81,6 @@ class SettingsController(SettingsControllerProtocol):
                     self._product_seeds[key] = runtime
 
     async def get(self, session: AsyncSession, payload: SettingGet) -> SettingValue:
-        _require_scope(payload.key, payload.scope)
         setting = await SettingRepository(session).get(
             payload.key,
             _storage_scope(payload.scope),
@@ -107,7 +93,6 @@ class SettingsController(SettingsControllerProtocol):
         return _to_contract(setting)
 
     async def set(self, session: AsyncSession, payload: SettingSet) -> SettingValue:
-        _require_scope(payload.key, payload.scope)
         _validate_value(payload.key, payload.value)
         scope = _contract_scope(payload.scope)
         setting = await SettingRepository(session).set(

@@ -14,6 +14,8 @@ from fastapi import (
     APIRouter,
     Body,
     Depends,
+    HTTPException,
+    status,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +26,17 @@ from shared.generated.schemas import (
 )
 
 from ..protocols import SettingsControllerProtocol
+from ..settings_schemas import SETTINGS_SCHEMA_SCOPES
+
+
+def _require_core_scope(key: str, scope: object) -> None:
+    """A core-owned setting exists only in its canonical scope; refused before storage."""
+    required = SETTINGS_SCHEMA_SCOPES.get(key)
+    if required is not None and getattr(scope, "value", scope) != required:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Setting is only available in {required} scope",
+        )
 
 
 def create_router(
@@ -46,6 +59,7 @@ def create_router(
         session: AsyncSession = Depends(get_session),  # noqa: B008
         controller: SettingsControllerProtocol = Depends(get_controller),  # noqa: B008
     ) -> SettingValue:
+        _require_core_scope(payload.key, payload.scope)
         result = await controller.get(
             session=session,
             payload=payload,
@@ -62,6 +76,7 @@ def create_router(
         session: AsyncSession = Depends(get_session),  # noqa: B008
         controller: SettingsControllerProtocol = Depends(get_controller),  # noqa: B008
     ) -> SettingValue:
+        _require_core_scope(payload.key, payload.scope)
         result = await controller.set(
             session=session,
             payload=payload,
