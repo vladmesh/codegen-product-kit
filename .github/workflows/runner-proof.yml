@@ -3,8 +3,8 @@ name: Runner Proof
 # A fresh backend,tg_bot product from the exact kit candidate, installed with tg-channels by the
 # orchestrator's real executor, through its own CI, its main image path and a post delivered via
 # the pinned platform's real auth and Caddy; a second leg installs the published reminders first
-# and proves both modules side by side. See docs/RUNNER_PROOF.md for the proof modes, the
-# evidence contract and for running the same proof from another repository with other pins.
+# and proves both modules side by side. See docs/RUNNER_PROOF.md for the proof and catalog
+# modes, the evidence contract and for running the same proof from another repository.
 
 on:
   push:
@@ -33,8 +33,15 @@ on:
         default: ""
       proof_mode:
         description: >-
-          candidate_release (the kit's pending tg-channels release through the isolated
-          fixture) or published_release (live catalog and tag, no fixture); never a fallback
+          published_release (the pinned published tg-channels tag, read from the real remote)
+          or candidate_release (a pending release of the kit through the isolated fixture)
+        type: string
+        required: true
+      catalog_mode:
+        description: >-
+          remote_head (the real default branch's catalog, no fixture) or candidate_snapshot
+          (the kit candidate's committed catalog as an isolated prospective HEAD) for
+          published_release; pending_fixture for candidate_release; never a fallback
         type: string
         required: true
       package_version:
@@ -73,9 +80,15 @@ jobs:
       # Pins of this proof; a caller passes other exact SHAs as inputs.
       ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha || 'ec96fa79c84937982420f0f01388d90000bd69eb' }}
       PLATFORM_SHA: ${{ inputs.platform_sha || '070dfb359f9a121546d1362ae84c9d0856cabf64' }}
-      # This repository's own PR and main runs prove the pending tg-channels 0.1.2 release
-      # (packages/pending-releases.yaml) until its tag is published; a caller chooses explicitly.
-      PROOF_MODE: ${{ inputs.proof_mode || 'candidate_release' }}
+      # This repository's own runs prove the published tg-channels 0.1.2: a pull request against
+      # the catalog it would publish (candidate_snapshot, prospective), main against the real
+      # default branch's catalog (remote_head). A caller names all three explicitly.
+      CALLED: ${{ inputs.kit_sha != '' }}
+      PROOF_MODE: ${{ inputs.proof_mode || 'published_release' }}
+      CATALOG_MODE: >-
+        ${{ inputs.catalog_mode
+        || (github.event_name == 'pull_request' && 'candidate_snapshot')
+        || 'remote_head' }}
       PACKAGE_VERSION: ${{ inputs.package_version || '0.1.2' }}
       PACKAGES: ${{ matrix.packages }}
     steps:
@@ -108,10 +121,22 @@ jobs:
               exit 1
             fi
           done
-          case "$PROOF_MODE" in
-            candidate_release|published_release) ;;
-            *) echo "Unknown proof mode: $PROOF_MODE" >&2; exit 1 ;;
+          case "$PROOF_MODE/$CATALOG_MODE" in
+            published_release/remote_head|published_release/candidate_snapshot) ;;
+            candidate_release/pending_fixture) ;;
+            *) echo "Unknown proof/catalog mode: $PROOF_MODE/$CATALOG_MODE" >&2; exit 1 ;;
           esac
+          # Own runs: a pull request proves the prospective catalog snapshot, only main proves
+          # the real default branch; neither can be the other or the pending fixture.
+          if [ "$CALLED" != true ]; then
+            expected=remote_head
+            if [ "$EVENT" = pull_request ]; then expected=candidate_snapshot; fi
+            if [ "$PROOF_MODE" != published_release ] || [ "$CATALOG_MODE" != "$expected" ]; then
+              echo "$EVENT must prove published_release/$expected," \
+                "not $PROOF_MODE/$CATALOG_MODE" >&2
+              exit 1
+            fi
+          fi
 
       - name: Refuse URL rewrites around the deploy key
         run: |
@@ -192,7 +217,8 @@ jobs:
             --kit-dir kit --kit-sha "$KIT_SHA" \
             --orchestrator-dir orchestrator --orchestrator-sha "$ORCHESTRATOR_SHA" \
             --platform-dir platform --platform-sha "$PLATFORM_SHA" \
-            --proof-mode "$PROOF_MODE" --package-version "$PACKAGE_VERSION" \
+            --proof-mode "$PROOF_MODE" --catalog-mode "$CATALOG_MODE" \
+            --package-version "$PACKAGE_VERSION" \
             --packages "$PACKAGES" --output-dir "$RUNNER_TEMP/runner-proof"
 
       - name: Preserve runner proof evidence
@@ -206,7 +232,9 @@ jobs:
       - name: Require passed SHA-bound evidence
         run: |
           python3 - "$RUNNER_TEMP/runner-proof/runner-proof.json" <<'EOF'
-          import json, os, sys
+          import json, os, re, sys
+          sys.path.insert(0, "kit/tests/runner")
+          import support
           evidence = json.load(open(sys.argv[1]))
           pinned = {
               "kit": os.environ["KIT_SHA"],
@@ -214,6 +242,7 @@ jobs:
               "platform": os.environ["PLATFORM_SHA"],
           }
           mode, version = os.environ["PROOF_MODE"], os.environ["PACKAGE_VERSION"]
+          catalog_mode = os.environ["CATALOG_MODE"]
           packages = os.environ["PACKAGES"].split(",")
           assert evidence["status"] == "passed", evidence.get("error")
           assert evidence["pinned"] == pinned, evidence["pinned"]
@@ -221,10 +250,16 @@ jobs:
           assert evidence["template"]["resolved_sha"] == pinned["kit"]
           for key in ("install", "release", "coexistence", "product_ci", "cold_main_regression",
                       "main_images", "integration_without_host_environments", "platform",
-                      "deployment", "scenario"):
+                      "deployment", "scenario", "catalog"):
               assert evidence.get(key), f"missing evidence section {key}"
-          release = evidence["release"]
+          release, catalog = evidence["release"], evidence["catalog"]
           assert evidence["proof_mode"] == release["mode"] == mode, (evidence["proof_mode"], mode)
+          assert evidence["catalog_mode"] == catalog["mode"] == catalog_mode, catalog
+          # Planner, HTTP reads and both probes reached the one catalog the run recorded.
+          assert set(catalog["planner_digests"].values()) == {catalog["catalog_digest"]}, catalog
+          assert release["planner_catalog_digest"] == catalog["catalog_digest"], catalog
+          assert all(item == {"preflight_returncode": 0, "readback": True}
+                     for item in catalog["probe_agreement"].values()), catalog
           assert evidence["matrix"]["packages"] == packages, evidence["matrix"]
           assert sorted(evidence["installs"]) == sorted(packages), sorted(evidence["installs"])
           assert evidence["module"]["version"] == release["version"] == version, release
@@ -235,11 +270,33 @@ jobs:
               assert release["source_sha"] == release["tag_target"] == pinned["kit"], release
               assert release["tag_type"] == "tag" and release["wheels"], release
           else:
+              # The pinned published tag, read from the real remote before planning; the probe
+              # fetched exactly it, and no tag was created anywhere.
+              pin = support.published_release("tg-channels", version)
               assert release["published"] is True and "intended_tag" not in release, release
+              assert release["published_tag"] == {
+                  "tag": pin.tag, "type": "tag", "tag_object": pin.tag_object,
+                  "target": pin.target, "tree": pin.tree}, release
+              source = release["probe_source"]
+              assert (source["tag"], source["tag_object"], source["target"], source["tree"]) == (
+                  pin.tag, pin.tag_object, pin.target, pin.tree), source
+              assert release["remote_package_tags"][pin.tag] == pin.tag_object
+              assert release["installed_distribution"]["version"] == version, release
+          if catalog_mode == "candidate_snapshot":
+              # Prospective: the candidate's own committed catalog, not the real default branch.
+              assert catalog["prospective"] is True and catalog["commit"] == pinned["kit"], catalog
+              assert any(item["path"].endswith("/HEAD/packages/catalog.yaml")
+                         for item in catalog["http_requests"]), catalog
+          elif catalog_mode == "remote_head":
+              # The real default branch, fetched by this run before planning and after install.
+              assert catalog["prospective"] is False and "http_requests" not in catalog, catalog
+              assert re.fullmatch(r"[0-9a-f]{40}", catalog["commit"]), catalog
+              assert catalog["after_install"]["catalog_digest"] == catalog["catalog_digest"]
           scenario = evidence["scenario"]
           assert scenario["delivered_post"]["text"] and scenario["delivered_post"]["chat_id"]
           if "reminders" in packages:
               assert scenario["reminders"]["delivered"]["text"].startswith("Reminder: ")
-          print(json.dumps({"mode": mode, "packages": packages,
+          print(json.dumps({"mode": mode, "catalog_mode": catalog_mode, "packages": packages,
+                            "catalog_commit": catalog["commit"],
                             "delivered_post": scenario["delivered_post"]}, indent=2))
           EOF

@@ -2,9 +2,10 @@
 #
 # `kit add <name>` reads this file live from the kit repository's default branch, so a new
 # package release needs no kit core tag. Format and release procedure: docs/CONTRACTS.md,
-# "Package catalog and releases". A release PR bumps the package version and appends its
-# entry under `versions`; the annotated tag `packages/<name>/v<version>` is published at the
-# merge commit by a separate PO operation.
+# "Package catalog and releases". A release PR bumps the package version and pins the release in
+# packages/pending-releases.yaml; the annotated tag `packages/<name>/v<version>` is published at
+# the merge commit by a separate PO operation, and only then does a following change append the
+# entry under `versions`. Every entry here names a tag that exists.
 format_version: 1
 libraries:
   - name: textparse
@@ -364,4 +365,7 @@ packages:
       requires_core: '>=2.4,<3'
     - version: 0.1.1
       tag: packages/tg-channels/v0.1.1
+      requires_core: '>=2.4,<3'
+    - version: 0.1.2
+      tag: packages/tg-channels/v0.1.2
       requires_core: '>=2.4,<3'

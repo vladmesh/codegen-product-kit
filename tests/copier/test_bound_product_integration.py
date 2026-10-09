@@ -26,11 +26,13 @@ UNCONFIGURED_WARNING = "tg-channels platform access is not configured"
 def _candidate_channels_source(candidate: str, tmp_path: Path) -> tuple[str, list[str]]:
     """Release the candidate commit's tg-channels from a scratch catalog source.
 
-    The public catalog lists published tags only; the candidate's pending release
-    (packages/pending-releases.yaml) is appended to it in the scratch source, as the runner
-    proof's candidate_release mode does. The package tree is exported from the exact candidate
-    commit and its intended tag exists only in the scratch source. Returns that version and the
-    ``kit add`` catalog arguments.
+    The source is the candidate commit's catalog: unchanged when tg-channels is not pending (its
+    newest entry is then the candidate's published release, whose tree the candidate holds), or
+    with the pending release (packages/pending-releases.yaml) appended, as the runner proof's
+    candidate_release mode does. Either way the real default branch does not list a candidate's
+    catalog before it merges, so the package tree is exported from the exact candidate commit and
+    its tag exists only in the scratch source. Returns that version and the ``kit add`` catalog
+    arguments.
     """
     paths = ["packages/catalog.yaml", support.PENDING_RELEASES, CHANNELS_PATH]
     archive = subprocess.run(  # noqa: S603
@@ -46,16 +48,20 @@ def _candidate_channels_source(candidate: str, tmp_path: Path) -> tuple[str, lis
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as exported:
         exported.extractall(source, filter="data")
     pending = source / support.PENDING_RELEASES
-    release = support.pending_release(yaml.safe_load(pending.read_text()), "tg-channels")
+    releases = yaml.safe_load(pending.read_text())
     pending.unlink()
     published = source / "packages/catalog.yaml"
-    published.write_text(
-        yaml.safe_dump(support.fixture_catalog(yaml.safe_load(published.read_text()), release))
-    )
+    release = None
+    if any(item["package"] == "tg-channels" for item in releases["releases"]):
+        release = support.pending_release(releases, "tg-channels")
+        published.write_text(
+            yaml.safe_dump(support.fixture_catalog(yaml.safe_load(published.read_text()), release))
+        )
     catalog = parse_catalog(published.read_text(), "candidate catalog")
     newest = catalog.get("tg-channels").newest()
     manifest = source / CHANNELS_PATH / "codegen_kit_tg_channels/package.yaml"
-    assert yaml.safe_load(manifest.read_text())["version"] == newest.version == release["version"]
+    assert yaml.safe_load(manifest.read_text())["version"] == newest.version
+    assert release is None or release["version"] == newest.version
     _commit(source, f"Candidate tg-channels {newest.version} at {candidate}")
     _tag(source, newest.tag)
     return newest.version, ["--catalog-source", str(source)]

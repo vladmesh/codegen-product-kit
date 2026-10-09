@@ -12,13 +12,18 @@ Run with the orchestrator's environment, whose codegen-kit-tooling is the kit ca
     orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py --kit-dir kit \
         --kit-sha SHA --orchestrator-dir orchestrator --orchestrator-sha SHA \
         --platform-dir platform --platform-sha SHA --output-dir OUT \
-        --proof-mode candidate_release --package-version 0.1.2 --packages tg-channels
+        --proof-mode published_release --catalog-mode remote_head --package-version 0.1.2 \
+        --packages tg-channels
 
-`--proof-mode candidate_release` installs the pending tg-channels release of the candidate
-through an isolated fixture repository and catalog snapshot (the release is not published yet);
-`published_release` installs from the live GitHub catalog and tag with no fixture. The mode is
-always explicit and never falls back. `--packages reminders,tg-channels` installs the published
-reminders first and proves both modules side by side.
+`--proof-mode published_release` installs the published tg-channels tag, read from the real
+remote at its pinned object first. `--catalog-mode remote_head` plans and installs from the real
+default branch's catalog with no fixture; `candidate_snapshot` serves the candidate commit's own
+committed catalog as HEAD of an isolated snapshot holding the real remote's package tags by
+object id (a prospective catalog, for a pull request). `--proof-mode candidate_release` with
+`--catalog-mode pending_fixture` installs a pending release of the candidate through an isolated
+fixture repository. Both modes are always explicit and never fall back.
+`--packages reminders,tg-channels` installs the published reminders first and proves both
+modules side by side.
 """
 
 from __future__ import annotations
@@ -57,6 +62,10 @@ PUBLISHED_RAW_SOURCE = "https://raw.githubusercontent.com/vladmesh/codegen-produ
 #: The URL path the catalog HTTP fixture serves the isolated repository under.
 FIXTURE_RAW_PATH = "/vladmesh/codegen-product-kit"
 PACKAGE = "tg-channels"
+CATALOG_FILE = "packages/catalog.yaml"
+#: How long the main proof waits for raw.githubusercontent.com to serve the catalog bytes git
+#: reads at the real HEAD (its cache lags a push by minutes); the source never changes.
+RAW_CATALOG_TIMEOUT = 900
 #: Other real modules a coexistence leg may install before the target package.
 COMPANIONS = ("reminders",)
 #: Product-scope values the scenario sets through `/settings/set` for each binding setting.
@@ -114,6 +123,25 @@ print(json.dumps({
     },
 }, sort_keys=True))
 """
+_SNAPSHOT_TRANSPORT = (
+    f"reached through a process-scoped HOME .gitconfig insteadOf {KIT_REPOSITORY} during the "
+    "install executor only, and a loopback HTTP fixture serving its raw files to the planner"
+)
+RELEASE_TRANSPORTS = {
+    "remote_head": (
+        "none: the real catalog at the kit's default branch and the published tags, "
+        "no fixture and no URL rewrite"
+    ),
+    "candidate_snapshot": (
+        "an isolated snapshot repository whose HEAD is the exact candidate with its committed "
+        "catalog unchanged (prospective) and whose package tags are fetched from the real "
+        f"remote by object id, {_SNAPSHOT_TRANSPORT}"
+    ),
+    "pending_fixture": (
+        "an isolated fixture repository (exact candidate, local intended tag, fixture catalog "
+        f"commit), {_SNAPSHOT_TRANSPORT}"
+    ),
+}
 TOOLING_PROVENANCE = (
     "from importlib.metadata import distribution; "
     "print(distribution('codegen-kit-tooling').read_text('direct_url.json'))"
@@ -125,7 +153,9 @@ class ProofError(RuntimeError):
 
 
 class CatalogFixture:
-    """Loopback raw-file server over the isolated release repository (candidate_release).
+    """Loopback raw-file server over an isolated catalog snapshot repository.
+
+    Used by the `candidate_snapshot` and `pending_fixture` catalog modes.
 
     It answers `/<ref>/<path>` like raw.githubusercontent.com does for the kit, from the same
     repository the install executor's git fetches reach, so the planner's KitCatalogReader and
@@ -245,9 +275,12 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         self.counter = 0
         self.sha = args.kit_sha
         self.mode = args.proof_mode
+        self.catalog_mode = args.catalog_mode
         self.packages = args.packages
-        #: Process-scoped HOME of the install executor in candidate_release mode.
+        #: Process-scoped HOME of the install executor when a snapshot repository is served.
         self.release_home: Path | None = None
+        #: Package tags as the real remote lists them ({name: tag object}), published_release.
+        self.remote_tags: dict[str, str] = {}
         self.catalog_source = PUBLISHED_RAW_SOURCE
         self.catalog_fixture: CatalogFixture | None = None
         self.evidence: dict[str, Any] = {
@@ -255,6 +288,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             "status": "running",
             "started_at": datetime.now(UTC).isoformat(),
             "proof_mode": self.mode,
+            "catalog_mode": self.catalog_mode,
             "pinned": {
                 "kit": args.kit_sha,
                 "orchestrator": args.orchestrator_sha,
@@ -273,14 +307,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
                 "reader": "tests/runner/fixtures/reader.py replaces only tg-reader",
                 "telegram": "tests/runner/fixtures/telegram_api.py replaces api.telegram.org",
                 "registry": f"{REGISTRY_IMAGE} on the runner loopback, removed afterwards",
-                "release_transport": (
-                    "none: the live catalog at the kit's default branch and its published tags"
-                    if self.mode == "published_release"
-                    else "an isolated fixture repository (exact candidate, local intended tag, "
-                    "fixture catalog commit) reached through a process-scoped HOME .gitconfig "
-                    f"insteadOf {KIT_REPOSITORY} during the install executor only, and a "
-                    "loopback HTTP fixture serving its raw files to the planner"
-                ),
+                "release_transport": RELEASE_TRANSPORTS[self.catalog_mode],
             },
             "resources": [],
             "commands": [],
@@ -535,12 +562,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             cwd=root,
             label="fixture tags",
         ).split()
-        released = {
-            item["tag"]
-            for section in ("packages", "libraries", "extensions")
-            for component in published.get(section) or []
-            for item in component["versions"]
-        }
+        released = support.released_tags(published)
         if missing := sorted(released - set(tags)):
             raise ProofError(f"the kit checkout lacks published package tags {missing}")
         if rev("refs/heads/main^") != self.sha:
@@ -570,8 +592,25 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         }
         if self.evidence["release"]["tag_target"] != self.sha:
             raise ProofError("the fixture tag does not point at the exact candidate")
-        # Process-scoped git configuration for the install executor: its fetches of the kit
-        # repository (catalog at HEAD, package tags) reach the fixture. URLs stay unchanged.
+        self.evidence["catalog"] = {
+            "mode": self.catalog_mode,
+            "prospective": True,
+            "note": "the candidate's catalog plus the pending entry, in a throwaway fixture",
+            "ref": "HEAD",
+            "commit": rev("refs/heads/main"),
+            "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "catalog_digest": support.catalog_digest(catalog_bytes.decode()),
+        }
+        self.serve_snapshot(root, bare, tags)
+
+    def serve_snapshot(self, root: Path, bare: Path, tags: list[str]) -> None:
+        """Make the snapshot repository the kit source of the planner and of the executor.
+
+        The planner reads raw files from a loopback HTTP fixture over the repository; the
+        executor's git fetches of the kit repository (catalog at HEAD, package tags) reach it
+        through a process-scoped HOME .gitconfig insteadOf, set only while `run_install` runs.
+        URLs stay unchanged and nothing else (Copier, the platform checkout) sees the rewrite.
+        """
         home = root / "home"
         home.mkdir()
         real_home = Path(os.environ["HOME"])
@@ -587,6 +626,221 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         )
         self.catalog_fixture.start()
         self.catalog_source = self.catalog_fixture.source
+
+    def published_tags(self) -> Path:
+        """Read the published target release and every package tag from the real remote.
+
+        A bare repository under the work directory fetches `refs/tags/packages/*` from GitHub;
+        every copied tag must be the object id `ls-remote` lists, and the target tag must be
+        the pinned annotated tag object, peeled commit and package tree. Nothing is created.
+        """
+        pin = support.published_release(PACKAGE, self.args.package_version)
+        root = self.work / "published"
+        root.mkdir()
+        bare = root / "codegen-product-kit.git"
+        self.git("init", "--bare", "-q", str(bare), cwd=root, label="published tags repository")
+        remote = {
+            ref: value
+            for ref, value in support.ls_remote_refs(
+                self.git("ls-remote", "--tags", KIT_REPOSITORY, cwd=root, label="real remote tags")
+            ).items()
+            if ref.startswith("refs/tags/packages/")
+        }
+        published = ["--git-dir", str(bare)]
+        self.git(
+            *published,
+            "fetch",
+            "-q",
+            "--no-tags",
+            KIT_REPOSITORY,
+            "+refs/tags/packages/*:refs/tags/packages/*",
+            cwd=root,
+            label="fetch package tags from the real remote",
+        )
+
+        def rev(expression: str) -> str:
+            return self.git(
+                *published, "rev-parse", expression, cwd=root, label="published rev-parse"
+            )
+
+        names = self.git(
+            *published,
+            "for-each-ref",
+            "--format=%(refname:strip=2)",
+            "refs/tags",
+            cwd=root,
+            label="copied package tags",
+        ).split()
+        copied = {name: rev(f"refs/tags/{name}") for name in names}
+        listed = {ref.removeprefix("refs/tags/") for ref in remote if not ref.endswith("^{}")}
+        if set(copied) != listed:
+            raise ProofError(f"copied tags {sorted(copied)} are not the remote's {sorted(listed)}")
+        try:
+            support.verify_copied_tags(remote, copied)
+            path = support.catalog_package(
+                yaml.safe_load((self.kit / CATALOG_FILE).read_text()), PACKAGE
+            )["path"]
+            ref = f"refs/tags/{pin.tag}"
+            fetched = {
+                "type": self.git(
+                    *published, "cat-file", "-t", ref, cwd=root, label="published tag type"
+                )
+                if pin.tag in copied
+                else None,
+                "tag_object": copied.get(pin.tag),
+                "target": rev(f"{ref}^{{commit}}") if pin.tag in copied else None,
+                "tree": rev(f"{ref}^{{commit}}:{path}") if pin.tag in copied else None,
+            }
+            verified = support.verify_published_tag(pin, remote, fetched)
+        except ValueError as error:
+            raise ProofError(str(error)) from error
+        self.remote_tags = copied
+        self.evidence["release"] = {
+            "mode": self.mode,
+            "published": True,
+            "package": PACKAGE,
+            "version": self.args.package_version,
+            "tag": pin.tag,
+            "remote": KIT_REPOSITORY,
+            "published_tag": verified,
+            "tag_object": pin.tag_object,
+            "tag_target": pin.target,
+            "package_tree": pin.tree,
+            "remote_package_tags": copied,
+        }
+        return bare
+
+    def candidate_snapshot(self, bare: Path) -> None:
+        """Serve the candidate's own committed catalog as the snapshot HEAD (prospective).
+
+        The real remote's default branch does not list a release before this change merges, so
+        a pull request proves the catalog it would publish: the exact candidate commit becomes
+        `refs/heads/main` of the published-tags repository, unchanged; no entry is added, no
+        tag is created and the package source is the published tag's.
+        """
+        root = bare.parent
+        snapshot = ["--git-dir", str(bare)]
+        self.git(
+            "push",
+            "-q",
+            str(bare),
+            f"{self.sha}:refs/heads/main",
+            cwd=self.kit,
+            label="snapshot: exact candidate as the catalog HEAD",
+        )
+        self.git(*snapshot, "symbolic-ref", "HEAD", "refs/heads/main", cwd=root, label="HEAD")
+        head = self.git(*snapshot, "rev-parse", "HEAD", cwd=root, label="snapshot HEAD")
+        blob = self.git(
+            *snapshot, "rev-parse", f"HEAD:{CATALOG_FILE}", cwd=root, label="snapshot catalog"
+        )
+        catalog_bytes = (self.kit / CATALOG_FILE).read_bytes()
+        checkout_blob = self.git(
+            "hash-object", CATALOG_FILE, cwd=self.kit, label="candidate catalog blob"
+        )
+        if head != self.sha or blob != checkout_blob:
+            raise ProofError("the snapshot HEAD is not the candidate's committed catalog")
+        catalog = yaml.safe_load(catalog_bytes)
+        if missing := sorted(support.released_tags(catalog) - set(self.remote_tags)):
+            raise ProofError(f"the candidate catalog names tags the real remote lacks: {missing}")
+        self.evidence["catalog"] = {
+            "mode": self.catalog_mode,
+            "prospective": True,
+            "note": (
+                "the candidate's committed catalog as it would be published by merging; not "
+                "the real default branch, which this run does not attest"
+            ),
+            "ref": "HEAD",
+            "head": "refs/heads/main",
+            "commit": head,
+            "catalog_blob": blob,
+            "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "catalog_digest": support.catalog_digest(catalog_bytes.decode()),
+        }
+        self.serve_snapshot(root, bare, sorted(self.remote_tags))
+
+    def remote_head_catalog(self, label: str) -> dict[str, str]:
+        """The catalog at the real remote's HEAD: commit, raw bytes digest and planner digest."""
+        target = self.work / f"remote-head-{label}"
+        self.git(
+            "clone",
+            "-q",
+            "--depth=1",
+            "--no-tags",
+            KIT_REPOSITORY,
+            str(target),
+            cwd=self.work,
+            label=f"real remote HEAD ({label})",
+        )
+        catalog_bytes = (target / CATALOG_FILE).read_bytes()
+        return {
+            "commit": self.git("rev-parse", "HEAD", cwd=target, label=f"real HEAD ({label})"),
+            "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "catalog_digest": support.catalog_digest(catalog_bytes.decode()),
+            "read_at": datetime.now(UTC).isoformat(),
+        }
+
+    def remote_head(self) -> None:
+        """Record the real HEAD catalog the planner and the probe must both read (main proof).
+
+        No fixture and no rewrite: the planner reads raw.githubusercontent.com at `HEAD` and the
+        executor's probe fetches `HEAD` itself. The runner waits only until the raw service
+        serves the bytes git reads at HEAD; it never switches to another catalog.
+        """
+        head = self.remote_head_catalog("before")
+        url = f"{PUBLISHED_RAW_SOURCE}/HEAD/{CATALOG_FILE}"
+
+        def served() -> bool:
+            prepared = Request(url, headers={"Cache-Control": "no-cache"})  # noqa: S310
+            with urlopen(prepared, timeout=15) as response:  # noqa: S310  # the real raw source
+                return hashlib.sha256(response.read()).hexdigest() == head["catalog_sha256"]
+
+        wait_until("the raw catalog at HEAD to match git HEAD", served, RAW_CATALOG_TIMEOUT, 15)
+        self.evidence["catalog"] = {
+            "mode": self.catalog_mode,
+            "prospective": False,
+            "note": "the real catalog at the kit's default branch, fetched by this run",
+            "ref": "HEAD",
+            "source": KIT_REPOSITORY,
+            "raw_source": url,
+        } | head
+
+    def catalog_agreement(self, payloads: dict[str, dict]) -> None:
+        """Every planner payload, HTTP read and remote re-read reached the same catalog.
+
+        The probes compare the catalog they fetch themselves with the payload digest (their
+        `catalog_changed` refusal), so a passed preflight and readback is their agreement.
+        """
+        catalog = self.evidence["catalog"]
+        digests = {name: payload["catalog_digest"] for name, payload in payloads.items()}
+        catalog["planner_digests"] = digests
+        if set(digests.values()) != {catalog["catalog_digest"]}:
+            raise ProofError(f"planner catalog digests {digests} are not the snapshot's")
+        catalog["probe_agreement"] = {
+            name: {
+                "preflight_returncode": (install.get("preflight") or {}).get("returncode"),
+                "readback": bool(install.get("readback")),
+            }
+            for name, install in self.evidence["installs"].items()
+        }
+        if any(
+            item != {"preflight_returncode": 0, "readback": True}
+            for item in catalog["probe_agreement"].values()
+        ):
+            raise ProofError(f"a probe did not accept the catalog: {catalog['probe_agreement']}")
+        if self.catalog_fixture is not None:
+            requests = list(self.catalog_fixture.requests)
+            catalog["http_requests"] = requests
+            try:
+                support.verify_snapshot_reads(
+                    requests, {f"/HEAD/{CATALOG_FILE}": catalog["catalog_sha256"]}
+                )
+            except ValueError as error:
+                raise ProofError(str(error)) from error
+        if self.catalog_mode == "remote_head":
+            after = self.remote_head_catalog("after")
+            catalog["after_install"] = after
+            if after["catalog_digest"] != catalog["catalog_digest"]:
+                raise ProofError(f"the real HEAD catalog changed during the proof: {after}")
 
     def select_payload(self, name: str) -> dict:
         destination = self.work / f"install-payload-{name}.json"
@@ -605,7 +859,11 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         if name == PACKAGE and version != self.args.package_version:
             raise ProofError(
                 f"the planner selected {PACKAGE} {version}, expected "
-                f"{self.args.package_version} ({self.mode})"
+                f"{self.args.package_version} ({self.mode}, {self.catalog_mode})"
+            )
+        if payload["catalog_digest"] != self.evidence["catalog"]["catalog_digest"]:
+            raise ProofError(
+                f"the planner read another catalog than the {self.catalog_mode} snapshot"
             )
         self.evidence.setdefault("install_payloads", {})[name] = payload
         if name == PACKAGE:
@@ -715,6 +973,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
     def release_evidence(self, product: Path, payload: dict, readback: dict) -> None:
         """Bind the installed target release to its source: fixture tag or published tag."""
         source = next(item for item in readback["component_sources"] if item["name"] == PACKAGE)
+        installed = readback["distributions"][PACKAGE]
         wheels = {
             name: hashlib.sha256((product / name).read_bytes()).hexdigest()
             for name in self.git(
@@ -724,19 +983,30 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         version = payload["package"]["version"]
         if not any(f"-{version}-" in name and "tg_channels" in name for name in wheels):
             raise ProofError(f"no committed {PACKAGE} {version} wheel: {sorted(wheels)}")
-        release = self.evidence.setdefault(
-            "release",
-            {
-                "mode": self.mode,
-                "published": True,
-                "package": PACKAGE,
-                "version": version,
-                "tag": payload["package"]["tag"],
-                "tag_object": source["tag_object"],
-                "tag_target": source["target"],
-                "package_tree": source["tree"],
-            },
-        )
+        if installed["version"] != version:
+            raise ProofError(f"the backend has {PACKAGE} {installed['version']}, not {version}")
+        release = self.evidence["release"]
+        if self.mode == "published_release":
+            # The probe fetched the release itself; it must be the tag read before planning, and
+            # every other installed component the real remote's tag object.
+            if payload["package"]["tag"] != release["tag"] or {
+                key: source[key] for key in ("tag", "tag_object", "target", "tree")
+            } != {
+                "tag": release["tag"],
+                "tag_object": release["tag_object"],
+                "target": release["tag_target"],
+                "tree": release["package_tree"],
+            }:
+                raise ProofError(f"the probe read another source than the published tag: {source}")
+            components = [
+                item for module in self.evidence["modules"].values() for item in module["sources"]
+            ]
+            if foreign := [
+                item
+                for item in components
+                if self.remote_tags.get(item["tag"]) != item["tag_object"]
+            ]:
+                raise ProofError(f"installed sources are not the real remote's tags: {foreign}")
         if self.mode == "candidate_release" and (
             source["tag"] != release["intended_tag"]
             or source["tag_object"] != release["tag_object"]
@@ -747,10 +1017,9 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         release |= {
             "planner_catalog_digest": payload["catalog_digest"],
             "probe_source": source,
+            "installed_distribution": installed,
             "wheels": wheels,
         }
-        if self.catalog_fixture is not None:
-            release["http_requests"] = list(self.catalog_fixture.requests)
 
     def coexistence(self, product: Path, install: Any) -> dict:
         """Settings, jobs, events and bindings of every installed module, read by the product."""
@@ -1477,9 +1746,15 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         key, invalid_key = support.product_key(), support.product_key()
         self.secrets.update((key, invalid_key))
         self.revisions()
-        if self.mode == "candidate_release":
+        if self.catalog_mode == "pending_fixture":
             self.candidate_release()
+        else:
+            published = self.published_tags()
+            if self.catalog_mode == "candidate_snapshot":
+                self.candidate_snapshot(published)
         product = self.scaffold(install)
+        if self.catalog_mode == "remote_head":
+            self.remote_head()
         payloads, results = {}, {}
         # The executor installs each module on the same story branch, companions first.
         for name in self.packages:
@@ -1509,6 +1784,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         self.evidence["module"] = self.evidence["modules"][PACKAGE]
         self.evidence["revisions"]["product_tooling"] = readback["tooling"]
         self.release_evidence(product, payloads[PACKAGE], readback)
+        self.catalog_agreement(payloads)
         self.coexistence(product, install)
         self.product_ci(result.head_sha)
         self.cold_main_regression()
@@ -1548,8 +1824,16 @@ def main() -> int:
         "--proof-mode",
         choices=support.PROOF_MODES,
         required=True,
-        help="candidate_release: the pending release through the isolated fixture; "
-        "published_release: the live catalog and tag, no fixture and no fallback",
+        help="published_release: the pinned published tag, read from the real remote first; "
+        "candidate_release: a pending release of the candidate through the isolated fixture",
+    )
+    parser.add_argument(
+        "--catalog-mode",
+        choices=support.CATALOG_MODES,
+        required=True,
+        help="remote_head: the real default branch's catalog, no fixture; candidate_snapshot: "
+        "the candidate's committed catalog as an isolated prospective HEAD; pending_fixture: "
+        "the candidate catalog plus its pending entry (candidate_release only)",
     )
     parser.add_argument("--package-version", required=True, help=f"expected {PACKAGE} version")
     parser.add_argument(
@@ -1558,6 +1842,10 @@ def main() -> int:
         help=f"install order, ending with {PACKAGE}; companions: {', '.join(COMPANIONS)}",
     )
     args = parser.parse_args()
+    try:
+        support.check_modes(args.proof_mode, args.catalog_mode)
+    except ValueError as error:
+        parser.error(str(error))
     for name in ("kit", "orchestrator", "platform"):
         if not re.fullmatch(r"[0-9a-f]{40}", getattr(args, f"{name}_sha")):
             parser.error(f"--{name}-sha must be a full commit SHA")

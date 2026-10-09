@@ -1,9 +1,22 @@
-# tg-channels 0.1.2 preparation
+# tg-channels 0.1.2
 
 Prepared 2026-10-09. A package-only patch release; no kit core, tooling, template, orchestrator or
-`CORE_VERSION` change. `requires_core` stays `>=2.4,<3`. Pending, not published: the public
-`packages/catalog.yaml` still lists 0.1.1 as newest and `packages/tg-channels/v0.1.2` does not
-exist. The release is pinned in `packages/pending-releases.yaml`.
+`CORE_VERSION` change. `requires_core` stays `>=2.4,<3`.
+
+Status:
+
+- **Tag published** 2026-10-09 (18:09:39 UTC), before any catalog entry: the annotated tag
+  `packages/tg-channels/v0.1.2`, object `4f5918dba1a3afc7ad9012715cb8f83c33a8e1bc`, at the merge
+  commit `29f481f213544b0b7a5055451d5b4e55a6249b35`, package tree
+  `676ee7061c6b08d17923f7c1fad3742798c9870f`. The 0.1.0 and 0.1.1 tags are unchanged.
+- **Catalog activation** is the change that appends the 0.1.2 entry to `packages/catalog.yaml`,
+  removes the pending entry from `packages/pending-releases.yaml` and pins the tag above in the
+  runner proof. Until it is merged, `kit add tg-channels` keeps selecting 0.1.1.
+- **Proof of the published path.** The activation's pull request proves the published tag against
+  its own catalog served as an isolated, prospective `HEAD` (`catalog_mode=candidate_snapshot`).
+  The published path itself (the real default branch's catalog and tag, no fixture) is proven
+  only by the Runner Proof matrix of the push to `main` at the merge commit
+  (`catalog_mode=remote_head`); see [RUNNER_PROOF.md](../RUNNER_PROOF.md).
 
 ## Defect
 
@@ -39,8 +52,8 @@ not run it. No job name is written in the test, so the 0.1.1 consumer fails it.
 
 ## Prepublication proof
 
-Before the tag exists the runner proof runs in `proof_mode=candidate_release`
-([RUNNER_PROOF.md](../RUNNER_PROOF.md)): the orchestrator's real planner and executor install
+Before the tag existed the runner proof ran in `proof_mode=candidate_release`
+([RUNNER_PROOF.md](../RUNNER_PROOF.md)): the orchestrator's real planner and executor installed
 0.1.2 from an isolated fixture repository holding the exact candidate, a fixture catalog commit
 with only the pending entry appended and the intended tag created locally at the candidate. The
 release matrix covers a fresh backend,tg_bot product with tg-channels and a product with the
@@ -48,10 +61,10 @@ published reminders 0.5.0 (and textparse 0.1.0) installed first, then tg-channel
 product's CI, main image path, registry, real auth and Caddy and timer-driven delivery, and the
 second leg also delivers a reminder through the companion module.
 
-This proves the prepared package source, not a published release and not the sprint's delivery
-definition of done. The published 0.1.1 stays broken until 0.1.2 is published and selected.
+That proved the prepared package source (candidate matrix at `1d413dd`, then main at `29f481f`),
+not a published release.
 
-## Publication (separate operation)
+## Publication (separate operation, done)
 
 From reviewed, merged main with a green Runner Proof matrix on that merge commit:
 
@@ -64,8 +77,15 @@ From reviewed, merged main with a green Runner Proof matrix on that merge commit
    move or recreate `packages/tg-channels/v0.1.0` or `v0.1.1`; no kit core tag.
 4. A following code change appends the pending `catalog_entry` to the tg-channels `versions` in
    `packages/catalog.yaml`, removes the pending entry, sets the runner default to
-   `proof_mode=published_release` with `package_version=0.1.2`, and proves the published path on
-   its PR and on main. Until that merge, `kit add tg-channels` keeps selecting 0.1.1.
+   `proof_mode=published_release` with `package_version=0.1.2`, and proves the published path:
+   prospectively on its PR (`candidate_snapshot`), on the real catalog on main (`remote_head`).
 
-Existing products with 0.1.1 upgrade afterwards with `kit add tg-channels`, then rerun their
-checks and `make test-integration`.
+Steps 1-3 were done with `M` = `29f481f213544b0b7a5055451d5b4e55a6249b35`; step 4 is the catalog
+activation above.
+
+## Scope
+
+New products only: after activation a new product's `kit add tg-channels` selects 0.1.2, and the
+runner proof covers a fresh product and one with reminders installed first. An upgrade of an
+existing product that installed 0.1.0 or 0.1.1 is neither implemented nor proven by this release,
+and this note gives no upgrade procedure for one.

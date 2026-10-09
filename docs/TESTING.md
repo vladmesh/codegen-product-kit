@@ -47,10 +47,14 @@ Backend projects additionally expose `make generate-from-spec` and `make test-in
 `.github/workflows/test-template.yml` exercises Copier generation and generated-project behavior.
 `.github/workflows/runner-proof.yml` runs the fresh installed-product runner proof on every PR and
 main push, as a release matrix (`fresh`, and `coexistence` with reminders) in an explicit proof
-mode; see [RUNNER_PROOF.md](RUNNER_PROOF.md) for its stages, fixtures and evidence contract.
+and catalog mode: the published tg-channels against the candidate's catalog snapshot on a pull
+request and against the real default branch's catalog on main; see
+[RUNNER_PROOF.md](RUNNER_PROOF.md) for its stages, fixtures and evidence contract.
 `tests/tooling/test_package_catalog.py` checks each package's newest catalog release against its
-annotated tag (Framework CI fetches tags) and the package source at HEAD against that release or
-its entry in `packages/pending-releases.yaml`. `tests/tooling/test_package_timers.py` feeds the
+annotated tag (Framework CI fetches tags), the package source at HEAD against that release or
+its entry in `packages/pending-releases.yaml`, and each published release the runner pins
+(`support.PUBLISHED_RELEASES`) against its catalog entry, its tag object, peeled commit and
+package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
 Keep required job names stable unless branch protection is updated at the same time.
@@ -62,7 +66,10 @@ sync without an interpreter. It checks that setup, both CI jobs and every Docker
 three product shapes use the command, that no other `uv sync` recipe remains, and executes the
 rendered main-job preparation step. `tests/unit/test_runner_proof.py` covers the runner's workflow
 step execution rules, evidence parsers, key format, the fixture reader against the vendored
-tg-reader OpenAPI contract, the fake Bot API and the workflow's trust and evidence guards. The
+tg-reader OpenAPI contract, the fake Bot API, the workflow's trust, mode and evidence guards, the
+proof/catalog mode pairing, the published tag check against the real remote's listing and its
+fetched copy (missing tag, other object, target, type or tree), copied tag object ids, the catalog
+digest, the snapshot HTTP read check and the pending-release helpers on a sample entry. The
 real runner, its Docker images, registry, platform and orchestrator executor run only in CI.
 
 `tests/copier/test_deploy_transport.py` belongs to the existing `test-pytest` fast Copier leg.
