@@ -10,17 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Runner proof (`.github/workflows/runner-proof.yml`, required on every PR and main push): a fresh
-  Copier backend,tg_bot product from the exact candidate is installed with the published
-  tg-channels by the orchestrator's real `run_install`, passes its own CI job, builds its runtime
+  Copier backend,tg_bot product from the exact candidate is installed with tg-channels by the
+  orchestrator's real `run_install`, passes its own CI job, builds its runtime
   images with its main job's preparation and Dockerfiles, publishes them to an isolated CI
   registry and runs them by digest against the pinned platform's real auth and Caddy. Only the
   reader (contract fixture) and the Telegram Bot API transport are replaced; an unknown key is
   refused at ingress before the registered key delivers the fixture post to the chat. SHA-bound
   evidence is uploaded; fork or keyless runs fail. Other repositories call it with exact pins
   through `workflow_call`. See [the runner proof](docs/RUNNER_PROOF.md).
+- Runner proof release matrix and explicit proof modes: a `coexistence` leg installs the published
+  reminders first and then tg-channels, checks their settings, jobs, events and bindings side by
+  side and delivers both a channel post and a reminder. `proof_mode=candidate_release` installs a
+  pending package release through an isolated fixture repository (exact candidate, fixture
+  catalog commit, local intended tag) and a loopback catalog HTTP fixture, with the executor,
+  probe and kit unchanged; `published_release` uses the live catalog and tag. The mode and
+  expected version are always explicit and recorded; there is no fallback.
+- `packages/pending-releases.yaml` pins package releases prepared in source but not yet tagged;
+  production readers ignore it and the public catalog lists published tags only. The newest
+  catalog release of every package is now checked against its annotated tag, and the source at
+  HEAD against that release or its pending entry.
 
 ### Fixed
 
+- tg-channels 0.1.2 (package release, prepared, pending publication; not in the catalog): the
+  timer consumer runs on `tg_channels.tick`, the job name the core generates and fires for the
+  package, instead of `tg-channels.tick`, which the core never fires; 0.1.0 and 0.1.1 therefore
+  never polled the reader or delivered a post. No core naming, event or template change. A
+  regression feeds the name from the generated `JOB_TIMERS` of the shipped manifest to the
+  package's consumer. See [tg-channels 0.1.2](docs/releases/tg-channels-0.1.2.md).
 - Generated products prepare Python environments through one command,
   `sh scripts/prepare-env.sh [--runtime] ENV...`, used by `make setup`, PR CI, the main image job
   and every Dockerfile stage with the environments that stage needs. The main image job of a bound

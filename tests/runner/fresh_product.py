@@ -11,7 +11,14 @@ Run with the orchestrator's environment, whose codegen-kit-tooling is the kit ca
 
     orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py --kit-dir kit \
         --kit-sha SHA --orchestrator-dir orchestrator --orchestrator-sha SHA \
-        --platform-dir platform --platform-sha SHA --output-dir OUT
+        --platform-dir platform --platform-sha SHA --output-dir OUT \
+        --proof-mode candidate_release --package-version 0.1.2 --packages tg-channels
+
+`--proof-mode candidate_release` installs the pending tg-channels release of the candidate
+through an isolated fixture repository and catalog snapshot (the release is not published yet);
+`published_release` installs from the live GitHub catalog and tag with no fixture. The mode is
+always explicit and never falls back. `--packages reminders,tg-channels` installs the published
+reminders first and proves both modules side by side.
 """
 
 from __future__ import annotations
@@ -20,6 +27,8 @@ import argparse
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
+import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -31,6 +40,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -42,7 +52,15 @@ import yaml
 
 TEMPLATE_SOURCE = "gh:vladmesh/codegen-product-kit"
 KIT_REPOSITORY = "https://github.com/vladmesh/codegen-product-kit.git"
+#: The raw-file base the orchestrator's planner reads the published catalog from.
+PUBLISHED_RAW_SOURCE = "https://raw.githubusercontent.com/vladmesh/codegen-product-kit"
+#: The URL path the catalog HTTP fixture serves the isolated repository under.
+FIXTURE_RAW_PATH = "/vladmesh/codegen-product-kit"
 PACKAGE = "tg-channels"
+#: Other real modules a coexistence leg may install before the target package.
+COMPANIONS = ("reminders",)
+#: Product-scope values the scenario sets through `/settings/set` for each binding setting.
+BINDING_SETTING_VALUES = {"language": "en", "timezone": "UTC"}
 PROJECT_NAME = "runner-proof"
 REPOSITORY_ID = "runner-product"
 #: The executor requires an owned GitHub URL; `remote get-url origin` answers it while the
@@ -55,7 +73,6 @@ REGISTRY_IMAGE = "registry:2.8.3"
 PLATFORM_IMAGE = "ghcr.io/vladmesh/codegen-platform-services/auth"
 FIXTURE_CHANNEL = "runner_fixture"
 TELEGRAM_USER = 424242001
-LANGUAGE = "en"
 NOT_CONFIGURED = "Service is not configured."
 CHANNEL_ADDED = f"Channel added: @{FIXTURE_CHANNEL}"
 DELIVERY_TIMEOUT = 300
@@ -65,11 +82,37 @@ from pathlib import Path
 from src.kit_catalog import KitCatalogReader, catalog_url
 from src.catalog_install import plan_install_payload
 async def main():
-    source = 'https://raw.githubusercontent.com/vladmesh/codegen-product-kit'
+    source = sys.argv[3]
     snapshot = await KitCatalogReader(catalog_url(source, 'HEAD'), component_source=source).read()
     payload = plan_install_payload(snapshot, sys.argv[2], '3.12.0')
     Path(sys.argv[1]).write_text(payload.model_dump_json())
 asyncio.run(main())
+"""
+#: Read with the product's own tooling: what the installed modules declare side by side.
+COEXISTENCE = """
+import json
+from pathlib import Path
+from framework.binding_product import binding_files, binding_settings
+from framework.spec.loader import load_specs
+root = Path.cwd()
+specs = load_specs(root)
+bindings = binding_files(root)
+print(json.dumps({
+    'packages': {item.name: item.manifest.version for item in specs.packages},
+    'publishes': {item.name: sorted(item.manifest.events.publishes) for item in specs.packages},
+    'events': sorted(item.name for item in specs.events.events),
+    'job_timers': specs.job_timers,
+    'job_owners': specs.job_schema_sources,
+    'settings': specs.settings_schema_sources,
+    'bindings': {
+        item.package: {
+            'file': name,
+            'commands': sorted(command.command for command in item.commands),
+            'settings': sorted(binding_settings(item)),
+        }
+        for name, item in sorted(bindings.items())
+    },
+}, sort_keys=True))
 """
 TOOLING_PROVENANCE = (
     "from importlib.metadata import distribution; "
@@ -79,6 +122,69 @@ TOOLING_PROVENANCE = (
 
 class ProofError(RuntimeError):
     pass
+
+
+class CatalogFixture:
+    """Loopback raw-file server over the isolated release repository (candidate_release).
+
+    It answers `/<ref>/<path>` like raw.githubusercontent.com does for the kit, from the same
+    repository the install executor's git fetches reach, so the planner's KitCatalogReader and
+    the executor's probe read identical bytes. Every request is recorded with its body digest.
+    """
+
+    def __init__(self, repository: Path, refs: dict[str, str]) -> None:
+        self.repository = repository
+        self.refs = refs
+        self.requests: list[dict] = []
+        fixture = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                status, body = fixture.serve(self.path)
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    @property
+    def source(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_address[1]}{FIXTURE_RAW_PATH}"
+
+    def serve(self, path: str) -> tuple[int, bytes]:
+        status, body = 404, b""
+        found = None
+        if path.startswith(f"{FIXTURE_RAW_PATH}/"):
+            found = support.fixture_resource(path.removeprefix(FIXTURE_RAW_PATH), self.refs)
+        if found is not None:
+            ref, name = found
+            shown = subprocess.run(  # noqa: S603
+                ["git", "--git-dir", str(self.repository), "show", f"{self.refs[ref]}:{name}"],  # noqa: S607
+                capture_output=True,
+                check=False,
+            )
+            if shown.returncode == 0:
+                status, body = 200, shown.stdout
+        self.requests.append(
+            {
+                "path": path,
+                "status": status,
+                "sha256": hashlib.sha256(body).hexdigest() if status == 200 else None,
+            }
+        )
+        return status, body
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
 
 
 def slug(text: str) -> str:
@@ -138,14 +244,25 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         self.cleanups: list[tuple[str, list[str], dict[str, str] | None]] = []
         self.counter = 0
         self.sha = args.kit_sha
+        self.mode = args.proof_mode
+        self.packages = args.packages
+        #: Process-scoped HOME of the install executor in candidate_release mode.
+        self.release_home: Path | None = None
+        self.catalog_source = PUBLISHED_RAW_SOURCE
+        self.catalog_fixture: CatalogFixture | None = None
         self.evidence: dict[str, Any] = {
-            "schema": "codegen-product-kit/runner-proof/1",
+            "schema": "codegen-product-kit/runner-proof/2",
             "status": "running",
             "started_at": datetime.now(UTC).isoformat(),
+            "proof_mode": self.mode,
             "pinned": {
                 "kit": args.kit_sha,
                 "orchestrator": args.orchestrator_sha,
                 "platform": args.platform_sha,
+            },
+            "matrix": {
+                "packages": list(self.packages),
+                "target": {"package": PACKAGE, "expected_version": args.package_version},
             },
             "fixtures": {
                 "git_transport": (
@@ -156,6 +273,14 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
                 "reader": "tests/runner/fixtures/reader.py replaces only tg-reader",
                 "telegram": "tests/runner/fixtures/telegram_api.py replaces api.telegram.org",
                 "registry": f"{REGISTRY_IMAGE} on the runner loopback, removed afterwards",
+                "release_transport": (
+                    "none: the live catalog at the kit's default branch and its published tags"
+                    if self.mode == "published_release"
+                    else "an isolated fixture repository (exact candidate, local intended tag, "
+                    "fixture catalog commit) reached through a process-scoped HOME .gitconfig "
+                    f"insteadOf {KIT_REPOSITORY} during the install executor only, and a "
+                    "loopback HTTP fixture serving its raw files to the planner"
+                ),
             },
             "resources": [],
             "commands": [],
@@ -328,23 +453,168 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         self.git("push", "-q", "origin", "main", cwd=product, label="product baseline push")
         return product
 
-    def select_payload(self) -> dict:
-        destination = self.work / "install-payload.json"
+    def candidate_release(self) -> None:
+        """Prepare the documented prepublication transport (docs/RUNNER_PROOF.md).
+
+        An isolated throwaway repository receives the exact candidate commit and the kit's
+        published package tags by object id, a fixture catalog commit on top of the candidate
+        appending only the pending entry, and the intended package tag, locally, at the
+        candidate. Nothing is pushed anywhere else and no executor, probe or kit code changes.
+        """
+        pending = (self.kit / support.PENDING_RELEASES).read_bytes()
+        release = support.pending_release(yaml.safe_load(pending), PACKAGE)
+        version = str(release["version"])
+        if version != self.args.package_version:
+            raise ProofError(
+                f"the pending {PACKAGE} release is {version}, not {self.args.package_version}"
+            )
+        tag = release["catalog_entry"]["tag"]
+        published = yaml.safe_load((self.kit / "packages/catalog.yaml").read_text())
+        snapshot = support.fixture_catalog(published, release)
+        root = self.work / "release-fixture"
+        root.mkdir()
+        bare = root / "codegen-product-kit.git"
+        self.git("init", "--bare", "-q", str(bare), cwd=root, label="release fixture repository")
+        self.git(
+            "push",
+            "-q",
+            str(bare),
+            f"{self.sha}:refs/heads/candidate",
+            "refs/tags/packages/*:refs/tags/packages/*",
+            cwd=self.kit,
+            label="fixture: exact candidate and published package tags",
+        )
+        checkout = root / "catalog"
+        self.git(
+            "clone",
+            "-q",
+            "--branch",
+            "candidate",
+            bare.as_uri(),
+            str(checkout),
+            cwd=root,
+            label="fixture catalog checkout",
+        )
+        (checkout / "packages/catalog.yaml").write_text(yaml.safe_dump(snapshot, sort_keys=False))
+        identity = ["-c", "user.name=Runner proof", "-c", "user.email=runner-proof@example.com"]
+        self.git(
+            *identity,
+            "commit",
+            "-q",
+            "-am",
+            f"Fixture catalog snapshot: pending {PACKAGE} {version}, not published",
+            cwd=checkout,
+            label="fixture catalog commit",
+        )
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=checkout, label="fixture main")
+        fixture = ["--git-dir", str(bare)]
+        self.git(
+            *fixture, "symbolic-ref", "HEAD", "refs/heads/main", cwd=root, label="fixture HEAD"
+        )
+        self.git(
+            *fixture,
+            *identity,
+            "tag",
+            "--annotate",
+            tag,
+            "-m",
+            f"Local fixture tag of the unpublished {PACKAGE} {version} candidate {self.sha}",
+            self.sha,
+            cwd=root,
+            label="fixture intended package tag (local only)",
+        )
+
+        def rev(expression: str) -> str:
+            return self.git(*fixture, "rev-parse", expression, cwd=root, label="fixture rev-parse")
+
+        tags = self.git(
+            *fixture,
+            "for-each-ref",
+            "--format=%(refname:strip=2)",
+            "refs/tags",
+            cwd=root,
+            label="fixture tags",
+        ).split()
+        released = {
+            item["tag"]
+            for section in ("packages", "libraries", "extensions")
+            for component in published.get(section) or []
+            for item in component["versions"]
+        }
+        if missing := sorted(released - set(tags)):
+            raise ProofError(f"the kit checkout lacks published package tags {missing}")
+        if rev("refs/heads/main^") != self.sha:
+            raise ProofError("the fixture catalog commit is not a child of the candidate")
+        catalog_bytes = (checkout / "packages/catalog.yaml").read_bytes()
+        self.evidence["release"] = {
+            "mode": self.mode,
+            "published": False,
+            "note": "the intended tag exists only in a throwaway fixture repository",
+            "package": PACKAGE,
+            "version": version,
+            "intended_tag": tag,
+            "requires_core": release["catalog_entry"]["requires_core"],
+            "pending_metadata": support.PENDING_RELEASES,
+            "pending_metadata_sha256": hashlib.sha256(pending).hexdigest(),
+            "published_catalog_lists_version": False,
+            "source_sha": self.sha,
+            "package_tree": rev(f"{self.sha}:{release['path']}"),
+            "fixture_catalog_commit": rev("refs/heads/main"),
+            "fixture_catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "tag_type": self.git(
+                *fixture, "cat-file", "-t", f"refs/tags/{tag}", cwd=root, label="fixture tag type"
+            ),
+            "tag_object": rev(f"refs/tags/{tag}"),
+            "tag_target": rev(f"refs/tags/{tag}^{{commit}}"),
+            "published_tags": {name: rev(f"refs/tags/{name}") for name in sorted(released)},
+        }
+        if self.evidence["release"]["tag_target"] != self.sha:
+            raise ProofError("the fixture tag does not point at the exact candidate")
+        # Process-scoped git configuration for the install executor: its fetches of the kit
+        # repository (catalog at HEAD, package tags) reach the fixture. URLs stay unchanged.
+        home = root / "home"
+        home.mkdir()
+        real_home = Path(os.environ["HOME"])
+        for name in (".cache", ".local"):
+            if (real_home / name).is_dir():
+                (home / name).symlink_to(real_home / name)
+        (home / ".gitconfig").write_text(
+            f'[url "{bare.as_uri()}"]\n\tinsteadOf = {KIT_REPOSITORY}\n'
+        )
+        self.release_home = home
+        self.catalog_fixture = CatalogFixture(
+            bare, {"HEAD": "refs/heads/main"} | {name: f"refs/tags/{name}" for name in tags}
+        )
+        self.catalog_fixture.start()
+        self.catalog_source = self.catalog_fixture.source
+
+    def select_payload(self, name: str) -> dict:
+        destination = self.work / f"install-payload-{name}.json"
         self.run(
-            [sys.executable, "-c", SELECT_PAYLOAD, str(destination), PACKAGE],
+            [sys.executable, "-c", SELECT_PAYLOAD, str(destination), name, self.catalog_source],
             cwd=self.orchestrator,
             env=self.clean_env(
                 PYTHONPATH=f"{self.orchestrator / 'services/langgraph'}:{self.orchestrator}"
             ),
-            label="orchestrator catalog selection",
+            label=f"orchestrator catalog selection {name}",
         )
         payload = json.loads(destination.read_text())
-        if payload["tooling_commit"] != self.sha or payload["package"]["name"] != PACKAGE:
+        if payload["tooling_commit"] != self.sha or payload["package"]["name"] != name:
             raise ProofError("typed install payload does not name the candidate tooling/package")
-        self.evidence["install_payload"] = payload
+        version = payload["package"]["version"]
+        if name == PACKAGE and version != self.args.package_version:
+            raise ProofError(
+                f"the planner selected {PACKAGE} {version}, expected "
+                f"{self.args.package_version} ({self.mode})"
+            )
+        self.evidence.setdefault("install_payloads", {})[name] = payload
+        if name == PACKAGE:
+            self.evidence["install_payload"] = payload
         return payload
 
-    async def install(self, product: Path, payload: dict, modules: SimpleNamespace) -> Any:
+    async def install(
+        self, product: Path, payload: dict, modules: SimpleNamespace, name: str
+    ) -> Any:
         install = modules.install
         boundary: list[dict] = []
         probes: dict[str, Any] = {}
@@ -385,13 +655,18 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             project_name=PROJECT_NAME,
             modules="backend,tg_bot",
             mode="install",
-            task_id="runner-proof-install",
+            task_id=f"runner-proof-install-{name}",
             story_id=STORY,
-            operation_id="runner-proof-operation",
+            operation_id=f"runner-proof-operation-{name}",
             cycle_started_at=datetime.now(UTC),
             install=payload,
         )
+        installs = self.evidence.setdefault("installs", {})
+        home = os.environ["HOME"]
         install._run_cmd = transport
+        if self.release_home is not None:
+            # The executor passes HOME to its children: their git reads the fixture insteadOf.
+            os.environ["HOME"] = str(self.release_home)
         try:
             result = await install.run_install(
                 message,
@@ -401,7 +676,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
                 fence,
             )
         except Exception as error:
-            self.evidence["install"] = {
+            installs[name] = {
                 "status": "failed",
                 "stage": getattr(error, "stage", None),
                 "error": self.redact(str(error))[:4000],
@@ -412,8 +687,10 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             raise
         finally:
             install._run_cmd = actual
-        self.evidence["install"] = {
+            os.environ["HOME"] = home
+        installs[name] = {
             "status": "published",
+            "package": name,
             "executor": "scaffolder.src.install.run_install",
             "head_sha": result.head_sha,
             "base_sha": result.base_sha,
@@ -431,7 +708,80 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             "fence": fences,
             "credential_boundary": boundary,
         }
+        if name == PACKAGE:
+            self.evidence["install"] = installs[name]
         return result
+
+    def release_evidence(self, product: Path, payload: dict, readback: dict) -> None:
+        """Bind the installed target release to its source: fixture tag or published tag."""
+        source = next(item for item in readback["component_sources"] if item["name"] == PACKAGE)
+        wheels = {
+            name: hashlib.sha256((product / name).read_bytes()).hexdigest()
+            for name in self.git(
+                "ls-files", "services/*/packages/*.whl", cwd=product, label="installed wheels"
+            ).split()
+        }
+        version = payload["package"]["version"]
+        if not any(f"-{version}-" in name and "tg_channels" in name for name in wheels):
+            raise ProofError(f"no committed {PACKAGE} {version} wheel: {sorted(wheels)}")
+        release = self.evidence.setdefault(
+            "release",
+            {
+                "mode": self.mode,
+                "published": True,
+                "package": PACKAGE,
+                "version": version,
+                "tag": payload["package"]["tag"],
+                "tag_object": source["tag_object"],
+                "tag_target": source["target"],
+                "package_tree": source["tree"],
+            },
+        )
+        if self.mode == "candidate_release" and (
+            source["tag"] != release["intended_tag"]
+            or source["tag_object"] != release["tag_object"]
+            or source["target"] != self.sha
+            or source["tree"] != release["package_tree"]
+        ):
+            raise ProofError(f"the probe read another source than the fixture release: {source}")
+        release |= {
+            "planner_catalog_digest": payload["catalog_digest"],
+            "probe_source": source,
+            "wheels": wheels,
+        }
+        if self.catalog_fixture is not None:
+            release["http_requests"] = list(self.catalog_fixture.requests)
+
+    def coexistence(self, product: Path, install: Any) -> dict:
+        """Settings, jobs, events and bindings of every installed module, read by the product."""
+        result = self.run(
+            [str(product / ".venv/bin/python"), "-I", "-c", COEXISTENCE],
+            cwd=product,
+            env=install.product_environment(product),
+            label="installed modules side by side",
+        )
+        found = json.loads(result.stdout.strip().splitlines()[-1])
+        owners = {found["job_owners"][name] for name in found["job_timers"]}
+        commands = [item for value in found["bindings"].values() for item in value["commands"]]
+        problems = []
+        if set(found["packages"]) != set(self.packages):
+            problems.append(f"installed {sorted(found['packages'])}")
+        if found["packages"].get(PACKAGE) != self.args.package_version:
+            problems.append(f"{PACKAGE} {found['packages'].get(PACKAGE)} is active")
+        if owners != {f"package:{name}" for name in self.packages}:
+            problems.append(f"timer owners {sorted(owners)}")
+        for name, events in found["publishes"].items():
+            if missing := sorted(set(events) - set(found["events"])):
+                problems.append(f"{name} events {missing} are not generated")
+        if set(found["bindings"]) != set(self.packages) or len(commands) != len(set(commands)):
+            problems.append(f"bindings {found['bindings']}")
+        for name, value in found["bindings"].items():
+            if missing := sorted(set(value["settings"]) - set(found["settings"])):
+                problems.append(f"{name} binding settings {missing} are not declared")
+        if problems:
+            raise ProofError(f"installed modules do not coexist: {problems}")
+        self.evidence["coexistence"] = found
+        return found
 
     def clone(self, name: str) -> Path:
         target = self.work / "clones" / name
@@ -870,16 +1220,27 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         )
 
     def initialize_product(self, deployment: SimpleNamespace) -> dict:
-        """Language and access only through the new product's own APIs."""
+        """Binding settings (language, timezone) and access only through the product's APIs."""
         url = f"http://127.0.0.1:{deployment.port}"
         values = deployment.values
+        settings = sorted(
+            {
+                key
+                for item in self.evidence["coexistence"]["bindings"].values()
+                for key in item["settings"]
+            }
+        )
+        if unknown := [key for key in settings if key not in BINDING_SETTING_VALUES]:
+            raise ProofError(f"no scenario value for binding settings {unknown}")
         steps = {
-            "language": http(
+            f"setting {key}": http(
                 "POST",
                 f"{url}/settings/set",
-                {"key": "language", "scope": "product", "value": LANGUAGE},
+                {"key": key, "scope": "product", "value": BINDING_SETTING_VALUES[key]},
                 {"X-Settings-Capability": values["SETTINGS_WRITE_CAPABILITY"]},
-            ),
+            )
+            for key in settings
+        } | {
             "grant": http(
                 "POST",
                 f"{url}/users/grant",
@@ -1042,8 +1403,41 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             "fixture_post_text": self.post_text,
             "negative_unknown_key": negative,
             "positive": positive,
-            "delivered_post": {"chat_id": delivered["chat_id"], "text": delivered["text"]},
+            "delivered_post": {
+                "chat_id": delivered["chat_id"],
+                "text": delivered["text"],
+                "url": delivered["text"].rstrip().rsplit("\n", 1)[-1],
+                "post_id": int(delivered["text"].rstrip().rsplit("/", 1)[-1]),
+            },
         }
+        if "reminders" in self.packages:
+            self.evidence["scenario"]["reminders"] = self.reminder_scenario(control)
+
+    def reminder_scenario(self, control: str) -> dict:
+        """The companion module keeps working: its command, timer and relay deliver a reminder."""
+        text = f"Runner proof reminder {secrets.token_hex(4)}"
+        command = f"/remind {text} in 1 minute"
+        watermark = self.say(control, command)
+        scheduled = wait_until(
+            "reminder scheduled reply",
+            lambda: self.sent_after(
+                control, watermark, lambda item: not item["text"].startswith("New post")
+            ),
+            timeout=120,
+        )
+        if not (
+            scheduled["text"].startswith("Scheduled for ") and scheduled["text"].endswith(text)
+        ):
+            raise ProofError(f"/remind answered {scheduled['text']!r}")
+        due = wait_until(
+            "reminder delivery",
+            lambda: self.sent_after(
+                control, scheduled["seq"], lambda item: item["text"] == f"Reminder: {text}"
+            ),
+            timeout=DELIVERY_TIMEOUT,
+            interval=3,
+        )
+        return {"command": command, "scheduled_reply": scheduled, "delivered": due}
 
     # -- driver -----------------------------------------------------------------------------
 
@@ -1083,9 +1477,15 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         key, invalid_key = support.product_key(), support.product_key()
         self.secrets.update((key, invalid_key))
         self.revisions()
+        if self.mode == "candidate_release":
+            self.candidate_release()
         product = self.scaffold(install)
-        payload = self.select_payload()
-        result = asyncio.run(self.install(product, payload, modules))
+        payloads, results = {}, {}
+        # The executor installs each module on the same story branch, companions first.
+        for name in self.packages:
+            payloads[name] = self.select_payload(name)
+            results[name] = asyncio.run(self.install(product, payloads[name], modules, name))
+        result = results[PACKAGE]
         remote = self.git(
             "ls-remote",
             str(self.work / "remote.git"),
@@ -1096,14 +1496,20 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         if remote != result.head_sha:
             raise ProofError("published story head differs from the executor result")
         readback = result.evidence
-        self.evidence["module"] = {
-            "package": PACKAGE,
-            "version": payload["package"]["version"],
-            "tag": payload["package"]["tag"],
-            "sources": readback["component_sources"],
-            "installed": readback["distributions"],
+        self.evidence["modules"] = {
+            name: {
+                "package": name,
+                "version": payloads[name]["package"]["version"],
+                "tag": payloads[name]["package"]["tag"],
+                "sources": results[name].evidence["component_sources"],
+                "installed": results[name].evidence["distributions"],
+            }
+            for name in self.packages
         }
+        self.evidence["module"] = self.evidence["modules"][PACKAGE]
         self.evidence["revisions"]["product_tooling"] = readback["tooling"]
+        self.release_evidence(product, payloads[PACKAGE], readback)
+        self.coexistence(product, install)
         self.product_ci(result.head_sha)
         self.cold_main_regression()
         images = self.main_images(result.head_sha)
@@ -1121,6 +1527,8 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             self.evidence["error"] = self.redact(f"{type(error).__name__}: {error}")[:4000]
             self.collect_logs()
         finally:
+            if self.catalog_fixture is not None:
+                self.catalog_fixture.stop()
             self.clean_up()
             self.evidence["finished_at"] = datetime.now(UTC).isoformat()
             text = self.redact(json.dumps(self.evidence, indent=2, default=str)) + "\n"
@@ -1136,10 +1544,30 @@ def main() -> int:
         parser.add_argument(f"--{name}-dir", type=Path, required=True)
         parser.add_argument(f"--{name}-sha", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--proof-mode",
+        choices=support.PROOF_MODES,
+        required=True,
+        help="candidate_release: the pending release through the isolated fixture; "
+        "published_release: the live catalog and tag, no fixture and no fallback",
+    )
+    parser.add_argument("--package-version", required=True, help=f"expected {PACKAGE} version")
+    parser.add_argument(
+        "--packages",
+        default=PACKAGE,
+        help=f"install order, ending with {PACKAGE}; companions: {', '.join(COMPANIONS)}",
+    )
     args = parser.parse_args()
     for name in ("kit", "orchestrator", "platform"):
         if not re.fullmatch(r"[0-9a-f]{40}", getattr(args, f"{name}_sha")):
             parser.error(f"--{name}-sha must be a full commit SHA")
+    args.packages = tuple(args.packages.split(","))
+    if (
+        args.packages[-1] != PACKAGE
+        or len(set(args.packages)) != len(args.packages)
+        or not set(args.packages[:-1]) <= set(COMPANIONS)
+    ):
+        parser.error(f"--packages must name companions from {COMPANIONS} and end with {PACKAGE}")
     return Runner(args).execute()
 
 

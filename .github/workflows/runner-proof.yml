@@ -2,8 +2,9 @@ name: Runner Proof
 
 # A fresh backend,tg_bot product from the exact kit candidate, installed with tg-channels by the
 # orchestrator's real executor, through its own CI, its main image path and a post delivered via
-# the pinned platform's real auth and Caddy. See docs/RUNNER_PROOF.md for the evidence contract
-# and for running the same proof from another repository with other pinned SHAs.
+# the pinned platform's real auth and Caddy; a second leg installs the published reminders first
+# and proves both modules side by side. See docs/RUNNER_PROOF.md for the proof modes, the
+# evidence contract and for running the same proof from another repository with other pins.
 
 on:
   push:
@@ -30,6 +31,16 @@ on:
         type: string
         required: false
         default: ""
+      proof_mode:
+        description: >-
+          candidate_release (the kit's pending tg-channels release through the isolated
+          fixture) or published_release (live catalog and tag, no fixture); never a fallback
+        type: string
+        required: true
+      package_version:
+        description: Expected tg-channels version the planner must select
+        type: string
+        required: true
     secrets:
       PLATFORM_SERVICES_DEPLOY_KEY:
         description: Read-only deploy key of vladmesh/codegen-platform-services
@@ -43,14 +54,30 @@ env:
 
 jobs:
   fresh-product-runner:
-    name: Fresh product runner proof
+    name: Fresh product runner proof (${{ matrix.leg }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      # The release matrix: (a) a fresh product with tg-channels alone, (b) the published
+      # reminders installed first, then tg-channels. Both run the full product CI, main image,
+      # registry, platform and delivery path.
+      matrix:
+        include:
+          - leg: fresh
+            packages: tg-channels
+          - leg: coexistence
+            packages: reminders,tg-channels
     env:
       KIT_SHA: ${{ inputs.kit_sha || github.event.pull_request.head.sha || github.sha }}
       # Pins of this proof; a caller passes other exact SHAs as inputs.
       ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha || 'ec96fa79c84937982420f0f01388d90000bd69eb' }}
       PLATFORM_SHA: ${{ inputs.platform_sha || '070dfb359f9a121546d1362ae84c9d0856cabf64' }}
+      # This repository's own PR and main runs prove the pending tg-channels 0.1.2 release
+      # (packages/pending-releases.yaml) until its tag is published; a caller chooses explicitly.
+      PROOF_MODE: ${{ inputs.proof_mode || 'candidate_release' }}
+      PACKAGE_VERSION: ${{ inputs.package_version || '0.1.2' }}
+      PACKAGES: ${{ matrix.packages }}
     steps:
       # The deploy key is used only for a push to main and a same-repository pull request, also
       # when another repository calls this workflow; anything else fails instead of skipping.
@@ -81,6 +108,10 @@ jobs:
               exit 1
             fi
           done
+          case "$PROOF_MODE" in
+            candidate_release|published_release) ;;
+            *) echo "Unknown proof mode: $PROOF_MODE" >&2; exit 1 ;;
+          esac
 
       - name: Refuse URL rewrites around the deploy key
         run: |
@@ -161,13 +192,14 @@ jobs:
             --kit-dir kit --kit-sha "$KIT_SHA" \
             --orchestrator-dir orchestrator --orchestrator-sha "$ORCHESTRATOR_SHA" \
             --platform-dir platform --platform-sha "$PLATFORM_SHA" \
-            --output-dir "$RUNNER_TEMP/runner-proof"
+            --proof-mode "$PROOF_MODE" --package-version "$PACKAGE_VERSION" \
+            --packages "$PACKAGES" --output-dir "$RUNNER_TEMP/runner-proof"
 
       - name: Preserve runner proof evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runner-proof-${{ env.KIT_SHA }}-${{ github.run_attempt }}
+          name: runner-proof-${{ matrix.leg }}-${{ env.KIT_SHA }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/runner-proof
           if-no-files-found: error
 
@@ -181,13 +213,33 @@ jobs:
               "orchestrator": os.environ["ORCHESTRATOR_SHA"],
               "platform": os.environ["PLATFORM_SHA"],
           }
+          mode, version = os.environ["PROOF_MODE"], os.environ["PACKAGE_VERSION"]
+          packages = os.environ["PACKAGES"].split(",")
           assert evidence["status"] == "passed", evidence.get("error")
           assert evidence["pinned"] == pinned, evidence["pinned"]
           assert evidence["revisions"]["product_tooling"]["vcs_info"]["commit_id"] == pinned["kit"]
           assert evidence["template"]["resolved_sha"] == pinned["kit"]
-          for key in ("install", "product_ci", "cold_main_regression", "main_images",
-                      "integration_without_host_environments", "platform", "deployment",
-                      "scenario"):
+          for key in ("install", "release", "coexistence", "product_ci", "cold_main_regression",
+                      "main_images", "integration_without_host_environments", "platform",
+                      "deployment", "scenario"):
               assert evidence.get(key), f"missing evidence section {key}"
-          print(json.dumps(evidence["scenario"]["delivered_post"], indent=2))
+          release = evidence["release"]
+          assert evidence["proof_mode"] == release["mode"] == mode, (evidence["proof_mode"], mode)
+          assert evidence["matrix"]["packages"] == packages, evidence["matrix"]
+          assert sorted(evidence["installs"]) == sorted(packages), sorted(evidence["installs"])
+          assert evidence["module"]["version"] == release["version"] == version, release
+          assert release["probe_source"]["target"] == release["tag_target"]
+          if mode == "candidate_release":
+              # The exact candidate through the fixture; its intended tag is not published.
+              assert release["published"] is False and release["published_catalog_lists_version"] is False
+              assert release["source_sha"] == release["tag_target"] == pinned["kit"], release
+              assert release["tag_type"] == "tag" and release["wheels"], release
+          else:
+              assert release["published"] is True and "intended_tag" not in release, release
+          scenario = evidence["scenario"]
+          assert scenario["delivered_post"]["text"] and scenario["delivered_post"]["chat_id"]
+          if "reminders" in packages:
+              assert scenario["reminders"]["delivered"]["text"].startswith("Reminder: ")
+          print(json.dumps({"mode": mode, "packages": packages,
+                            "delivered_post": scenario["delivered_post"]}, indent=2))
           EOF

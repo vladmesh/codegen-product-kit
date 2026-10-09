@@ -212,6 +212,14 @@ def test_log_parsers_read_fixture_records_caddy_access_and_pushed_digests() -> N
         )
     )
     assert support.caddy_requests(access + "\nplain", "/tg-reader/v1/posts") == [401]
+    query = json.dumps(
+        {
+            "logger": "http.log.access.log0",
+            "request": {"uri": "/tg-reader/v1/posts?channels=runner_fixture&limit=200"},
+            "status": 200,
+        }
+    )
+    assert support.caddy_requests(query, "/tg-reader/v1/posts") == [200]
     digests = ["127.0.0.1:5000/p-backend@sha256:" + "a" * 64, "other/p@sha256:" + "b" * 64]
     assert support.pushed_digest(digests, "127.0.0.1:5000/p-backend") == "sha256:" + "a" * 64
     with pytest.raises(ValueError, match="one pushed digest"):
@@ -240,3 +248,91 @@ def test_runner_workflow_guards_the_platform_key_and_requires_the_evidence() -> 
     assert upload["with"]["path"] == "${{ runner.temp }}/runner-proof"
     assert "pull_request_target" not in triggers
     assert 'evidence["status"] == "passed"' in steps["Require passed SHA-bound evidence"]["run"]
+
+
+def _pending() -> dict:
+    return yaml.safe_load((ROOT / support.PENDING_RELEASES).read_text())
+
+
+def test_pending_release_is_the_runner_default_and_refuses_ambiguity() -> None:
+    workflow = (ROOT / ".github/workflows/runner-proof.yml").read_text()
+    default = re.search(r"inputs\.package_version \|\| '([^']+)'", workflow)
+    release = support.pending_release(_pending(), "tg-channels")
+
+    assert default is not None and release["version"] == default.group(1)
+    assert release["catalog_entry"]["tag"] == f"packages/tg-channels/v{release['version']}"
+    for broken in (
+        {"format_version": 2, "releases": [release]},
+        {"format_version": 1, "releases": [release, release]},
+        {"format_version": 1, "releases": []},
+        {
+            "format_version": 1,
+            "releases": [release | {"catalog_entry": release["catalog_entry"] | {"tag": "v9"}}],
+        },
+    ):
+        with pytest.raises(ValueError, match="pending releases"):
+            support.pending_release(broken, "tg-channels")
+
+
+def test_fixture_catalog_appends_only_the_pending_entry() -> None:
+    published = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
+    before = json.dumps(published, sort_keys=True)
+    release = support.pending_release(_pending(), "tg-channels")
+
+    snapshot = support.fixture_catalog(published, release)
+
+    assert json.dumps(published, sort_keys=True) == before
+    channels = next(item for item in snapshot["packages"] if item["name"] == "tg-channels")
+    original = next(item for item in published["packages"] if item["name"] == "tg-channels")
+    assert channels["versions"] == [*original["versions"], release["catalog_entry"]]
+    assert [item for item in snapshot["packages"] if item["name"] != "tg-channels"] == [
+        item for item in published["packages"] if item["name"] != "tg-channels"
+    ]
+    listed = original["versions"][-1]
+    with pytest.raises(ValueError, match="already in the catalog"):
+        support.fixture_catalog(published, release | {"version": listed["version"]})
+    with pytest.raises(ValueError, match="another distribution"):
+        support.fixture_catalog(published, release | {"distribution": "other"})
+
+
+def test_catalog_fixture_routes_raw_paths_to_served_refs_only() -> None:
+    refs = ["HEAD", "packages/tg-channels/v0.1.2", "packages/tg"]
+    assert support.fixture_resource("/HEAD/packages/catalog.yaml", refs) == (
+        "HEAD",
+        "packages/catalog.yaml",
+    )
+    assert support.fixture_resource(
+        "/packages/tg-channels/v0.1.2/packages/codegen-kit-tg-channels/x/package.yaml", refs
+    ) == ("packages/tg-channels/v0.1.2", "packages/codegen-kit-tg-channels/x/package.yaml")
+    for path in ("/main/packages/catalog.yaml", "/HEAD/", "/HEAD/../secret", "HEAD/x"):
+        assert support.fixture_resource(path, refs) is None
+
+
+def test_runner_workflow_runs_the_explicit_mode_release_matrix() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/runner-proof.yml").read_text())
+    inputs = workflow[True]["workflow_call"]["inputs"]
+    job = workflow["jobs"]["fresh-product-runner"]
+    steps = {step["name"]: step for step in job["steps"]}
+
+    assert inputs["proof_mode"]["required"] is True
+    assert inputs["package_version"]["required"] is True
+    assert job["env"]["PROOF_MODE"] == "${{ inputs.proof_mode || 'candidate_release' }}"
+    assert job["strategy"]["fail-fast"] is False
+    assert {item["leg"]: item["packages"] for item in job["strategy"]["matrix"]["include"]} == {
+        "fresh": "tg-channels",
+        "coexistence": "reminders,tg-channels",
+    }
+    runner = steps["Run the fresh product runner proof"]["run"]
+    for argument in ("--proof-mode", "--package-version", "--packages"):
+        assert argument in runner
+    guard = steps["Require a trusted source and the platform deploy key"]["run"]
+    assert "candidate_release|published_release" in guard
+    required = steps["Require passed SHA-bound evidence"]["run"]
+    for check in (
+        'evidence["proof_mode"] == release["mode"] == mode',
+        'release["source_sha"] == release["tag_target"] == pinned["kit"]',
+        'evidence["module"]["version"] == release["version"] == version',
+        'scenario["reminders"]',
+    ):
+        assert check in required
+    assert "matrix.leg" in steps["Preserve runner proof evidence"]["with"]["name"]

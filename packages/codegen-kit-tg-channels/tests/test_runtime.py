@@ -146,10 +146,15 @@ def test_consumer_initializes_group_registers_reclaim_and_cleans_up(  # noqa: C9
         await consumer.start()
         assert calls == ["connect", "group", None, 300_000, "start"]
         assert handlers == [consumer.handle_job, consumer.handle_job]
-        await consumer.handle_job({"payload": {"name": "unrelated.tick", "arguments": {}}})
+        # Other jobs, another package's tick and the event-namespace spelling, which the core
+        # never fires, are ignored; tests/tooling/test_package_timers.py feeds the generated name.
+        for name in ("unrelated.tick", "reminders.tick", "tg-channels.tick"):
+            await consumer.handle_job(
+                {"payload": {"name": name, "arguments": {"at": "2026-10-07T21:00:00Z"}}}
+            )
         poller.tick.assert_not_awaited()
         await consumer.handle_job(
-            {"payload": {"name": "tg-channels.tick", "arguments": {"at": "2026-10-07T21:00:00Z"}}}
+            {"payload": {"name": "tg_channels.tick", "arguments": {"at": "2026-10-07T21:00:00Z"}}}
         )
         poller.tick.assert_awaited_once()
         await consumer.stop()

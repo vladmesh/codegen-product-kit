@@ -46,7 +46,13 @@ Backend projects additionally expose `make generate-from-spec` and `make test-in
 `.github/workflows/ci.yml` runs the framework suite.
 `.github/workflows/test-template.yml` exercises Copier generation and generated-project behavior.
 `.github/workflows/runner-proof.yml` runs the fresh installed-product runner proof on every PR and
-main push; see [RUNNER_PROOF.md](RUNNER_PROOF.md) for its stages, fixtures and evidence contract.
+main push, as a release matrix (`fresh`, and `coexistence` with reminders) in an explicit proof
+mode; see [RUNNER_PROOF.md](RUNNER_PROOF.md) for its stages, fixtures and evidence contract.
+`tests/tooling/test_package_catalog.py` checks each package's newest catalog release against its
+annotated tag (Framework CI fetches tags) and the package source at HEAD against that release or
+its entry in `packages/pending-releases.yaml`. `tests/tooling/test_package_timers.py` feeds the
+timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
+consumer, so a consumer listening for any other name fails.
 Keep required job names stable unless branch protection is updated at the same time.
 
 `tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording
@@ -196,8 +202,9 @@ that each fixture resolves to its own product directory before the CI-only comma
 `test_bound_product_integration.py` adds two CI-only slow cases for the generated backend,tg_bot
 product's unchanged `make test-integration`, default-bound with exact candidate tooling:
 published reminders 0.5.0/textparse 0.1.0 through the default live catalog, and the candidate
-commit's tg-channels release. For channels, the test exports the candidate commit's catalog and
-package tree into a scratch catalog source, checks the catalog newest entry against the
+commit's tg-channels release. For channels, the test exports the candidate commit's catalog,
+pending release metadata and package tree into a scratch catalog source, appends the pending
+entry to the catalog there (the public catalog lists published tags only), checks it against the
 package manifest, creates the release tag only there and installs with `--catalog-source`; it
 proves the unpublished release, not a published tag. Channels verifies its platform environment
 declarations and, as in a real product CI, the product `.env` has no `PLATFORM_KEY` or

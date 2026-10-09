@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Iterable, Mapping
+import copy
 from dataclasses import dataclass
 import json
 import re
@@ -27,6 +28,9 @@ BASELINE_MAIN_GENERATION = (
     ("make", "generate-from-spec"),
 )
 BASELINE_FAILURE = "BindingEnvironmentError: tg_bot environment is not installed"
+#: How the proof obtains the target package release (docs/RUNNER_PROOF.md, "Proof modes").
+PROOF_MODES = ("candidate_release", "published_release")
+PENDING_RELEASES = "packages/pending-releases.yaml"
 
 
 class WorkflowError(ValueError):
@@ -178,7 +182,7 @@ def caddy_requests(text: str, path: str) -> list[int]:
         if (
             isinstance(entry, dict)
             and str(entry.get("logger", "")).startswith("http.log.access")
-            and entry.get("request", {}).get("uri") == path
+            and str(entry.get("request", {}).get("uri", "")).split("?", 1)[0] == path
         ):
             statuses.append(int(entry["status"]))
     return statuses
@@ -190,3 +194,58 @@ def pushed_digest(repo_digests: Iterable[str], repository: str) -> str:
     if len(found) != 1:
         raise ValueError(f"expected one pushed digest for {repository}, got {found}")
     return found[0].split("@", 1)[1]
+
+
+# -- candidate release transport (proof_mode=candidate_release) ------------------------------
+
+
+def pending_release(document: Mapping, package: str) -> dict:
+    """The single pending release of `package` from packages/pending-releases.yaml."""
+    if document.get("format_version") != 1:
+        raise ValueError("pending releases: unsupported format_version")
+    found = [item for item in document.get("releases") or [] if item.get("package") == package]
+    if len(found) != 1:
+        raise ValueError(f"pending releases: expected one {package} entry, found {len(found)}")
+    release = dict(found[0])
+    entry = release.get("catalog_entry") or {}
+    version = str(release.get("version", ""))
+    if (
+        set(entry) != {"version", "tag", "requires_core"}
+        or str(entry["version"]) != version
+        or entry["tag"] != f"packages/{package}/v{version}"
+    ):
+        raise ValueError(f"pending releases: {package} catalog_entry disagrees with its version")
+    return release
+
+
+def fixture_catalog(catalog: Mapping, release: Mapping) -> dict:
+    """The published catalog plus the pending entry: the candidate release's catalog snapshot.
+
+    Only the package's `versions` list grows; every published entry is kept unchanged.
+    """
+    document = copy.deepcopy(dict(catalog))
+    package = next(
+        (item for item in document.get("packages") or [] if item["name"] == release["package"]),
+        None,
+    )
+    if package is None:
+        raise ValueError(f"catalog has no package {release['package']}")
+    if package["distribution"] != release["distribution"] or package["path"] != release["path"]:
+        raise ValueError(f"pending {release['package']} names another distribution or path")
+    if any(str(item["version"]) == str(release["version"]) for item in package["versions"]):
+        raise ValueError(f"{release['package']} {release['version']} is already in the catalog")
+    package["versions"].append(dict(release["catalog_entry"]))
+    return document
+
+
+def fixture_resource(path: str, refs: Iterable[str]) -> tuple[str, str] | None:
+    """Split a raw-file URL path `/<ref>/<file>` of the catalog HTTP fixture.
+
+    Refs contain slashes (`packages/tg-channels/v0.1.2`), so the longest served ref that
+    prefixes the path wins; anything else is not served.
+    """
+    for ref in sorted(refs, key=len, reverse=True):
+        prefix = f"/{ref}/"
+        if path.startswith(prefix) and len(path) > len(prefix) and ".." not in path.split("/"):
+            return ref, path.removeprefix(prefix)
+    return None
