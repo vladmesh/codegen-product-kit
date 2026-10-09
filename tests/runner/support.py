@@ -406,3 +406,22 @@ def verify_snapshot_reads(requests: Iterable[Mapping], served: Mapping[str, str]
                 seen.add(suffix)
     if missing := sorted(set(served) - seen):
         raise ValueError(f"the planner never read {missing} from the snapshot")
+
+
+#: The core-owned product language every binding references (docs/CONTRACTS.md).
+LANGUAGE_KEY = "language"
+
+
+def host_problems(found: dict) -> list[str]:
+    """Core owns the language; the registry holds exactly core and bound module commands."""
+    problems = []
+    if found["settings"].get(LANGUAGE_KEY) != "core":
+        problems.append(f"language owner is {found['settings'].get(LANGUAGE_KEY)!r}, not core")
+    expected = {"start": "core", "command": "core"} | {
+        command: f"package:{name}"
+        for name, value in found["bindings"].items()
+        for command in value["commands"]
+    }
+    if found["host_violations"] or dict(found["registry"]) != expected:
+        problems.append(f"command registry {found['registry']} {found['host_violations']}")
+    return problems

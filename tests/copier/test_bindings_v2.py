@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from framework.cli import bind_package
+from framework.spec.loader import load_specs
 from tests.copier.test_bindings import (  # noqa: F401
     bound_product,
     bound_product_v2,
@@ -22,11 +23,12 @@ ROOT = Path(__file__).parents[2]
 @pytest.mark.parametrize("fixture", ["bound_product_v2", "bound_product_v2_only"])
 def test_v2_generated_handlers_and_event_delivery(request, fixture, locale):
     product = request.getfixturevalue(fixture)
+    # Core owns the language: bind references it and never declares it in a product manifest.
     manifest = yaml.safe_load((product / "services/tg_bot/manifest.yaml").read_text())
-    assert manifest["settings_schema"]["properties"]["language"] == {
-        "type": "string",
-        "enum": ["ru", "en"],
-    }
+    assert "language" not in manifest["settings_schema"]["properties"]
+    specs = load_specs(product)
+    assert specs.settings_schema_sources["language"] == "core"
+    assert specs.settings_schemas["language"] == {"type": "string", "enum": ["ru", "en"]}
     assert bind_package("binding-notes", product) == "unchanged"
     result = subprocess.run(
         [
@@ -110,12 +112,16 @@ def test_v2_product_refusals_do_not_mutate_outputs(request, bad):
         elif bad == "cross-command":
             data["commands"][0]["command"] = "remind"
         elif bad == "language-schema":
+            # Even an equal schema is a competing owner of the core language.
             manifest = yaml.safe_load(manifest_file.read_text())
-            manifest["settings_schema"]["properties"]["language"]["enum"] = ["en"]
+            manifest["settings_schema"]["properties"]["language"] = {
+                "type": "string",
+                "enum": ["ru", "en"],
+            }
             manifest_file.write_text(yaml.safe_dump(manifest, sort_keys=False))
         elif bad == "core":
             core_file.write_text(
-                core_file.read_text().replace('CORE_VERSION = "2.4.0"', 'CORE_VERSION = "2.3.0"')
+                core_file.read_text().replace('CORE_VERSION = "2.5.0"', 'CORE_VERSION = "2.3.0"')
             )
         else:
             data["timezone"] = {

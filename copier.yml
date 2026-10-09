@@ -50,6 +50,7 @@ _skip_if_exists:
   - shared/spec/events.yaml
   - "services/*/src/app/**"
   - "services/*/src/controllers/**"
+  - services/tg_bot/src/commands.py
 
 project_name:
   type: str

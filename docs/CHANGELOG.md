@@ -1,5 +1,14 @@
 # Contract changelog
 
+## 2026-10-09
+
+- Façade `2.5.0`, package protocol v1 unchanged: the [core host contract](CONTRACTS.md#core-host-contract-v1).
+  Core owns the product-scoped `language` setting; manifests, packages and bind may not declare it.
+  One generated tg_bot registry registers core, product (`ProductCommand` in
+  `services/tg_bot/src/commands.py`) and bound module commands and answers unknown input in the
+  core language. Generation, lint, add and bind refuse conflicts before writing; `kit check-install`
+  returns result version 1 (`mechanical`, `glue`, `incompatible`) without writing.
+
 ## 2026-10-03
 
 - No contract change. Kit 0.7.1 fixes the generated backend's lifespan unit tests, which started

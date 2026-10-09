@@ -35,6 +35,10 @@ output, so regeneration, the generated-tree drift check and `make lint` agree; s
 The next prepared tag, `0.10.0`, delivers façade 2.4.0 and finite bilingual binding v2;
 see [0.10.0 preparation](releases/0.10.0.md). The 0.9.0 platform environment source contract
 and v1 bindings remain compatible.
+Façade 2.5.0 adds the [core host contract](#core-host-contract-v1): the core-owned `language`
+setting, one Telegram command registry with a core unknown-input reply, its hard lint and the
+read-only `kit check-install` preflight. The façade semver is versioned independently of the kit's
+Git release tags; package protocol stays 1 because its serialized manifest surface is unchanged.
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
@@ -598,14 +602,18 @@ interpolation, translation, arbitrary error routing or general workflows.
 
 Unknown keys, missing/extra locales, actions/events/fields/arguments, unavailable branch sources,
 incompatible schemas, duplicate command/event names and duplicate button labels in either
-locale fail admission. Product preflight also refuses reserved `start`/`command`, commands longer
-than 32 characters, duplicate commands/events/packages across bindings, setting ownership
-conflicts and incompatible setting schemas. All v2 bindings share one product language key;
-all timezone declarations in v1/v2 share one product timezone key. Those two keys must differ.
+locale fail admission. Product preflight also refuses duplicate events/packages across bindings,
+setting ownership conflicts and incompatible setting schemas; command names, reserved `start`/
+`command`, the 32-character limit and collisions with product or other module commands are
+resolved by the [core command registry](#core-host-contract-v1). All v2 bindings share one product
+language key; all timezone declarations in v1/v2 share one product timezone key. Those two keys
+must differ.
 
-Bind adds `{type: string, enum: [ru, en]}` at the language key in
-`services/tg_bot/manifest.yaml`, through the existing product settings registry. It never writes
-a setting value. Commands, valid callbacks and events read `/settings/get` with
+From façade 2.5 the language key must be the core-owned `language` setting
+(`{type: string, enum: [ru, en]}`, product scope), present in every fresh product before any
+module install. Bind references it and never declares it in `services/tg_bot/manifest.yaml`;
+a binding naming another language key is refused as `binding_language_owner`. Bind never
+writes a setting value. Commands, valid callbacks and events read `/settings/get` with
 `contract_version: 1`, the declared key and `scope: product`, without `subject_id`.
 Language is read again on a callback even if it changed after the list was displayed.
 For commands and callbacks, missing (404), malformed or invalid language yields this fixed
@@ -869,6 +877,130 @@ not carry this deployment capability.
 Environment variables remain startup, connectivity, platform, and secret configuration. A value
 derived from the Product Brief or intended for a user to change belongs in a manifest-declared
 setting instead.
+
+Core-owned settings are declared by the kit, not by a manifest. Façade 2.5 owns one:
+`language`, `{type: string, enum: [ru, en]}`, read and written at `product` scope. The spec loader
+registers it first with source `core`, so a fresh product's generated `SETTINGS_SCHEMAS` carries
+it before any module install, and the ordinary `/settings/set` and `/settings/get` contract writes
+and reads its value. There is no default value, no seeding and no environment fallback. A service
+manifest or package that declares the same key, even with an equal schema, is a competing owner
+and fails generation with its source; bindings reference the core key.
+
+## Core host contract v1
+
+`framework/host_contract.py` is the single authority for the two hard host invariants of façade
+2.5: core setting ownership and Telegram command registration. Generation
+(`make generate-from-spec`), `kit add` and `kit bind` admission, the product's `make lint` and the
+read-only `kit check-install` evaluate the same contract. The order is: collect typed declarations
+with their source files and lines, resolve core ownership and exclusive command claims, report
+every violation, and only then write generated artifacts. The generated bot registry renders the
+same validated claims, so lint, preflight and runtime registration cannot disagree.
+
+### Command registry
+
+`services/tg_bot/src/generated/commands.py` is the only place the bot registers handlers. Its
+`register(application, access=..., builtins=..., bindings=..., client_factory=...)` adds the
+access check in group -1, then in group 0 and in this order: core `/start` (and `/command` in
+backend shapes), product commands, bound module commands in binding-file order, and last the
+core unknown-input reply. Module bindings are admitted through a guard that accepts exactly the
+registry's next module command or the `b1:` callback handler and refuses anything else. At
+startup the registry refuses product declarations that differ from the generated registry.
+`start` and `command` are reserved in every shape. Names match `[a-z][a-z0-9_]*` with at most
+32 characters. A name claimed by two owners fails with the command and both source locations.
+
+The admitted product contribution form is one module-level tuple in
+`services/tg_bot/src/commands.py` (product-owned, never overwritten by Copier):
+
+```python
+from services.tg_bot.src.generated.commands import ProductCommand
+
+async def handle_ping(update, context) -> None: ...
+
+COMMANDS: tuple[ProductCommand, ...] = (ProductCommand("ping", handle_ping),)
+```
+
+Each entry is `ProductCommand("<literal name>", <function name>)`. The lint reads the file as
+data and fails closed on any other form: a non-literal name, extra arguments, a non-tuple value,
+reassignment or augmentation. Product tg_bot code outside `src/generated/`, `tests/`, `packages/`
+and environments may not mention `BaseHandler`, `CommandHandler`, `ConversationHandler`,
+`MessageHandler`, `PrefixHandler`, `StringCommandHandler`, `StringRegexHandler`, `TypeHandler`,
+`add_handler` or `add_handlers` as a name, attribute, import or string; these would register a
+command or a catch-all outside the registry. Product callbacks and other update types are not
+contributable in this version. Other product logic is not linted by this contract.
+
+Unknown commands and text reach the core reply, which lists the registry's commands in the core
+`language`: `I don't understand this message. Available commands: /start, …` or
+`Не понимаю это сообщение. Доступные команды: /start, …`. When the language is unset or the
+settings read fails, both lines are sent; a backend-less bot always sends both.
+`commands.language(client_factory)` gives product handlers the same read.
+
+`make lint` runs `python -m framework.host_contract` in every shape and fails on any violation or
+when the committed registry differs from its render (`registry_stale`). Backend shapes regenerate
+it with `make generate-from-spec`; a backend-less bot's `make generate-from-spec` runs
+`python -m framework.host_contract --write`. There is no warning-only mode.
+
+### Read-only install preflight
+
+```bash
+kit check-install tg-channels --json --package-source /path/to/codegen-kit-tg-channels
+kit check-install tg-channels --json --catalog-source https://github.com/vladmesh/codegen-product-kit.git \
+  --catalog-ref <commit-or-tag> [--version 0.1.2]
+```
+
+The typed Python API is `framework.preflight.check_install(root, name, *, package_source=None,
+catalog_source=None, catalog_ref=None, version=None)`, returning `CheckInstallResult`. It reads
+the product's files and the exact package version's `package.yaml` and default binding as data:
+from a package source directory, or from the tag a catalog at an explicit source and ref selects
+for the product's façade (or `--version`). There is no live catalog default and no environment
+variable fallback. It never imports package runtime, never builds or installs, and never writes
+to the product, its environments, locks, settings or database. It only checks that the product's
+service environments exist (and, for a parsed v1 command, reads library metadata through the
+bot environment's isolated interpreter).
+
+Result version 1, printed with sorted keys:
+
+| Field | Meaning |
+|---|---|
+| `result_version` | `1` |
+| `package` | requested package name |
+| `status` | `mechanical`, `glue` or `incompatible` |
+| `product_core` | the product façade `CORE_VERSION`, when read |
+| `target` | `route` (`package_source`, `catalog`), `path` or `catalog_source`/`catalog_ref`/`tag`, `version`, `requires_core`, `metadata_sha256` |
+| `glue` | sorted list; empty unless `status` is `glue` |
+| `incompatible` | `{code, explanation}` when `status` is `incompatible`, else `null` |
+
+Each glue item has `code`, `path`, `line` (or `null`), `owner`, `symbol`, `key`, `command`,
+`conflict`, `action` and `other` (`{owner, path, line, symbol}` of the other claimant or `null`).
+Codes are `core_setting_redeclared`, `command_collision`, `reserved_command`, `invalid_command`,
+`unsupported_product_command`, `registration_bypass` and `library_required`. Command glue is
+anchored on the product-editable side. Prospective module paths are the product binding path
+`services/tg_bot/bindings/<package>.yaml` the default bind would write. Incompatible codes are
+`provenance_required`, `catalog_unavailable`, `unknown_component`, `unsupported_component`,
+`artifact_unavailable`, `package_metadata_invalid`, `package_mismatch`, `product_shape`,
+`environment_missing`, `core_unsupported`, `core_range`, `binding_invalid` and
+`binding_language_owner`. A prospective conflict is a result, never a traceback.
+
+`mechanical` means the version, source and core range were verified and the prospective product
+satisfies the contract as is. Exit status is 0 for `mechanical`, 3 for `glue`, 4 for
+`incompatible` and 2 for a usage error; consumers should read `status`. Example glue item:
+
+```json
+{"action": "rename the product command /channel at services/tg_bot/src/commands.py:16 (its ProductCommand entry) to an unused name and run make generate-from-spec",
+ "code": "command_collision", "command": "channel",
+ "conflict": "/channel is claimed by both package:tg-channels and product",
+ "key": null, "line": 16, "owner": "product",
+ "other": {"line": 6, "owner": "package:tg-channels", "path": "services/tg_bot/bindings/tg-channels.yaml", "symbol": "text_create"},
+ "path": "services/tg_bot/src/commands.py", "symbol": "handle_channel"}
+```
+
+`kit add` (wheel or catalog tag) and `kit bind` run the same contract evaluation before any
+product write and refuse with `HostContractError`, leaving owned files and locks unchanged for
+these conflicts. This is not a general install recovery mechanism.
+
+Façade 2.5.0 is a minor version: the host surface and `ProductCommand` API are additive, the
+published tg-channels 0.1.2 (`>=2.4,<3`, binding key `language`) and reminders 0.5.0
+(`>=2.2,<3`, binding v1 without language) admit it unchanged, and package protocol stays 1.
+Products generated earlier keep their pinned tooling; there is no automatic upgrade.
 
 ## Environment contract v1
 
@@ -1137,8 +1269,9 @@ signature. No library or package runtime code is imported/executed by the toolin
 
 The complete binding set is validated before any generated output changes. Unknown mappings,
 missing actions/events/recipients/libraries, incompatible settings, repeated package bindings,
-commands/events and callback button labels fail explicitly. `start` and `command` are reserved;
-commands have Telegram's 32-character limit. No old package obtains actions from newer catalog
+commands/events and callback button labels fail explicitly. Command names are claimed in the
+core registry: `start` and `command` are reserved, commands have Telegram's 32-character limit
+and a collision with a product or another module command names both sources. No old package obtains actions from newer catalog
 metadata. A repeated byte-identical default is idempotent. A differing existing file is retained
 and refused with `BindingOwnedFileError`; use `--file` for an explicit replacement. Generation
 owns `services/tg_bot/src/generated/bindings.py` and `binding_relay.py`; product bindings and
@@ -1165,8 +1298,10 @@ Handlers read `POST /settings/get` with `contract_version: 1`, the declared key 
 values give an explicit setup reply before create. No environment/host/UTC default or user
 setting participates. `month_word` uses an explicit English month table and the product zone.
 
-`register(application, BackendClient)` adds commands/callbacks after the existing admission
-TypeHandler. `start`/`stop` run from the existing `post_init`/`post_shutdown` and own the relay's
+The generated bindings module's `register(application, BackendClient)` is called by the core
+command registry, which admits exactly its registry commands and the callback handler after
+the access check and before the core unknown-input reply. `start`/`stop` run from the existing
+`post_init`/`post_shutdown` and own the relay's
 subscriber broker/client; startup failure closes those resources and the existing publisher.
 The generated module receives the client factory, avoiding an import of bot main. The real
 parser is called only in generated product bot code with the original text, `lang=en`, an

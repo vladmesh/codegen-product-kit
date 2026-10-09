@@ -8,6 +8,6 @@
 
 from __future__ import annotations
 
-SETTINGS_SCHEMAS: dict[str, object] = {}
+SETTINGS_SCHEMAS: dict[str, object] = {"language": {"enum": ["ru", "en"], "type": "string"}}
 
-SETTINGS_SCHEMA_SOURCES: dict[str, str] = {}
+SETTINGS_SCHEMA_SOURCES: dict[str, str] = {"language": "core"}

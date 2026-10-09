@@ -473,3 +473,24 @@ def test_runner_workflow_runs_the_explicit_mode_release_matrix() -> None:
     ):
         assert check in required
     assert "matrix.leg" in steps["Preserve runner proof evidence"]["with"]["name"]
+
+
+def test_host_problems_require_core_language_and_the_exact_registry() -> None:
+    found = {
+        "settings": {"language": "core", "timezone": "tg_bot"},
+        "bindings": {"tg-channels": {"commands": ["channel", "channels", "digest"]}},
+        "registry": [
+            ["start", "core"],
+            ["command", "core"],
+            ["channel", "package:tg-channels"],
+            ["channels", "package:tg-channels"],
+            ["digest", "package:tg-channels"],
+        ],
+        "host_violations": [],
+    }
+    assert support.host_problems(found) == []
+    assert support.host_problems(found | {"settings": {"language": "tg_bot"}}) == [
+        "language owner is 'tg_bot', not core"
+    ]
+    assert support.host_problems(found | {"registry": found["registry"][:-1]})
+    assert support.host_problems(found | {"host_violations": ["command_collision: x"]})

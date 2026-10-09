@@ -99,6 +99,18 @@ Agents should interact with the system primarily through `make`.
 - **Generate Code:** `make generate-from-spec`
 - **Generate OpenAPI:** `make openapi` (Outputs to `services/<service>/docs/openapi.json`)
 
+## Core Host Contract
+
+`framework/host_contract.py` owns the two hard host invariants: the core `language` setting
+(`framework/spec/core_settings.py`; never declared by a manifest, package or bind) and the
+generated tg_bot command registry (`framework/templates/codegen/commands.py.j2`). Generation,
+`kit add`/`kit bind`, the product's `make lint` and the read-only `kit check-install`
+(`framework/preflight.py`) share it. Product commands are `ProductCommand` entries in the
+product-owned `template/services/tg_bot/src/commands.py`; tg_bot code must not register handlers
+directly. When the generated registry changes, re-render
+`template/services/tg_bot/src/generated/commands.py.jinja` from `render_registry` (a test compares
+both shapes). See `docs/CONTRACTS.md#core-host-contract-v1`.
+
 ## Language Agnosticism
 
 When modifying YAML specs or the codegen pipeline, prefer language-neutral abstractions where possible. The framework may eventually support multiple target languages, but no migration is currently planned.

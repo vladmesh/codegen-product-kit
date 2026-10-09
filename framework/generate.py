@@ -6,13 +6,16 @@ Uses modular generators with validated spec types.
 from pathlib import Path
 import sys
 
+from framework import host_contract
 from framework.binding_product import (
     binding_files,
+    binding_sources,
     require_binding_product,
     validate_product_bindings,
 )
 from framework.bindings import BindingError
 from framework.generators.bindings import BindingsGenerator
+from framework.generators.commands import CommandsGenerator
 from framework.generators.controllers import ControllersGenerator
 from framework.generators.event_adapter import EventAdapterGenerator
 from framework.generators.events import EventsGenerator
@@ -34,6 +37,9 @@ def generate_all(repo_root: Path | None = None) -> None:
 
     print("Loading and validating specs...")
     bindings = binding_files(repo_root)
+    # The hard host lint: core setting ownership and command registration, before any write.
+    host = host_contract.evaluate(repo_root, bindings, binding_sources(repo_root, bindings))
+    host.require_valid()
     if bindings:
         require_binding_product(repo_root)
     try:
@@ -46,6 +52,7 @@ def generate_all(repo_root: Path | None = None) -> None:
 
     if not specs.models.models:
         BindingsGenerator(specs, repo_root, binding_plan).generate()
+        host_contract.write_registry(repo_root, host)
         print("No specs found. Skipping generation.")
         return
 
@@ -66,6 +73,7 @@ def generate_all(repo_root: Path | None = None) -> None:
         ("EventAdapters", EventAdapterGenerator(specs, repo_root)),
         ("Routers", RoutersGenerator(specs, repo_root)),
         ("Bindings", BindingsGenerator(specs, repo_root, binding_plan)),
+        ("Commands", CommandsGenerator(specs, repo_root, host)),
     ]
 
     for name, generator in generators:

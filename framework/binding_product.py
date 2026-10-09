@@ -16,12 +16,13 @@ from packaging.version import Version
 from framework.bindings import Binding, BindingError, ParsedCreate, load_binding, validate_binding
 from framework.bindings_v2 import BindingV2
 from framework.catalog import Catalog, bundled_catalog
+from framework.spec.core_settings import CORE_OWNER, CORE_SETTINGS, LANGUAGE_KEY
 from framework.spec.loader import AllSpecs
 from framework.spec.package_resolution import ActivePackage
 
 TIMEZONE_SCHEMA = {"type": "string", "format": "x-iana-tz"}
-LANGUAGE_SCHEMA = {"type": "string", "enum": ["ru", "en"]}
-MAX_COMMAND_LENGTH = 32
+#: Bindings reference the core-owned language setting; they never declare it.
+LANGUAGE_SCHEMA = CORE_SETTINGS[LANGUAGE_KEY]
 
 
 @dataclass
@@ -138,13 +139,14 @@ def binding_files(root: Path) -> dict[str, Binding | BindingV2]:
     }
 
 
-def _commands(root, binding, catalog, commands, plan) -> None:
+def binding_sources(root: Path, bindings: dict[str, Binding | BindingV2]) -> dict[str, Path]:
+    """Product files the bindings were read from, for source locations."""
+    return {name: root / "services/tg_bot/bindings" / name for name in bindings}
+
+
+def _libraries(root, binding, catalog, plan) -> None:
+    # Command names and ownership are resolved by the core host contract.
     for command in binding.commands:
-        if len(command.command) > MAX_COMMAND_LENGTH or command.command in commands:
-            raise BindingError(
-                f"BindingDuplicateError: reserved or duplicate command {command.command}"
-            )
-        commands.add(command.command)
         if isinstance(command, ParsedCreate):
             name = command.parse.function.partition(".")[0]
             if name not in plan.libraries:
@@ -188,6 +190,7 @@ def _binding_package(
 
 
 def binding_settings(binding: Binding | BindingV2) -> dict[str, dict]:
+    """Settings a binding reads: the core language and an optional product timezone."""
     settings = {}
     if binding.timezone is not None:
         settings[binding.timezone.key] = TIMEZONE_SCHEMA.copy()
@@ -207,6 +210,20 @@ def _setting_keys(bindings) -> None:
         )
 
 
+def _setting_owners(binding: Binding | BindingV2, specs: AllSpecs) -> None:
+    """Language resolves to the core declaration; a timezone to a product manifest."""
+    for key, schema in binding_settings(binding).items():
+        owner = specs.settings_schema_sources.get(key)
+        if key in CORE_SETTINGS or schema == LANGUAGE_SCHEMA:
+            if owner != CORE_OWNER or specs.settings_schemas.get(key) != schema:
+                raise BindingError(
+                    f"BindingSettingError: {key} must reference the core-owned "
+                    f"{LANGUAGE_KEY!r} setting"
+                )
+        elif owner not in specs.manifests or specs.settings_schemas.get(key) != schema:
+            raise BindingError(f"BindingTimezoneError: {key} needs a product-owned {schema}")
+
+
 def validate_product_bindings(
     root: Path,
     specs: AllSpecs,
@@ -222,7 +239,6 @@ def validate_product_bindings(
     core_version = product_core_version(root)
     catalog = catalog or bundled_catalog()
     packages = {item.name: item for item in specs.packages}
-    commands = {"start", "command"}
     events: set[str] = set()
     package_names: set[str] = set()
     for _filename, binding in sorted(selected.items()):
@@ -233,16 +249,8 @@ def validate_product_bindings(
             )
         package_names.add(binding.package)
         validate_binding(binding, package.manifest, catalog)
-        for key, schema in binding_settings(binding).items():
-            owner = specs.settings_schema_sources.get(key)
-            if owner not in specs.manifests or specs.settings_schemas.get(key) != schema:
-                label = (
-                    "BindingSettingError"
-                    if isinstance(binding, BindingV2)
-                    else "BindingTimezoneError"
-                )
-                raise BindingError(f"{label}: {key} needs a product-owned {schema}")
-        _commands(root, binding, catalog, commands, plan)
+        _setting_owners(binding, specs)
+        _libraries(root, binding, catalog, plan)
         for event in binding.events:
             if event.event in events:
                 raise BindingError(f"BindingDuplicateError: duplicate event {event.event}")

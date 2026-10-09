@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core host contract, façade `CORE_VERSION` 2.5.0 (package protocol stays 1). The product
+  `language` setting (`{type: string, enum: [ru, en]}`, product scope) is owned by core: every fresh
+  product's settings registry carries it, bindings reference it, and `kit bind` no longer declares
+  it in `services/tg_bot/manifest.yaml`; a manifest or package that declares it again fails with its
+  source. The bot registers every command through one generated registry
+  (`services/tg_bot/src/generated/commands.py`): core `/start` and `/command`, product commands
+  declared as `ProductCommand` entries in the new product-owned `services/tg_bot/src/commands.py`,
+  bound module commands, then a core RU/EN reply to unknown commands and text. Collisions, reserved
+  names, other declaration forms and direct handler registration in product code fail
+  `make generate-from-spec`, `make lint`, `kit add` and `kit bind` before any write, naming both
+  sources. `kit check-install <name> --json` (and `framework.preflight.check_install`) is a
+  read-only, versioned `mechanical`/`glue`/`incompatible` preflight from an explicit package
+  source or catalog source and ref. Published tg-channels 0.1.2 and reminders 0.5.0 admit 2.5.0
+  unchanged. The runner proof requires the core language owner and checks RU/EN unknown input and
+  `/channel` through the fake Bot API. See
+  [the core host contract](docs/CONTRACTS.md#core-host-contract-v1).
+
 - Runner proof (`.github/workflows/runner-proof.yml`, required on every PR and main push): a fresh
   Copier backend,tg_bot product from the exact candidate is installed with tg-channels by the
   orchestrator's real `run_install`, passes its own CI job, builds its runtime

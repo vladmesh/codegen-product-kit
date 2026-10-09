@@ -70,6 +70,17 @@ RAW_CATALOG_TIMEOUT = 900
 COMPANIONS = ("reminders",)
 #: Product-scope values the scenario sets through `/settings/set` for each binding setting.
 BINDING_SETTING_VALUES = {"language": "en", "timezone": "UTC"}
+#: What the core registry and the channels binding answer in each product language.
+LANGUAGE_REPLIES = {
+    "en": {
+        "unknown": "I don't understand this message. Available commands: ",
+        "channel": "Enter a public channel username.",
+    },
+    "ru": {
+        "unknown": "Не понимаю это сообщение. Доступные команды: ",
+        "channel": "Введите имя публичного канала.",
+    },
+}
 PROJECT_NAME = "runner-proof"
 REPOSITORY_ID = "runner-product"
 #: The executor requires an owned GitHub URL; `remote get-url origin` answers it while the
@@ -102,10 +113,12 @@ COEXISTENCE = """
 import json
 from pathlib import Path
 from framework.binding_product import binding_files, binding_settings
+from framework.host_contract import evaluate
 from framework.spec.loader import load_specs
 root = Path.cwd()
 specs = load_specs(root)
 bindings = binding_files(root)
+host = evaluate(root)
 print(json.dumps({
     'packages': {item.name: item.manifest.version for item in specs.packages},
     'publishes': {item.name: sorted(item.manifest.events.publishes) for item in specs.packages},
@@ -113,6 +126,8 @@ print(json.dumps({
     'job_timers': specs.job_timers,
     'job_owners': specs.job_schema_sources,
     'settings': specs.settings_schema_sources,
+    'registry': [[item.command, item.owner] for item in host.commands],
+    'host_violations': [item.describe() for item in host.violations],
     'bindings': {
         item.package: {
             'file': name,
@@ -1047,6 +1062,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         for name, value in found["bindings"].items():
             if missing := sorted(set(value["settings"]) - set(found["settings"])):
                 problems.append(f"{name} binding settings {missing} are not declared")
+        problems.extend(support.host_problems(found))
         if problems:
             raise ProofError(f"installed modules do not coexist: {problems}")
         self.evidence["coexistence"] = found
@@ -1681,6 +1697,54 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         }
         if "reminders" in self.packages:
             self.evidence["scenario"]["reminders"] = self.reminder_scenario(control)
+        self.evidence["scenario"]["languages"] = self.language_scenario(deployment, control)
+
+    def set_language(self, deployment: SimpleNamespace, value: str) -> dict:
+        status, body = http(
+            "POST",
+            f"http://127.0.0.1:{deployment.port}/settings/set",
+            {"key": support.LANGUAGE_KEY, "scope": "product", "value": value},
+            {"X-Settings-Capability": deployment.values["SETTINGS_WRITE_CAPABILITY"]},
+        )
+        if status != 200 or body.get("value") != value:
+            raise ProofError(f"core language {value} was not set: {status} {body}")
+        return {"status": status, "body": body}
+
+    def reply_to(self, control: str, text: str) -> dict:
+        watermark = self.say(control, text)
+        return wait_until(
+            f"reply to {text!r}",
+            lambda: self.sent_after(
+                control,
+                watermark,
+                lambda item: (
+                    not item["text"].startswith(("New post", "Новая публикация"))
+                    and not item["text"].startswith("Reminder: ")
+                ),
+            ),
+            timeout=120,
+        )
+
+    def language_scenario(self, deployment: SimpleNamespace, control: str) -> dict:
+        """Core unknown input and a module command answer in RU and EN via the Bot API."""
+        results = {}
+        for language in ("ru", "en"):  # End on the language the delivery scenario used.
+            expected = LANGUAGE_REPLIES[language]
+            setting = self.set_language(deployment, language)
+            replies = {
+                "unknown_command": self.reply_to(control, "/runner_unknown_command"),
+                "unknown_text": self.reply_to(control, "runner plain text"),
+                "channel_without_name": self.reply_to(control, "/channel"),
+            }
+            if (
+                not replies["unknown_command"]["text"].startswith(expected["unknown"])
+                or "/channel" not in replies["unknown_command"]["text"]
+                or replies["unknown_text"]["text"] != replies["unknown_command"]["text"]
+                or replies["channel_without_name"]["text"] != expected["channel"]
+            ):
+                raise ProofError(f"{language} command replies are wrong: {replies}")
+            results[language] = {"setting": setting, "replies": replies}
+        return results
 
     def reminder_scenario(self, control: str) -> dict:
         """The companion module keeps working: its command, timer and relay deliver a reminder."""

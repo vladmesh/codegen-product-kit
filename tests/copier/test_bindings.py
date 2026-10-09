@@ -10,6 +10,7 @@ import sys
 import pytest
 import yaml
 
+from framework import host_contract
 from framework.bindings import BindingError
 from framework.cli import bind_package
 from framework.generate import generate_all
@@ -230,6 +231,8 @@ def test_bound_product_generation_passes_its_own_drift_and_lint(request, fixture
             assert result.returncode == 0, f"{step}\n{result.stdout}{result.stderr}"
     assert outputs[0] == outputs[1]
     assert "services/tg_bot/src/generated/bindings.py" in outputs[0]
+    assert "services/tg_bot/src/generated/commands.py" in outputs[0]
+    assert host_contract.check_product(product).violations == []
 
 
 def test_binding_idempotence_timezone_and_product_override(bound_product):
@@ -388,7 +391,7 @@ def test_bind_refusals_are_nonmutating(bound_product, tmp_path, bad):  # noqa: P
             path = product / "codegen_kit/packages.py"
             changes[path] = path.read_bytes()
             path.write_text(
-                path.read_text().replace('CORE_VERSION = "2.4.0"', 'CORE_VERSION = "2.1.0"')
+                path.read_text().replace('CORE_VERSION = "2.5.0"', 'CORE_VERSION = "2.1.0"')
             )
         elif bad == "malformed":
             binding_file = tmp_path / "bad.yaml"
