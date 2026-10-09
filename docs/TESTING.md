@@ -45,7 +45,19 @@ Backend projects additionally expose `make generate-from-spec` and `make test-in
 
 `.github/workflows/ci.yml` runs the framework suite.
 `.github/workflows/test-template.yml` exercises Copier generation and generated-project behavior.
+`.github/workflows/runner-proof.yml` runs the fresh installed-product runner proof on every PR and
+main push; see [RUNNER_PROOF.md](RUNNER_PROOF.md) for its stages, fixtures and evidence contract.
 Keep required job names stable unless branch protection is updated at the same time.
+
+`tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording
+`uv` stand-in: frozen syncs per named environment, repeated runs, runtime flags without root
+tooling, refusal of unknown or missing environments before any sync, a failed service sync and a
+sync without an interpreter. It checks that setup, both CI jobs and every Dockerfile stage of the
+three product shapes use the command, that no other `uv sync` recipe remains, and executes the
+rendered main-job preparation step. `tests/unit/test_runner_proof.py` covers the runner's workflow
+step execution rules, evidence parsers, key format, the fixture reader against the vendored
+tg-reader OpenAPI contract, the fake Bot API and the workflow's trust and evidence guards. The
+real runner, its Docker images, registry, platform and orchestrator executor run only in CI.
 
 `tests/copier/test_deploy_transport.py` belongs to the existing `test-pytest` fast Copier leg.
 That checkout fetches history and tags so the upgrade fixture can generate exact annotated 0.6.3

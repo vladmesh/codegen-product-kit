@@ -8,6 +8,9 @@ make lint
 make typecheck
 make tests
 ```
+
+Prepare Python environments only with `sh scripts/prepare-env.sh [--runtime] ENV...` (see the
+README); setup, CI and the Dockerfiles each name the environments their stage needs.
 {%- if 'backend' in modules %}
 
 For spec changes, run `make validate-specs` and `make generate-from-spec` before verification.

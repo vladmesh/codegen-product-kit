@@ -24,7 +24,7 @@ def test_tg_bot_image_has_locked_library_artifacts(project_backend_tg_bot: Path)
     service = project_backend_tg_bot / "services/tg_bot"
     dockerfile = (service / "Dockerfile").read_text()
     copy = "COPY services/tg_bot/packages ./services/tg_bot/packages"
-    assert dockerfile.index(copy) < dockerfile.index("uv sync --frozen")
+    assert dockerfile.index(copy) < dockerfile.index("sh scripts/prepare-env.sh --runtime tg_bot")
     assert (service / "packages/.gitkeep").is_file()
     assert "COPY --from=deps /app/services/tg_bot/.venv" in dockerfile
 

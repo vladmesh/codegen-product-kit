@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Runner proof (`.github/workflows/runner-proof.yml`, required on every PR and main push): a fresh
+  Copier backend,tg_bot product from the exact candidate is installed with the published
+  tg-channels by the orchestrator's real `run_install`, passes its own CI job, builds its runtime
+  images with its main job's preparation and Dockerfiles, publishes them to an isolated CI
+  registry and runs them by digest against the pinned platform's real auth and Caddy. Only the
+  reader (contract fixture) and the Telegram Bot API transport are replaced; an unknown key is
+  refused at ingress before the registered key delivers the fixture post to the chat. SHA-bound
+  evidence is uploaded; fork or keyless runs fail. Other repositories call it with exact pins
+  through `workflow_call`. See [the runner proof](docs/RUNNER_PROOF.md).
+
 ### Fixed
+
+- Generated products prepare Python environments through one command,
+  `sh scripts/prepare-env.sh [--runtime] ENV...`, used by `make setup`, PR CI, the main image job
+  and every Dockerfile stage with the environments that stage needs. The main image job of a bound
+  backend,tg_bot product now prepares `root backend tg_bot` and no longer fails cold generation
+  with `BindingEnvironmentError: tg_bot environment is not installed`. The command uses frozen
+  locks, refuses unknown or missing requested environments before syncing and stops at the first
+  failed sync (setup previously ignored the failure of every service but the last); runtime images
+  still receive runtime dependencies only. `make typecheck` now fails when any service fails, and
+  the product's PR CI runs it. New products only; existing products are not migrated.
 
 - tg-channels 0.1.1 (package release, prepared, not published): the package starts without
   `PLATFORM_BASE_URL`/`PLATFORM_KEY`, logging one warning that names the missing variables.

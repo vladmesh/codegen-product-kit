@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = [
     REPO_ROOT / ".github" / "workflows" / "ci.yml",
     REPO_ROOT / ".github" / "workflows" / "test-template.yml",
+    REPO_ROOT / ".github" / "workflows" / "runner-proof.yml",
     REPO_ROOT / "template" / ".github" / "workflows" / "ci.yml.jinja",
 ]
 

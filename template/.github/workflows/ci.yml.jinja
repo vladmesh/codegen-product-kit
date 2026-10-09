@@ -70,6 +70,9 @@ jobs:
       - name: Run linters
         run: make lint
 
+      - name: Run typecheck
+        run: make typecheck
+
       - name: Run tests
         run: make tests
 
@@ -133,11 +136,11 @@ jobs:
           version: "0.11.29"
           checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"
 
+      - name: Prepare generation environments
+        run: sh scripts/prepare-env.sh root backend{% if 'tg_bot' in modules %} tg_bot{% endif %}
+
       - name: Generate code from specs
-        run: |
-          uv sync --frozen
-          uv sync --project services/backend --frozen
-          make generate-from-spec
+        run: make generate-from-spec
 {% endif %}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

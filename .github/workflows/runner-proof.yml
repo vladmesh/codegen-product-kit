@@ -1,0 +1,193 @@
+name: Runner Proof
+
+# A fresh backend,tg_bot product from the exact kit candidate, installed with tg-channels by the
+# orchestrator's real executor, through its own CI, its main image path and a post delivered via
+# the pinned platform's real auth and Caddy. See docs/RUNNER_PROOF.md for the evidence contract
+# and for running the same proof from another repository with other pinned SHAs.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    # No path filter: the proof is required for every PR and for main. A path-filtered or
+    # skipped required check would read as green without having run.
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      kit_sha:
+        description: Kit candidate commit reachable on vladmesh/codegen-product-kit
+        type: string
+        required: true
+      orchestrator_sha:
+        description: Orchestrator commit (empty for the kit's pin)
+        type: string
+        required: false
+        default: ""
+      platform_sha:
+        description: Platform services commit (empty for the kit's pin)
+        type: string
+        required: false
+        default: ""
+    secrets:
+      PLATFORM_SERVICES_DEPLOY_KEY:
+        description: Read-only deploy key of vladmesh/codegen-platform-services
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  fresh-product-runner:
+    name: Fresh product runner proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      KIT_SHA: ${{ inputs.kit_sha || github.event.pull_request.head.sha || github.sha }}
+      # Pins of this proof; a caller passes other exact SHAs as inputs.
+      ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha || 'ec96fa79c84937982420f0f01388d90000bd69eb' }}
+      PLATFORM_SHA: ${{ inputs.platform_sha || '070dfb359f9a121546d1362ae84c9d0856cabf64' }}
+    steps:
+      # The deploy key is used only for a push to main and a same-repository pull request, also
+      # when another repository calls this workflow; anything else fails instead of skipping.
+      - name: Require a trusted source and the platform deploy key
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          HAS_PLATFORM_KEY: ${{ secrets.PLATFORM_SERVICES_DEPLOY_KEY != '' }}
+        run: |
+          if [ "$EVENT" = pull_request ] && [ "$HEAD_REPOSITORY" = "$REPOSITORY" ]; then
+            :
+          elif [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            :
+          else
+            echo "The runner proof runs only for main pushes and same-repository pull requests" \
+              "($EVENT $REF $HEAD_REPOSITORY); this required check fails." >&2
+            exit 1
+          fi
+          if [ "$HAS_PLATFORM_KEY" != true ]; then
+            echo "PLATFORM_SERVICES_DEPLOY_KEY is unavailable; the runner proof cannot pass." >&2
+            exit 1
+          fi
+          for sha in "$KIT_SHA" "$ORCHESTRATOR_SHA" "$PLATFORM_SHA"; do
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Not a full commit SHA: $sha" >&2
+              exit 1
+            fi
+          done
+
+      - name: Refuse URL rewrites around the deploy key
+        run: |
+          for scope in --system --global; do
+            if git config "$scope" --get-regexp '^url\..*\.insteadof$'; then
+              echo "A $scope insteadOf rewrite could replace the SSH deploy key" >&2
+              exit 1
+            fi
+          done
+
+      - name: Free runner disk for product, platform and registry images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      - name: Check out the kit candidate
+        uses: actions/checkout@v4
+        with:
+          repository: vladmesh/codegen-product-kit
+          ref: ${{ env.KIT_SHA }}
+          path: kit
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the pinned orchestrator
+        uses: actions/checkout@v4
+        with:
+          repository: vladmesh/codegen_orchestrator
+          ref: ${{ env.ORCHESTRATOR_SHA }}
+          path: orchestrator
+          persist-credentials: false
+
+      - name: Check out the pinned platform with the read-only deploy key
+        uses: actions/checkout@v4
+        with:
+          repository: vladmesh/codegen-platform-services
+          ref: ${{ env.PLATFORM_SHA }}
+          path: platform
+          ssh-key: ${{ secrets.PLATFORM_SERVICES_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Verify fetched heads and the platform transport
+        run: |
+          test "$(git -C kit rev-parse HEAD)" = "$KIT_SHA"
+          test "$(git -C orchestrator rev-parse HEAD)" = "$ORCHESTRATOR_SHA"
+          test "$(git -C platform rev-parse HEAD)" = "$PLATFORM_SHA"
+          origin=$(git -C platform remote get-url origin)
+          case "$origin" in
+            git@github.com:vladmesh/codegen-platform-services*) ;;
+            *) echo "Platform was not fetched over the SSH deploy key: $origin" >&2; exit 1 ;;
+          esac
+          if git -C platform config --get-regexp '^(http\..*extraheader|core\.sshcommand)$'; then
+            echo "Platform checkout kept credentials" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a
+        with:
+          version: "0.11.29"
+          checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"
+
+      - name: Prepare the orchestrator environment with the candidate tooling
+        working-directory: orchestrator
+        run: |
+          uv sync --frozen
+          uv pip install --python .venv/bin/python --reinstall-package codegen-kit-tooling \
+            "codegen-kit-tooling @ git+https://github.com/vladmesh/codegen-product-kit.git@${KIT_SHA}"
+
+      - name: Run the fresh product runner proof
+        run: |
+          orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py \
+            --kit-dir kit --kit-sha "$KIT_SHA" \
+            --orchestrator-dir orchestrator --orchestrator-sha "$ORCHESTRATOR_SHA" \
+            --platform-dir platform --platform-sha "$PLATFORM_SHA" \
+            --output-dir "$RUNNER_TEMP/runner-proof"
+
+      - name: Preserve runner proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-proof-${{ env.KIT_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runner-proof
+          if-no-files-found: error
+
+      - name: Require passed SHA-bound evidence
+        run: |
+          python3 - "$RUNNER_TEMP/runner-proof/runner-proof.json" <<'EOF'
+          import json, os, sys
+          evidence = json.load(open(sys.argv[1]))
+          pinned = {
+              "kit": os.environ["KIT_SHA"],
+              "orchestrator": os.environ["ORCHESTRATOR_SHA"],
+              "platform": os.environ["PLATFORM_SHA"],
+          }
+          assert evidence["status"] == "passed", evidence.get("error")
+          assert evidence["pinned"] == pinned, evidence["pinned"]
+          assert evidence["revisions"]["product_tooling"]["vcs_info"]["commit_id"] == pinned["kit"]
+          assert evidence["template"]["resolved_sha"] == pinned["kit"]
+          for key in ("install", "product_ci", "cold_main_regression", "main_images",
+                      "integration_without_host_environments", "platform", "deployment",
+                      "scenario"):
+              assert evidence.get(key), f"missing evidence section {key}"
+          print(json.dumps(evidence["scenario"]["delivered_post"], indent=2))
+          EOF

@@ -133,8 +133,14 @@ of services or containers; `backend` and `tg_bot` remain Copier selections.
 ## Tooling and runtime
 
 Framework development uses the root `.venv/`. Generated projects use a root tooling venv plus a
-separate venv per Python service. `make setup` creates them with uv, generates backend artifacts,
-formats the initial output, and configures Git hooks.
+separate venv per Python service. Every stage prepares them with the one product command
+`sh scripts/prepare-env.sh [--runtime] ENV...` and names the environments it needs: `make setup`
+all of them, CI image generation `root backend` plus `tg_bot` when present (binding preflight reads
+both service environments), the backend dev image `root backend` plus the bot's runtime
+environment, and each runtime image only `--runtime <service>`. Each is `uv sync --frozen` into its
+own `.venv` in the checkout; unknown or missing requested environments and failed syncs stop the
+command, and repeating it is safe. `make setup` then generates backend artifacts, formats the
+initial output, and configures Git hooks.
 
 Docker is used for service runtime, integration tests, and deployment—not for framework lint or
 unit tests. Generated Compose is layered:

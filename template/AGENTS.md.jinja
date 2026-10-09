@@ -16,6 +16,7 @@
 | Команда | Назначение |
 |---------|-----------|
 | `make setup` | Bootstrap: venvs, codegen, git hooks (один раз) |
+| `sh scripts/prepare-env.sh [--runtime] ENV...` | Единственный способ подготовить venv (`root` или сервис); его вызывают setup, CI и Dockerfile |
 | `make lint` | Полный lint gate: ruff format/check, xenon, spec checks, controller sync, deptry |
 | `make format` | Авто-форматирование (ruff) |
 | `make typecheck` | mypy по сервисам |
