@@ -890,6 +890,11 @@ generated settings router (`services/backend/src/generated/routers/settings.py`)
 setting in any other scope with 422 on both get and set, before the product-owned controller or
 the repository is reached; other settings keep both scopes. The check lives in generated code
 because Copier keeps a product's controllers on update, so an upgraded product enforces it too.
+The same router commits the session after the controller and before it answers: with FastAPI
+0.118 and later the `get_async_db` dependency's own commit runs only after the response is sent,
+so a caller (the bot reading `language` right after an operator set it) could otherwise read the
+previous value. A `200` from `/settings/set` therefore means the value is stored. Other generated
+routers keep the dependency's commit-after-response behaviour; this contract does not change them.
 
 ## Core host contract v1
 

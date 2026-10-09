@@ -64,6 +64,9 @@ def create_router(
             session=session,
             payload=payload,
         )
+        # A core setting is stored when its answer is sent: the session dependency's own
+        # commit runs only after the response, so a caller could read the previous value.
+        await session.commit()
         return result
 
     @router.post(
@@ -81,6 +84,9 @@ def create_router(
             session=session,
             payload=payload,
         )
+        # A core setting is stored when its answer is sent: the session dependency's own
+        # commit runs only after the response, so a caller could read the previous value.
+        await session.commit()
         return result
 
     return router

@@ -103,6 +103,11 @@ def create_router(
             payload=payload,
 {% endif %}
         )
+{% if core_setting_scopes %}
+        # A core setting is stored when its answer is sent: the session dependency's own
+        # commit runs only after the response, so a caller could read the previous value.
+        await session.commit()
+{% endif %}
 {% if handler.publish_channel %}
         await publish_event("{{ handler.publish_channel }}", result)
 {% endif %}

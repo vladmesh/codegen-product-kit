@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/settings/set` and `/settings/get` commit before answering. FastAPI (0.118+, products lock
+  0.133.1) runs the session dependency's commit after the response is sent, so the bot could read
+  the previous core `language` right after a `200`; the runner proof's RU/EN check hit it once
+  (fresh leg on bad1daf replied in RU after `language` was set to `en`). The commit is in the
+  generated settings router, so products keep their own settings controller.
 - Kit CI pulls Docker Hub images through the credential-free public mirror `mirror.gcr.io`
   instead of failing on Docker Hub's unauthenticated rate limit and token timeouts: the
   `test-generation`, `test-pytest` and runner-proof jobs configure the runner's Docker daemon

@@ -1,4 +1,4 @@
-"""The core language scope is refused in the generated settings router, before any controller.
+"""The core settings router refuses the core language outside its scope, commits, then answers.
 
 The settings controller is product-owned (Copier keeps it on update), so the core contract
 lives in generated code every product regenerates.
@@ -83,6 +83,14 @@ def test_core_language_outside_product_scope_never_reaches_the_controller(
 
     calls: list[tuple[str, object]] = []
 
+    class Session:
+        """Records the commit among the controller calls: stored before the answer is sent."""
+
+        async def commit(self) -> None:
+            calls.append(("commit", None))
+
+    session = Session()
+
     class Controller:
         async def get(self, session: object, payload: SettingGet) -> object:
             calls.append(("get", payload))
@@ -100,7 +108,7 @@ def test_core_language_outside_product_scope_never_reaches_the_controller(
         ("get", SettingGet(**user)),
     ):
         with pytest.raises(HTTPException) as refused:
-            asyncio.run(handlers[name](payload=payload, session=None, controller=Controller()))
+            asyncio.run(handlers[name](payload=payload, session=session, controller=Controller()))
         assert refused.value.status_code == 422
         assert refused.value.detail == "Setting is only available in product scope"
     assert calls == []
@@ -108,7 +116,14 @@ def test_core_language_outside_product_scope_never_reaches_the_controller(
     product_scope = SettingSet(key="language", scope="product", value="en")
     other_key = SettingSet(key="languages", scope="user", subject_id=7, value=["ru"])
     for payload in (product_scope, other_key):
-        asyncio.run(handlers["set"](payload=payload, session=None, controller=Controller()))
+        asyncio.run(handlers["set"](payload=payload, session=session, controller=Controller()))
     default_scope = SettingGet(key="language")
-    asyncio.run(handlers["get"](payload=default_scope, session=None, controller=Controller()))
-    assert calls == [("set", product_scope), ("set", other_key), ("get", default_scope)]
+    asyncio.run(handlers["get"](payload=default_scope, session=session, controller=Controller()))
+    assert calls == [
+        ("set", product_scope),
+        ("commit", None),
+        ("set", other_key),
+        ("commit", None),
+        ("get", default_scope),
+        ("commit", None),
+    ]

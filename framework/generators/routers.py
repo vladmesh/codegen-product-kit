@@ -67,7 +67,8 @@ class RoutersGenerator(BaseGenerator):
                 "needs_query": needs_query,
                 "needs_broker": needs_broker,
                 # The core settings contract: a core-owned setting (language) is refused
-                # outside its canonical scope here, before any product-owned controller.
+                # outside its canonical scope here, before any product-owned controller, and
+                # a settings call commits before its response is sent.
                 "core_setting_scopes": service_name == "backend" and domain.name == "settings",
             }
             service_data["domains"].append(domain_context)
