@@ -111,7 +111,7 @@ async def scenario(locale):  # noqa: C901, PLR0915
         ]
         assert registered == [item["command"] for item in commands.COMMANDS], registered
         assert isinstance(group[-1], MessageHandler), group[-1]
-        assert [type(item) for item in application.handlers[-1]] == [TypeHandler]
+        assert [isinstance(item, TypeHandler) for item in application.handlers[-1]] == [True]
         assert all(
             isinstance(item, CommandHandler | CallbackQueryHandler | MessageHandler)
             for item in group
@@ -180,6 +180,70 @@ async def scenario(locale):  # noqa: C901, PLR0915
             pass
         else:
             raise AssertionError("a module catch-all was registered")
+
+        # Through normal dispatch, a declared product command tries to replace the core
+        # unknown reply, clear or extend the registry. Every change fails closed.
+        attempts = {}
+        rogue_calls = []
+
+        async def rogue(update, context):
+            rogue_calls.append(update)
+
+        async def mutate(update, context):
+            app = context.application
+            changes = {
+                "callback": lambda: setattr(app.handlers[0][-1], "callback", rogue),
+                "clear": app.handlers.clear,
+                "group": lambda: app.handlers.__setitem__(5, []),
+                "remove_handler": lambda: app.remove_handler(app.handlers[0][-1]),
+                "add_handler": lambda: app.add_handler(MessageHandler(None, rogue)),
+            }
+            for name, change in changes.items():
+                try:
+                    change()
+                except (commands.CommandRegistryError, AttributeError) as error:
+                    attempts[name] = type(error).__name__
+                else:
+                    attempts[name] = "applied"
+            await update.message.reply_text("mutation attempted")
+
+        target = product_commands[0]
+        product.COMMANDS = tuple(
+            commands.ProductCommand(item.name, mutate if item.name == target else item.handler)
+            for item in original
+        )
+        try:
+            mutated = ApplicationBuilder().token("test:token").build()
+            commands.register(
+                mutated,
+                access=allow,
+                builtins=builtins,
+                bindings=bindings,
+                client_factory=FakeClient,
+            )
+        finally:
+            product.COMMANDS = original
+        registered_before = {
+            group: [(id(item), item.callback) for item in items]
+            for group, items in mutated.handlers.items()
+        }
+        await mutated.initialize()
+        before = len(sent)
+        await mutated.process_update(update(f"/{target}", mutated.bot))
+        assert sent[before:] == ["mutation attempted"], sent[before:]
+        assert set(attempts) == {"callback", "clear", "group", "remove_handler", "add_handler"}
+        assert "applied" not in attempts.values(), attempts
+        assert {
+            group: [(id(item), item.callback) for item in items]
+            for group, items in mutated.handlers.items()
+        } == registered_before
+        before = len(sent)
+        await mutated.process_update(update("text after mutation", mutated.bot))
+        await mutated.process_update(update("/start", mutated.bot))
+        assert sent[before] == unknown[locale], sent[before:]
+        assert sent[before + 1].startswith("Привет!")
+        assert rogue_calls == []
+        await mutated.shutdown()
     print(f"registry {locale}: commands, module binding and unknown fallback passed")
 
 

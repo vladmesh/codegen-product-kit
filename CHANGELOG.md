@@ -23,7 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only, versioned `mechanical`/`glue`/`incompatible` preflight from an explicit package
   source or catalog source and ref. Published tg-channels 0.1.2 and reminders 0.5.0 admit 2.5.0
   unchanged. The runner proof requires the core language owner and checks RU/EN unknown input and
-  `/channel` through the fake Bot API. See
+  `/channel` through the fake Bot API. The core language is enforced in product scope by the
+  settings API; registered bot handlers are final at runtime; preflight and admission validate
+  the product environment and the retained effective binding, and malformed manifests fail
+  closed as typed results. The generated durable-event integration test runs in its own Redis
+  database with event identity assertions. See
   [the core host contract](docs/CONTRACTS.md#core-host-contract-v1).
 
 - Runner proof (`.github/workflows/runner-proof.yml`, required on every PR and main push): a fresh

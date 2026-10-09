@@ -254,6 +254,43 @@ def test_applied_glue_makes_install_mechanical_and_product_ci_green(fresh_bot_pr
     )
 
 
+TIMEZONE_AS_LANGUAGE = (
+    "timezone: {key: language, scope: product, required: true, format: x-iana-tz}\n"
+)
+
+
+def test_retained_binding_conflict_refuses_writes_then_glue_installs(fresh_bot_product, tmp_path):
+    """A product-kept binding naming core language as its timezone: glue, then normal install."""
+    product = tmp_path / "retained"
+    shutil.copytree(fresh_bot_product, product, symlinks=True)
+    binding = product / "services/tg_bot/bindings/tg-channels.yaml"
+    binding.parent.mkdir(parents=True)
+    default = (CHANNELS / "codegen_kit_tg_channels/bindings/default.yaml").read_text()
+    binding.write_text(default + TIMEZONE_AS_LANGUAGE)
+
+    [item] = _preflight(product).glue
+    assert (item["code"], item["owner"], item["path"], item["key"]) == (
+        "binding_setting_conflict",
+        "product",
+        "services/tg_bot/bindings/tg-channels.yaml",
+        "language",
+    )
+    assert item["line"] == len(default.splitlines()) + 1
+    _install_channels(product)
+    before = _files(product)
+    with pytest.raises(HostContractError, match="binding_setting_conflict"):
+        generate_all(product)
+    with pytest.raises(HostContractError, match="binding_setting_conflict"):
+        bind_package("tg-channels", product, binding_file=binding)
+    assert _files(product) == before
+
+    binding.write_text(default)  # The glue action: give timezone no core key (none needed).
+    assert _preflight(product).status == "mechanical"
+    generate_all(product)
+    assert bind_package("tg-channels", product) == "unchanged"
+    assert host_contract.check_product(product).violations == []
+
+
 @pytest.mark.parametrize(
     ("path", "source"),
     [

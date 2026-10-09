@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 import yaml
 
-from framework.spec.core_settings import CORE_OWNER, CORE_SETTINGS
+from framework.spec.core_settings import CORE_OWNER, CORE_SETTING_SCOPES, CORE_SETTINGS
 from framework.spec.events import EventSpec, EventsSpec, event_identifier
 from framework.spec.manifests import ServiceManifest, parse_service_manifest
 from framework.spec.models import ModelsSpec
@@ -51,6 +51,7 @@ class AllSpecs:
     package_models: dict[str, dict[str, Any]] = field(default_factory=dict)
     settings_schemas: dict[str, object] = field(default_factory=dict)
     settings_schema_sources: dict[str, str] = field(default_factory=dict)
+    settings_schema_scopes: dict[str, str] = field(default_factory=dict)
     job_schemas: dict[str, object] = field(default_factory=dict)
     job_schema_sources: dict[str, str] = field(default_factory=dict)
     job_timers: dict[str, int] = field(default_factory=dict)
@@ -366,6 +367,7 @@ def _merge_package_names(
 def _merge_core_settings(specs: AllSpecs, setting_owners: dict[str, str]) -> None:
     """Core owns shared product settings first; any redeclaration is a conflict."""
 
+    specs.settings_schema_scopes = dict(sorted(CORE_SETTING_SCOPES.items()))
     for name, schema in sorted(CORE_SETTINGS.items()):
         setting_owners[name] = CORE_OWNER
         specs.settings_schemas[name] = dict(schema)

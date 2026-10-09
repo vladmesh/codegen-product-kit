@@ -4,7 +4,8 @@ Built-in, product and bound module commands come from the validated host contrac
 order, and unknown commands or text are answered by core in the core ``language`` setting.
 Declare a product command as ``ProductCommand("name", handler)`` in ``COMMANDS`` of
 ``services/tg_bot/src/commands.py`` and run ``make generate-from-spec``; product CI fails when
-this file and the declarations disagree.
+this file and the declarations disagree. After registration the handler groups and every
+registered handler are final: adding, removing or replacing one raises CommandRegistryError.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 import importlib
-from typing import Any
+from typing import Any, NoReturn
 
 from telegram import Update
 from telegram.ext import (
@@ -82,6 +83,43 @@ def product_handlers() -> dict[str, Handler]:
             "product commands differ from the generated registry; run make generate-from-spec"
         )
     return {item.name: item.handler for item in declared}
+
+
+def _refuse_change(self: Any, name: str, value: Any = None) -> NoReturn:
+    raise CommandRegistryError(f"registered handlers are final; {name!r} cannot change")
+
+
+_SEALED: dict[type, type] = {}
+
+
+def _seal(handler: Any) -> Any:
+    """Make a registered handler's attributes, such as its callback, final."""
+    kind = type(handler)
+    sealed = _SEALED.get(kind)
+    if sealed is None:
+        namespace = {"__slots__": (), "__setattr__": _refuse_change, "__delattr__": _refuse_change}
+        sealed = _SEALED[kind] = type(f"Sealed{kind.__name__}", (kind,), namespace)
+    handler.__class__ = sealed
+    return handler
+
+
+class FrozenHandlers(dict[int, tuple[Any, ...]]):
+    """The application's handlers by group after core registration: no group changes."""
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise CommandRegistryError("the core command registry is final; use ProductCommand")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _refuse
+
+
+def _freeze(application: Any) -> None:
+    """Seal every registered handler and fix the groups, so later changes fail closed."""
+    application.handlers = FrozenHandlers(
+        {
+            group: tuple(_seal(item) for item in items)
+            for group, items in application.handlers.items()
+        }
+    )
 
 
 class _ModuleApplication:
@@ -159,3 +197,4 @@ def register(
             await update.effective_message.reply_text(unknown_reply(await language(client_factory)))
 
     application.add_handler(MessageHandler(filters.TEXT | filters.COMMAND, unknown))
+    _freeze(application)

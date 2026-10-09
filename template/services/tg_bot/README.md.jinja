@@ -48,6 +48,8 @@ with both source locations, on a name another owner claims (`/start`, `/command`
 `/channel` or `/remind`), on any other declaration form, and on product code that mentions
 `CommandHandler`, `MessageHandler`, `TypeHandler`, `PrefixHandler`, `ConversationHandler`,
 `BaseHandler`, `add_handler` or `add_handlers`: product and module catch-alls cannot replace
-the core unknown-input reply. `commands.language(client_factory)` reads the core language.
+the core unknown-input reply. Registered handlers are final at runtime: adding, removing or
+replacing one from product code raises. `commands.language(client_factory)` reads the core
+language.
 
 Background tasks and persistence layers stay product-owned; handler registration does not.

@@ -1725,9 +1725,24 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             timeout=120,
         )
 
+    def user_language_refused(self, deployment: SimpleNamespace) -> dict:
+        """The core language exists only in product scope: user scope is refused before storage."""
+        url = f"http://127.0.0.1:{deployment.port}"
+        user = {"key": support.LANGUAGE_KEY, "scope": "user", "subject_id": 7}
+        written = http(
+            "POST",
+            f"{url}/settings/set",
+            {**user, "value": "ru"},
+            {"X-Settings-Capability": deployment.values["SETTINGS_WRITE_CAPABILITY"]},
+        )
+        read = http("POST", f"{url}/settings/get", user)
+        if written[0] != 422 or read[0] != 422:
+            raise ProofError(f"user-scoped core language was not refused: {written} {read}")
+        return {"set": {"status": written[0]}, "get": {"status": read[0]}}
+
     def language_scenario(self, deployment: SimpleNamespace, control: str) -> dict:
         """Core unknown input and a module command answer in RU and EN via the Bot API."""
-        results = {}
+        results: dict = {"user_scope": self.user_language_refused(deployment)}
         for language in ("ru", "en"):  # End on the language the delivery scenario used.
             expected = LANGUAGE_REPLIES[language]
             setting = self.set_language(deployment, language)

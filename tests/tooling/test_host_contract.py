@@ -276,3 +276,112 @@ def test_violations_refuse_to_render_and_are_binding_errors(tmp_path: Path) -> N
     with pytest.raises(BindingError, match="HostContractError"):
         render_registry(contract)
     assert not (product / host_contract.REGISTRY).exists()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'extra = {"unexpected": True}\nCOMMANDS = (ProductCommand("ping", handle, **extra),)\n',
+        'COMMANDS = (ProductCommand("ping", handle, handler=handle),)\n',
+        'COMMANDS = (ProductCommand("ping", name="ping", handler=handle),)\n',
+        'COMMANDS = (ProductCommand("ping", handle, handle),)\n',
+        'arguments = ("ping", handle)\nCOMMANDS = (ProductCommand(*arguments),)\n',
+        'COMMANDS = (ProductCommand("ping", handle, block=False),)\n',
+    ],
+)
+def test_product_command_shapes_the_runtime_refuses_fail_before_writes(
+    tmp_path: Path, body: str
+) -> None:
+    product = _product(tmp_path)
+    _commands(product, body)
+    assert _codes(evaluate(product)) == ["unsupported_product_command"]
+    with pytest.raises(HostContractError):
+        write_registry(product, evaluate(product).require_valid())
+    assert not (product / host_contract.REGISTRY).exists()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'COMMANDS = (ProductCommand("ping", handle),)\n',
+        'COMMANDS = (ProductCommand(name="ping", handler=handle),)\n',
+        'COMMANDS = (ProductCommand("ping", handler=handle),)\n',
+    ],
+)
+def test_product_command_shapes_the_runtime_accepts_are_admitted(tmp_path: Path, body: str) -> None:
+    product = _product(tmp_path)
+    _commands(product, body)
+    contract = evaluate(product)
+    assert contract.violations == []
+    assert [(item.command, item.symbol) for item in contract.commands][-1] == ("ping", "handle")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "async def ping(update, context):\n"
+        "    context.application.handlers[0][-1].callback = ping\n",
+        "async def ping(update, context):\n    context.application.handlers.clear()\n",
+        "async def ping(update, context):\n    context.application.remove_handler(handler)\n",
+        "def wipe(app):\n    app.handlers[0] = []\n",
+        'def wipe(application):\n    getattr(application, "handlers").clear()\n',
+    ],
+)
+def test_registry_mutation_through_product_code_fails_closed(tmp_path: Path, source: str) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/ping.py").write_text(source)
+    violations = evaluate(product).violations
+    assert violations and {item.code for item in violations} == {"registration_bypass"}
+    assert violations[0].location == host_contract.Location("services/tg_bot/src/ping.py", 2)
+
+
+def test_ordinary_product_handlers_callbacks_and_clear_are_not_banned(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/logic.py").write_text(
+        "class Queue:\n"
+        "    def __init__(self):\n"
+        "        self.handlers = []\n"
+        "        self.callback = None\n\n"
+        "    def reset(self, context):\n"
+        "        self.handlers.clear()\n"
+        "        self.callback = context.bot_data.get('callback')\n"
+        "        context.user_data.clear()\n"
+    )
+    assert evaluate(product).violations == []
+
+
+@pytest.mark.parametrize("text", ["- language\n", "version: [1\n", "version: 1\n"])
+def test_malformed_manifest_fails_closed_with_its_source(tmp_path: Path, text: str) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/manifest.yaml").write_text(text)
+    [violation] = evaluate(product).violations
+    assert violation.code == "manifest_invalid"
+    assert violation.location == host_contract.Location("services/tg_bot/manifest.yaml")
+    with pytest.raises(HostContractError, match="manifest_invalid"):
+        check_product(product)
+
+
+def test_binding_timezone_naming_core_language_is_refused(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    _bind_channels(product)
+    path = product / "services/tg_bot/bindings/tg-channels.yaml"
+    path.write_text(
+        path.read_text()
+        + "timezone: {key: language, scope: product, required: true, format: x-iana-tz}\n"
+    )
+    [violation] = evaluate(product).violations
+    assert (violation.code, violation.owner, violation.key) == (
+        "binding_setting_conflict",
+        "product",
+        "language",
+    )
+    assert violation.location == host_contract.Location(
+        "services/tg_bot/bindings/tg-channels.yaml", 71
+    )
+    # The same binding offered as a package default is the package's, not the product's.
+    prospective = evaluate(
+        product,
+        {"tg-channels.yaml": load_binding(path)},
+        {"tg-channels.yaml": tmp_path / "elsewhere.yaml"},
+    )
+    assert [item.owner for item in prospective.violations] == ["package:tg-channels"]

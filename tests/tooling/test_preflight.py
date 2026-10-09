@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import venv
 import zipfile
 
 import pytest
@@ -33,6 +34,10 @@ settings_schema:
     language: {type: string, enum: [ru, en]}
   additionalProperties: false
 """
+#: A timezone reference that names the core language key.
+TIMEZONE_AS_LANGUAGE = (
+    "timezone: {key: language, scope: product, required: true, format: x-iana-tz}\n"
+)
 CHANNEL_COMMAND = (
     "from services.tg_bot.src.generated.commands import ProductCommand\n\n\n"
     "async def handle_channel(update, context):\n    pass\n\n\n"
@@ -43,10 +48,18 @@ CHANNEL_COMMAND = (
 def _product(root: Path, core: str = "2.5.0") -> Path:
     for service in ("backend", "tg_bot"):
         directory = root / "services" / service
-        (directory / ".venv/bin").mkdir(parents=True)
-        (directory / ".venv/bin/python").write_text("")
+        directory.mkdir(parents=True)
+        # A real, empty product virtualenv: its interpreter symlink leaves the product, the
+        # environment does not. Nothing is installed into it.
+        venv.EnvBuilder(symlinks=True, with_pip=False).create(directory / ".venv")
         (directory / "pyproject.toml").write_text(f"[project]\nname = '{service}'\n")
-    (root / "services/backend/manifest.yaml").write_text("version: 1\npackages: []\n")
+    # A valid version 1 manifest: the host contract refuses a malformed one.
+    (root / "services/backend/manifest.yaml").write_text(
+        "version: 1\nsettings_schema:\n"
+        "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+        "  type: object\n  properties: {}\n  additionalProperties: false\n"
+        "packages: []\n"
+    )
     (root / "services/tg_bot/src").mkdir(parents=True)
     shutil.copy2(
         ROOT / "template/services/tg_bot/src/commands.py", root / "services/tg_bot/src/commands.py"
@@ -56,17 +69,17 @@ def _product(root: Path, core: str = "2.5.0") -> Path:
     return root
 
 
-def _state(root: Path) -> dict[str, tuple[int, int, bytes]]:
-    """Every file, including environments: size, mtime and bytes."""
-    return {
-        str(path.relative_to(root)): (
-            path.stat().st_size,
-            path.stat().st_mtime_ns,
-            path.read_bytes(),
-        )
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+def _state(root: Path) -> dict[str, object]:
+    """Every file, including environments: size, mtime and bytes; symlinks by target."""
+    state: dict[str, object] = {}
+    for path in sorted(root.rglob("*")):
+        relative = str(path.relative_to(root))
+        if path.is_symlink():
+            state[relative] = os.readlink(path)
+        elif path.is_file():
+            stat = path.stat()
+            state[relative] = (stat.st_size, stat.st_mtime_ns, path.read_bytes())
+    return state
 
 
 def _check(root: Path, **kwargs):
@@ -142,59 +155,106 @@ def test_simultaneous_conflicts_are_all_reported_in_order(tmp_path: Path) -> Non
     ]
 
 
-@pytest.mark.parametrize(
-    ("change", "code"),
-    [
-        ("core-old", "core_range"),
-        ("core-missing", "core_unsupported"),
-        ("no-tg-bot", "product_shape"),
-        ("no-venv", "environment_missing"),
-        ("no-provenance", "provenance_required"),
-        ("both-provenances", "provenance_required"),
-        ("other-name", "package_mismatch"),
-        ("other-version", "package_mismatch"),
-        ("no-metadata", "artifact_unavailable"),
-        ("binding-language", "binding_language_owner"),
-        ("catalog-unreachable", "catalog_unavailable"),
-    ],
-)
-def test_incompatible_results_carry_a_stable_reason(  # noqa: C901
-    tmp_path: Path, change: str, code: str
-) -> None:
+def _replace_python(product: Path, service: str, content: str) -> None:
+    python = product / f"services/{service}/.venv/bin/python"
+    python.unlink()
+    python.write_text(content)
+    python.chmod(0o755)
+
+
+def _host_venv(product: Path, source: Path, tmp_path: Path) -> None:
+    # The whole environment lives outside the product, as a host venv would.
+    outside = tmp_path / "host-venv"
+    shutil.move(product / "services/tg_bot/.venv", outside)
+    (product / "services/tg_bot/.venv").symlink_to(outside)
+
+
+def _default_binding(source: Path, edit) -> None:
+    binding = source / MODULE / "bindings/default.yaml"
+    binding.write_text(edit(binding.read_text()))
+
+
+def _manifest(product: Path, text: str) -> None:
+    (product / "services/tg_bot/manifest.yaml").write_text(text)
+
+
+#: Each case changes the product, or the package source, before the preflight runs.
+INCOMPATIBLE_CASES = {
+    "core-missing": (
+        "core_unsupported",
+        lambda p, s, t: (p / "codegen_kit/packages.py").write_text(""),
+    ),
+    "no-tg-bot": ("product_shape", lambda p, s, t: shutil.rmtree(p / "services/tg_bot")),
+    "no-venv": (
+        "environment_missing",
+        lambda p, s, t: shutil.rmtree(p / "services/tg_bot/.venv"),
+    ),
+    "host-venv": ("environment_invalid", _host_venv),
+    "placeholder": ("environment_invalid", lambda p, s, t: _replace_python(p, "tg_bot", "")),
+    "broken-interpreter": (
+        "environment_invalid",
+        lambda p, s, t: _replace_python(p, "backend", "#!/bin/sh\nexit 3\n"),
+    ),
+    "manifest-list": ("manifest_invalid", lambda p, s, t: _manifest(p, "- language\n")),
+    "manifest-yaml": ("manifest_invalid", lambda p, s, t: _manifest(p, "version: [1\n")),
+    "no-metadata": (
+        "artifact_unavailable",
+        lambda p, s, t: (s / MODULE / "package.yaml").unlink(),
+    ),
+    "unreadable-metadata": (
+        "artifact_unavailable",
+        lambda p, s, t: (s / MODULE / "package.yaml").chmod(0),
+    ),
+    "binding-language": (
+        "binding_language_owner",
+        lambda p, s, t: _default_binding(
+            s, lambda text: text.replace("key: language", "key: product_language")
+        ),
+    ),
+    "default-timezone-language": (
+        "binding_setting_conflict",
+        lambda p, s, t: _default_binding(s, lambda text: text + TIMEZONE_AS_LANGUAGE),
+    ),
+}
+#: Cases that change the request instead: package name, version or provenance.
+REQUEST_CASES = {
+    "core-old": ("core_range", {}),
+    "no-provenance": ("provenance_required", {"package_source": None}),
+    "both-provenances": ("provenance_required", {"catalog_ref": "HEAD", "catalog": "self"}),
+    "other-name": ("package_mismatch", {"name": "reminders"}),
+    "other-version": ("package_mismatch", {"version": "0.1.1"}),
+    "catalog-unreachable": (
+        "catalog_unavailable",
+        {"package_source": None, "catalog_ref": "HEAD", "catalog": "missing"},
+    ),
+}
+
+
+@pytest.mark.parametrize("change", [*INCOMPATIBLE_CASES, *REQUEST_CASES])
+def test_incompatible_results_carry_a_stable_reason(tmp_path: Path, change: str) -> None:
     product = _product(tmp_path / "product", "2.3.0" if change == "core-old" else "2.5.0")
-    source: Path | None = tmp_path / "source"
+    source = tmp_path / "source"
     shutil.copytree(CHANNELS, source, ignore=shutil.ignore_patterns("__pycache__"))
-    arguments: dict = {}
-    name = "tg-channels"
-    if change == "core-missing":
-        (product / "codegen_kit/packages.py").write_text("")
-    elif change == "no-tg-bot":
-        shutil.rmtree(product / "services/tg_bot")
-    elif change == "no-venv":
-        shutil.rmtree(product / "services/tg_bot/.venv")
-    elif change == "no-provenance":
-        source = None
-    elif change == "both-provenances":
-        arguments = {"catalog_source": str(tmp_path), "catalog_ref": "HEAD"}
-    elif change == "other-name":
-        name = "reminders"
-    elif change == "other-version":
-        arguments = {"version": "0.1.1"}
-    elif change == "no-metadata":
-        (source / MODULE / "package.yaml").unlink()
-    elif change == "binding-language":
-        binding = source / MODULE / "bindings/default.yaml"
-        binding.write_text(binding.read_text().replace("key: language", "key: product_language"))
-    elif change == "catalog-unreachable":
-        source = None
-        arguments = {"catalog_source": str(tmp_path / "missing"), "catalog_ref": "HEAD"}
+    request: dict = {"name": "tg-channels", "package_source": source}
+    if change in INCOMPATIBLE_CASES:
+        code, apply = INCOMPATIBLE_CASES[change]
+        apply(product, source, tmp_path)
+    else:
+        code, overrides = REQUEST_CASES[change]
+        request |= overrides
+        catalog = request.pop("catalog", None)
+        if catalog is not None:
+            request["catalog_source"] = str(
+                tmp_path / catalog if catalog == "missing" else tmp_path
+            )
     assert code in INCOMPATIBLE_CODES
     before = _state(product)
-    result = check_install(product, name, package_source=source, **arguments)
+    result = check_install(product, request.pop("name"), **request)
     assert _state(product) == before
-    assert result.status == "incompatible" and result.exit_code == 4
+    assert result.status == "incompatible" and result.exit_code == 4, result.to_json()
     assert result.incompatible is not None and result.incompatible["code"] == code
     assert result.incompatible["explanation"] and result.glue == []
+    json.loads(result.to_json())
 
 
 def _git(*arguments: str, cwd: Path) -> None:
@@ -293,3 +353,88 @@ def test_kit_add_refuses_named_conflicts_before_any_product_write(
     assert calls == [] and _state(product) == before
     manifest = yaml.safe_load((product / "services/backend/manifest.yaml").read_text())
     assert manifest["packages"] == []
+
+
+def _retain_default(product: Path, edit) -> Path:
+    """The product keeps its own copy of the binding, as `kit bind --file` leaves it."""
+    retained = product / "services/tg_bot/bindings/tg-channels.yaml"
+    retained.parent.mkdir(parents=True, exist_ok=True)
+    retained.write_text(edit((CHANNELS / MODULE / "bindings/default.yaml").read_text()))
+    return retained
+
+
+@pytest.mark.parametrize(
+    ("edit", "code", "line"),
+    [
+        (lambda text: text + TIMEZONE_AS_LANGUAGE, "binding_setting_conflict", 71),
+        (
+            lambda text: text.replace("key: language", "key: product_language"),
+            "binding_language_owner",
+            3,
+        ),
+    ],
+)
+def test_retained_binding_language_conflict_is_glue_at_its_file(
+    tmp_path: Path, edit, code: str, line: int
+) -> None:
+    product = _product(tmp_path)
+    _retain_default(product, edit)
+    [item] = _check(product).glue
+    assert (item["code"], item["owner"], item["path"], item["line"]) == (
+        code,
+        "product",
+        "services/tg_bot/bindings/tg-channels.yaml",
+        line,
+    )
+    assert item["action"].startswith("edit services/tg_bot/bindings/tg-channels.yaml")
+
+
+def test_retained_binding_is_validated_instead_of_the_default(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    _retain_default(product, lambda text: text.replace("tg-channels.add", "tg-channels.missing"))
+    result = _check(product)
+    assert result.incompatible is not None and result.incompatible["code"] == "binding_invalid"
+    assert (
+        "retained services/tg_bot/bindings/tg-channels.yaml" in result.incompatible["explanation"]
+    )
+
+
+def test_cli_malformed_manifest_is_typed_json_not_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/manifest.yaml").write_text("- language\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "kit",
+            "check-install",
+            "tg-channels",
+            "--json",
+            "--package-source",
+            str(CHANNELS),
+            "--product-root",
+            str(product),
+        ],
+    )
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+    assert exited.value.code == 4
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["result_version"] == 1
+    assert payload["incompatible"]["code"] == "manifest_invalid"
+
+
+def test_kit_add_refuses_a_retained_binding_conflict_before_any_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product = _product(tmp_path / "product")
+    _retain_default(product, lambda text: text + TIMEZONE_AS_LANGUAGE)
+    wheel = _wheel(tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(cli, "_run", lambda command, root: calls.append(command))
+    monkeypatch.setattr(cli, "generate_all", lambda root: calls.append(root))
+    before = _state(product)
+    with pytest.raises(BindingError, match="binding_setting_conflict"):
+        cli.add_package("tg-channels", wheel, product)
+    assert calls == [] and _state(product) == before

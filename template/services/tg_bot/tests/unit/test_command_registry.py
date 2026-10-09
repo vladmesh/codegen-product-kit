@@ -28,12 +28,28 @@ def _register(**overrides: Any) -> Application:
 
 def test_registry_registers_access_commands_then_core_fallback() -> None:
     application = _register()
-    assert [type(item) for item in application.handlers[-1]] == [TypeHandler]
+    assert [isinstance(item, TypeHandler) for item in application.handlers[-1]] == [True]
     group = application.handlers[0]
     registered = [sorted(item.commands)[0] for item in group if isinstance(item, CommandHandler)]
     assert registered == [item["command"] for item in commands.COMMANDS]
     assert isinstance(group[-1], MessageHandler)
     assert sum(isinstance(item, MessageHandler) for item in group) == 1
+
+
+def test_registered_handlers_are_final() -> None:
+    application = _register()
+    fallback = application.handlers[0][-1]
+    with pytest.raises(commands.CommandRegistryError):
+        fallback.callback = AsyncMock()
+    with pytest.raises(commands.CommandRegistryError):
+        application.handlers.clear()
+    with pytest.raises(commands.CommandRegistryError):
+        application.handlers[5] = []
+    with pytest.raises(AttributeError):
+        application.add_handler(MessageHandler(None, AsyncMock()))
+    with pytest.raises(AttributeError):
+        application.remove_handler(fallback)
+    assert application.handlers[0][-1] is fallback
 
 
 def test_unknown_input_uses_core_language_or_both() -> None:

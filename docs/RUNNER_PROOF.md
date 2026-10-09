@@ -252,7 +252,9 @@ after moving its kit pin. The runner refuses a planner whose tooling is not the 
     `language` is set to `ru` and then back to `en` through the same `/settings/set`; in each
     language an unknown command and plain text must get the core registry's localized
     unknown-input reply listing `/channel`, and `/channel` without a name the binding's localized
-    `on_empty` reply, all through the fake Bot API transport.
+    `on_empty` reply, all through the fake Bot API transport. A user-scoped `language` set and
+    get must both be refused (422) by the real backend: the core language exists only in
+    product scope.
 
 ## Fixtures and controlled edges
 
@@ -300,5 +302,5 @@ environment contract artifact and one log per command. Every known synthetic sec
 | `integration_without_host_environments` | the cold `make test-integration` summary |
 | `platform` | auth image, throwaway product id, grant, admin read-back and ingress refusals |
 | `deployment` | the digest references the running backend and bot use |
-| `scenario` | initialization responses, negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery; `languages`: per `ru`/`en` the language write and the unknown-command, unknown-text and `/channel` replies |
+| `scenario` | initialization responses, negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery; `languages`: the refused user-scoped set/get statuses, then per `ru`/`en` the language write and the unknown-command, unknown-text and `/channel` replies |
 | `commands`, `resources` | every command with cwd, exit code, duration and log; created resources and their clean-up |

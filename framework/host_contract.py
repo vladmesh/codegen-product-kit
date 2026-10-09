@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 import json
 import os
@@ -65,13 +65,17 @@ BYPASS_NAMES = frozenset(
         "TypeHandler",
         "add_handler",
         "add_handlers",
+        "remove_handler",
     }
 )
+#: Names that reach a PTB Application; ``<application>.handlers`` is the core registry itself.
+APPLICATION_NAMES = frozenset({"application", "app"})
 #: tg_bot paths that are not product handler code: environments, tests, wheels and the
 #: generated tree, which product CI drift-checks against the generator instead.
 _SKIPPED_ROOTS = frozenset({".venv", "tests", "packages"})
 
-#: Violations the product author resolves by editing product-owned files.
+#: Violations the product author resolves by editing product-owned files. A binding
+#: violation is glue too when the binding is a retained product file (owner ``product``).
 GLUE_CODES = frozenset(
     {
         "core_setting_redeclared",
@@ -192,19 +196,30 @@ def _compose(path: Path) -> yaml.Node | None:
 
 
 def manifest_setting_violations(root: Path) -> list[Violation]:
-    """Product service manifests must not declare a core-owned setting key."""
+    """Product service manifests must be valid and must not declare a core-owned key."""
+
+    from framework.spec.loader import SpecValidationError, load_manifest
 
     violations = []
     for manifest in sorted((root / "services").glob("*/manifest.yaml")):
         relative = str(manifest.relative_to(root))
+        service = manifest.parent.name
         try:
-            data = yaml.safe_load(manifest.read_text()) or {}
-        except (OSError, yaml.YAMLError):
-            continue  # The spec loader names an unreadable manifest itself.
-        properties = (data.get("settings_schema") or {}).get("properties") or {}
+            properties = load_manifest(manifest).settings_schema["properties"]
+        except (SpecValidationError, OSError, UnicodeError) as error:
+            # Fail closed: the ownership of an unreadable manifest cannot be verified.
+            violations.append(
+                Violation(
+                    code="manifest_invalid",
+                    owner=f"service:{service}",
+                    location=Location(relative),
+                    conflict=f"{relative} is not a valid service manifest: {error}",
+                    action=f"make {relative} a valid version 1 service manifest",
+                )
+            )
+            continue
         lines = _key_lines(_compose(manifest), "settings_schema", "properties")
         for key in sorted(CORE_SETTINGS.keys() & set(properties)):
-            service = manifest.parent.name
             violations.append(
                 Violation(
                     code="core_setting_redeclared",
@@ -225,7 +240,31 @@ def manifest_setting_violations(root: Path) -> list[Violation]:
     return violations
 
 
+def _command_arguments(node: ast.Call) -> dict[str, ast.expr] | str:
+    """Bind a call like the runtime constructor (name, handler), or name the unsupported form."""
+
+    parameters = ("name", "handler")
+    if any(isinstance(item, ast.Starred) for item in node.args) or any(
+        keyword.arg is None for keyword in node.keywords
+    ):
+        return f"{PRODUCT_COMMAND_TYPE} arguments may not be unpacked"
+    if len(node.args) > len(parameters):
+        return f"{PRODUCT_COMMAND_TYPE} takes at most a name and a handler positionally"
+    arguments: dict[str, ast.expr] = dict(zip(parameters, node.args, strict=False))
+    for keyword in node.keywords:
+        if keyword.arg not in parameters:
+            return f"{PRODUCT_COMMAND_TYPE} has no argument {keyword.arg!r}"
+        if keyword.arg in arguments:
+            return f"{PRODUCT_COMMAND_TYPE} receives {keyword.arg!r} twice"
+        arguments[str(keyword.arg)] = keyword.value
+    if set(arguments) != set(parameters):
+        return f"{PRODUCT_COMMAND_TYPE} takes exactly a name and a handler"
+    return arguments
+
+
 def _product_command(node: ast.expr, location: Location) -> tuple[CommandClaim | None, str]:
+    """Admit exactly the runtime constructor's shapes: name and handler, positional or named."""
+
     if not (
         isinstance(node, ast.Call)
         and (
@@ -234,13 +273,10 @@ def _product_command(node: ast.expr, location: Location) -> tuple[CommandClaim |
         )
     ):
         return None, f"each COMMANDS entry must be a {PRODUCT_COMMAND_TYPE}(...) call"
-    arguments = {
-        **dict(zip(("name", "handler"), node.args, strict=False)),
-        **{keyword.arg: keyword.value for keyword in node.keywords if keyword.arg},
-    }
-    name, handler = arguments.get("name"), arguments.get("handler")
-    if len(node.args) > 2 or set(arguments) != {"name", "handler"}:  # noqa: PLR2004
-        return None, f"{PRODUCT_COMMAND_TYPE} takes exactly a name and a handler"
+    arguments = _command_arguments(node)
+    if isinstance(arguments, str):
+        return None, arguments
+    name, handler = arguments["name"], arguments["handler"]
     if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
         return None, "the command name must be a string literal"
     if not isinstance(handler, ast.Name | ast.Attribute):
@@ -337,6 +373,30 @@ def _bypass_names(node: ast.AST) -> Iterable[str]:
         yield node.value
 
 
+def _reaches_application(node: ast.AST) -> bool:
+    """Whether an expression chain names a PTB Application (``context.application``, ``app``)."""
+    while isinstance(node, ast.Attribute | ast.Subscript | ast.Call):
+        if isinstance(node, ast.Attribute) and node.attr in APPLICATION_NAMES:
+            return True
+        node = node.func if isinstance(node, ast.Call) else node.value
+    return isinstance(node, ast.Name) and node.id in APPLICATION_NAMES
+
+
+def _registry_access(node: ast.AST) -> bool:
+    """``<application>.handlers`` or ``getattr(<application>, "handlers")``: the registry."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "handlers" and _reaches_application(node.value)
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2  # noqa: PLR2004
+        and _reaches_application(node.args[0])
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "handlers"
+    )
+
+
 def _product_sources(root: Path) -> list[Path]:
     service = root / TG_BOT
     sources = []
@@ -376,6 +436,25 @@ def registration_bypasses(root: Path) -> list[Violation]:
             continue
         seen: set[tuple[int, str]] = set()
         for node in ast.walk(module):
+            if _registry_access(node) and (node.lineno, "handlers") not in seen:
+                seen.add((node.lineno, "handlers"))
+                violations.append(
+                    Violation(
+                        code="registration_bypass",
+                        owner=PRODUCT_OWNER,
+                        symbol="application.handlers",
+                        location=Location(relative, node.lineno),
+                        conflict=(
+                            "the application's handlers are the core command registry; reading "
+                            "or changing them replaces commands, access or the unknown-input reply"
+                        ),
+                        action=(
+                            "remove the access to application.handlers; declare commands as "
+                            f"{PRODUCT_COMMAND_TYPE}(name, handler) in COMMANDS of "
+                            f"{PRODUCT_COMMANDS}"
+                        ),
+                    )
+                )
             for name in _bypass_names(node):
                 line = getattr(node, "lineno", None) or 0
                 if name not in BYPASS_NAMES or (line, name) in seen:
@@ -422,28 +501,12 @@ def binding_claims(
 ) -> tuple[list[CommandClaim], list[Violation]]:
     """Commands bound modules contribute, at their product binding path, in file order."""
 
-    from framework.bindings_v2 import BindingV2
-
     claims: list[CommandClaim] = []
     violations: list[Violation] = []
     for filename, binding in sorted(bindings.items()):
         relative = f"{TG_BOT}/bindings/{filename}"
         owner = f"package:{binding.package}"
         lines = _binding_command_lines((sources or {}).get(filename))
-        if isinstance(binding, BindingV2) and binding.language.key != LANGUAGE_KEY:
-            violations.append(
-                Violation(
-                    code="binding_language_owner",
-                    owner=owner,
-                    key=binding.language.key,
-                    location=Location(relative),
-                    conflict=(
-                        f"binding reads language from {binding.language.key!r}; language is "
-                        f"the core setting {LANGUAGE_KEY!r}"
-                    ),
-                    action=f"reference the core setting as language: {{key: {LANGUAGE_KEY}}}",
-                )
-            )
         for command in binding.commands:
             claims.append(
                 CommandClaim(
@@ -454,6 +517,87 @@ def binding_claims(
                 )
             )
     return claims, violations
+
+
+def _timezone_conflict(binding: Binding | BindingV2, timezones: Mapping[str, str]) -> str:
+    """Why a binding's timezone reference breaks the shared settings, or an empty string."""
+
+    from framework.binding_product import binding_settings
+
+    if binding.timezone is None:
+        return ""
+    key = binding.timezone.key
+    try:
+        binding_settings(binding)
+    except BindingError as error:
+        return str(error)
+    if key in CORE_SETTINGS:
+        return f"timezone reads the core setting {key!r}, which is not a timezone"
+    if timezones and key not in timezones:
+        other, where = next(iter(timezones.items()))
+        return (
+            f"timezone key {key!r} differs from {other!r} of {where}; all bindings share one "
+            "product timezone key"
+        )
+    return ""
+
+
+def binding_setting_violations(
+    bindings: Mapping[str, Binding | BindingV2],
+    sources: Mapping[str, Path],
+    retained: Collection[str],
+) -> list[Violation]:
+    """Settings a binding reads must reference core language and one product timezone.
+
+    Reuses ``binding_settings``. A violation in a retained product binding file is the
+    product's to fix (owner ``product``); one in a package default is the package's.
+    """
+
+    from framework.bindings_v2 import BindingV2
+
+    violations: list[Violation] = []
+    timezones: dict[str, str] = {}
+    for filename, binding in sorted(bindings.items()):
+        relative = f"{TG_BOT}/bindings/{filename}"
+        mine = filename in retained
+        owner = PRODUCT_OWNER if mine else f"package:{binding.package}"
+        source = sources.get(filename)
+        node = _compose(source) if source is not None else None
+        fix = f"edit {relative}" if mine else f"bind {binding.package} with a product override"
+        if isinstance(binding, BindingV2) and binding.language.key != LANGUAGE_KEY:
+            violations.append(
+                Violation(
+                    code="binding_language_owner",
+                    owner=owner,
+                    key=binding.language.key,
+                    symbol=binding.package,
+                    location=Location(relative, _key_lines(node, "language").get("key")),
+                    conflict=(
+                        f"binding reads language from {binding.language.key!r}; language is "
+                        f"the core setting {LANGUAGE_KEY!r}"
+                    ),
+                    action=f"{fix}: reference core language as language: {{key: {LANGUAGE_KEY}}}",
+                )
+            )
+        conflict = _timezone_conflict(binding, timezones)
+        if conflict and binding.timezone is not None:
+            violations.append(
+                Violation(
+                    code="binding_setting_conflict",
+                    owner=owner,
+                    key=binding.timezone.key,
+                    symbol=binding.package,
+                    location=Location(relative, _key_lines(node, "timezone").get("key")),
+                    conflict=conflict,
+                    action=(
+                        f"{fix}: give timezone one product key, distinct from the core "
+                        f"{LANGUAGE_KEY!r} setting"
+                    ),
+                )
+            )
+        elif binding.timezone is not None:
+            timezones.setdefault(binding.timezone.key, relative)
+    return violations
 
 
 def _command_violation(claim: CommandClaim, claimed: dict[str, CommandClaim]) -> Violation | None:
@@ -525,16 +669,25 @@ def evaluate(
     if bindings is None:
         bindings = binding_files(root)
         binding_sources = {name: root / TG_BOT / "bindings" / name for name in bindings}
+    sources = dict(binding_sources or {})
+    product_bindings = root / TG_BOT / "bindings"
+    # Retained: the binding is the product's own file, not a prospective package default.
+    retained = {
+        name
+        for name, path in sources.items()
+        if path.parent.resolve() == product_bindings.resolve() and path.name == name
+    }
     builtins = [CommandClaim("start", CORE_OWNER, Location(CORE_COMMAND_SOURCE), "handle_start")]
     if contract.backend:
         builtins.append(
             CommandClaim("command", CORE_OWNER, Location(CORE_COMMAND_SOURCE), "handle_command")
         )
     product, product_violations = product_command_claims(root)
-    modules, module_violations = binding_claims(bindings, binding_sources)
+    modules, module_violations = binding_claims(bindings, sources)
     contract.violations.extend(product_violations)
     contract.violations.extend(registration_bypasses(root))
     contract.violations.extend(module_violations)
+    contract.violations.extend(binding_setting_violations(bindings, sources, retained))
     claimed: dict[str, CommandClaim] = {}
     for claim in [*builtins, *product, *modules]:
         violation = _command_violation(claim, claimed)

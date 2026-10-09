@@ -118,13 +118,17 @@ latest entry after that publication would skip the event. Early registration pre
 delivery observation while retaining the crash exit, pending database state, replacement exit,
 event identity and stream-count assertions. This Redis/PostgreSQL scenario runs in CI only.
 
-The generated product's `tests/integration/test_durable_events.py` owns the shared `job_fired`
-stream while it runs, but the product's live backend core timer also publishes there at every
-slot boundary of an installed package timer (multiples of its period since the epoch). Both
-tests that read `job_fired` therefore start, from the generated `JOB_TIMERS`, only when no
-boundary falls within the next 15 seconds (less for shorter periods), and their `flushdb` drops
-earlier fires. With reminders and tg-channels installed, a run crossing such a minute boundary
-otherwise reads a core-timer event as a second delivery; their assertions are unchanged.
+The generated product's `tests/integration/test_durable_events.py` runs every backlog, live,
+reclaimed, duplicate and generated-adapter case through one fixture transport boundary: its own
+Redis logical database (15, never the product's), into which the generated publishers and every
+reader are redirected. It deletes only its own streams, never flushes the live backend's Redis,
+and asserts the identity of each delivery: the duplicate phase checks both deliveries carry the
+duplicate UUID with one effect, and the adapter guard sees exactly the published event twice.
+While these tests run, they publish real current-slot core-timer `job_fired` events (the
+`core-timer:<job>:<slot>` identity of the first `JOB_TIMERS` entry) into the product's live
+database, where the backend's packages consume them as ordinary module deliveries; none may
+reach the owned stream. Products without timers skip that publication. Redis/Postgres runs are
+CI-only (product CI inside the runner proof and the slow Copier integration lanes).
 
 When a Docker-dependent test cannot run, skip it explicitly at the pytest boundary with a reason;
 do not silently return from the test.
@@ -267,3 +271,20 @@ location; the standalone shape lints and rewrites its registry. The slow case (C
 the real `kit add --wheel` before writes, then installs the built wheel after the glue and binds.
 The runner proof adds the RU/EN unknown-input and `/channel` checks through its fake Bot API.
 
+Review 11 repairs are covered in the same suites. Tooling tests refuse unpacked, duplicate and
+extra `ProductCommand` arguments before any registry write while admitting the positional and
+named forms the runtime accepts; flag `context.application.handlers` callback/clear/remove and
+`getattr(application, "handlers")` but not ordinary `handlers`, `callback` or `clear` fields;
+fail closed on list, invalid-YAML and incomplete manifests; and classify a retained binding that
+names core language as its timezone, or another language key, as product glue at its file and
+line (as a package default: incompatible). Preflight fixtures are real empty virtualenvs
+(`venv`, no installs); a host venv symlinked from outside the product, an empty placeholder and
+a failing interpreter are `environment_invalid`, unreadable metadata `artifact_unavailable`, and
+a malformed manifest is versioned JSON with exit 4 from the CLI. `kit add` refuses a retained
+conflict before any command or write. In a generated product the retained conflict refuses
+generation and bind with unchanged files and environments, and the glue leads to `mechanical`,
+install and bind. `command_registry_scenarios.py` dispatches a product command that tries to
+replace the core fallback callback, clear, extend and shrink the registry; each attempt fails
+and the core unknown reply and `/start` still answer. The product template's settings test
+refuses user-scoped `language` with no stored row and round-trips product RU/EN; the runner
+proof repeats the refusal against the real deployed backend.

@@ -47,7 +47,9 @@ def test_manifest_generator_emits_declared_settings(fake_repo: Path) -> None:
         "items": {"type": "string"},
         "type": "array",
     }
-    assert namespace["SETTINGS_SCHEMA_SOURCES"] == {"languages": "backend"}
+    # Core-owned settings are registered with the core as source and their only scope.
+    assert namespace["SETTINGS_SCHEMA_SOURCES"] == {"language": "core", "languages": "backend"}
+    assert namespace["SETTINGS_SCHEMA_SCOPES"] == {"language": "product"}
 
 
 def test_manifest_generator_never_accepts_duplicate_keys(fake_repo: Path) -> None:

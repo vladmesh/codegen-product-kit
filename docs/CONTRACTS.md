@@ -884,7 +884,10 @@ registers it first with source `core`, so a fresh product's generated `SETTINGS_
 it before any module install, and the ordinary `/settings/set` and `/settings/get` contract writes
 and reads its value. There is no default value, no seeding and no environment fallback. A service
 manifest or package that declares the same key, even with an equal schema, is a competing owner
-and fails generation with its source; bindings reference the core key.
+and fails generation with its source; bindings reference the core key. Generation also emits
+`SETTINGS_SCHEMA_SCOPES` (`{"language": "product"}`) from the same core metadata, and the
+settings controller refuses a core setting in any other scope with 422 on both get and set,
+before the repository is touched; other settings keep both scopes.
 
 ## Core host contract v1
 
@@ -919,13 +922,23 @@ async def handle_ping(update, context) -> None: ...
 COMMANDS: tuple[ProductCommand, ...] = (ProductCommand("ping", handle_ping),)
 ```
 
-Each entry is `ProductCommand("<literal name>", <function name>)`. The lint reads the file as
-data and fails closed on any other form: a non-literal name, extra arguments, a non-tuple value,
+Each entry is `ProductCommand("<literal name>", <function name>)`, or the same two arguments
+named (`name=`, `handler=`), exactly the shapes the runtime constructor accepts. The lint reads
+the file as data and fails closed on any other form before anything is written: a non-literal
+name, unpacked (`*`/`**`) or extra arguments, an argument given twice, a non-tuple value,
 reassignment or augmentation. Product tg_bot code outside `src/generated/`, `tests/`, `packages/`
 and environments may not mention `BaseHandler`, `CommandHandler`, `ConversationHandler`,
 `MessageHandler`, `PrefixHandler`, `StringCommandHandler`, `StringRegexHandler`, `TypeHandler`,
-`add_handler` or `add_handlers` as a name, attribute, import or string; these would register a
-command or a catch-all outside the registry. Product callbacks and other update types are not
+`add_handler`, `add_handlers` or `remove_handler` as a name, attribute, import or string, nor
+reach the registry itself as `<application>.handlers` (or `getattr(<application>, "handlers")`),
+where the chain names `application` or `app`, as `context.application` does; these would register,
+replace or remove a command, the access check or the unknown-input reply. Other attributes
+called `handlers`, `callback` or `clear` in product logic are not restricted. At runtime the
+registry is final: after registration every handler group is a fixed tuple and every registered
+handler is sealed, so adding, removing or clearing handlers, or replacing a handler's callback,
+raises (`CommandRegistryError`, or `AttributeError` from PTB's list operations) inside the
+offending handler and the core access, commands and unknown-input reply keep working. This
+protects the registry; it is not a Python sandbox. Product callbacks and other update types are not
 contributable in this version. Other product logic is not linted by this contract.
 
 Unknown commands and text reach the core reply, which lists the registry's commands in the core
@@ -953,9 +966,14 @@ the product's files and the exact package version's `package.yaml` and default b
 from a package source directory, or from the tag a catalog at an explicit source and ref selects
 for the product's façade (or `--version`). There is no live catalog default and no environment
 variable fallback. It never imports package runtime, never builds or installs, and never writes
-to the product, its environments, locks, settings or database. It only checks that the product's
-service environments exist (and, for a parsed v1 command, reads library metadata through the
-bot environment's isolated interpreter).
+to the product, its environments, locks, settings or database. Evaluation order is the same for
+check-install, `kit add` and `kit bind`: the product's service environments are validated with
+the read-only ownership/provenance check normal bind uses (the virtualenv must live inside the
+product and its interpreter must answer an isolated, bytecode-free query; a host venv, a
+placeholder or an unusable interpreter is refused), then the effective binding is chosen (a
+retained `services/tg_bot/bindings/<package>.yaml` wins over the package default) and validated
+against the exact package manifest, then core language and timezone references (through
+`binding_settings`) and command claims are resolved. No environment is created or synced.
 
 Result version 1, printed with sorted keys:
 
@@ -972,13 +990,19 @@ Result version 1, printed with sorted keys:
 Each glue item has `code`, `path`, `line` (or `null`), `owner`, `symbol`, `key`, `command`,
 `conflict`, `action` and `other` (`{owner, path, line, symbol}` of the other claimant or `null`).
 Codes are `core_setting_redeclared`, `command_collision`, `reserved_command`, `invalid_command`,
-`unsupported_product_command`, `registration_bypass` and `library_required`. Command glue is
+`unsupported_product_command`, `registration_bypass` and `library_required`, plus
+`binding_language_owner` and `binding_setting_conflict` when the offending binding is a retained
+product file (owner `product`, with that file and line). Command glue is
 anchored on the product-editable side. Prospective module paths are the product binding path
 `services/tg_bot/bindings/<package>.yaml` the default bind would write. Incompatible codes are
 `provenance_required`, `catalog_unavailable`, `unknown_component`, `unsupported_component`,
 `artifact_unavailable`, `package_metadata_invalid`, `package_mismatch`, `product_shape`,
-`environment_missing`, `core_unsupported`, `core_range`, `binding_invalid` and
-`binding_language_owner`. A prospective conflict is a result, never a traceback.
+`environment_missing`, `environment_invalid`, `manifest_invalid`, `core_unsupported`,
+`core_range`, `binding_invalid`, `binding_language_owner` and `binding_setting_conflict` (the
+last two when a package default breaks the core references). A malformed or unreadable service
+manifest (`- language`, invalid YAML, a missing `settings_schema`) is `manifest_invalid`;
+generation and lint fail on it too instead of skipping it. A prospective conflict or an expected
+input failure is a result, never a traceback; programming errors stay visible.
 
 `mechanical` means the version, source and core range were verified and the prospective product
 satisfies the contract as is. Exit status is 0 for `mechanical`, 3 for `glue`, 4 for

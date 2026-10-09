@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.backend.src.app.models.setting import Setting
 from services.backend.src.core.db import get_async_db
 from services.backend.src.core.settings import get_settings
-from services.backend.src.generated.settings_schemas import SETTINGS_SCHEMAS
+from services.backend.src.generated.settings_schemas import (
+    SETTINGS_SCHEMA_SCOPES,
+    SETTINGS_SCHEMAS,
+)
 
 SETTINGS_CAPABILITY_HEADER = "X-Settings-Capability"
 FIRST_SUBJECT_VALUE = 2
@@ -149,6 +152,31 @@ async def test_user_scoped_settings_are_isolated_by_subject(client: AsyncClient)
     assert second["value"] == SECOND_SUBJECT_VALUE
     assert first_read.json() == first
     assert invalid_scope.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.asyncio
+async def test_core_language_exists_only_in_its_canonical_product_scope(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    assert SETTINGS_SCHEMA_SCOPES == {"language": "product"}
+    SETTINGS_SCHEMAS["language"] = {"type": "string", "enum": ["ru", "en"]}
+    user = {"key": "language", "scope": "user", "subject_id": 7}
+
+    refused = await client.post("/settings/set", headers=_headers(), json={**user, "value": "ru"})
+    unread = await client.post("/settings/get", json=user)
+
+    assert refused.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert unread.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert (await db_session.execute(select(Setting))).scalars().all() == []
+    for value in ("ru", "en"):
+        written = await _set(client, {"key": "language", "scope": "product", "value": value})
+        fetched = await client.post("/settings/get", json={"key": "language", "scope": "product"})
+        assert written["value"] == value
+        assert fetched.json() == written
+    other = await _set(
+        client, {"key": "languages", "scope": "user", "subject_id": 7, "value": ["ru"]}
+    )
+    assert other["scope"] == "user"
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,8 @@ from framework.binding_product import (
     binding_sources,
     library_evidence,
     product_core_version,
+    require_binding_product,
+    require_service_environment,
 )
 from framework.bindings import BindingError, ParsedCreate, load_binding, validate_binding
 from framework.bindings_v2 import BindingV2
@@ -64,6 +66,9 @@ INCOMPATIBLE_CODES = (
     "package_mismatch",
     "product_shape",
     "environment_missing",
+    "environment_invalid",
+    "manifest_invalid",
+    "binding_setting_conflict",
     "core_unsupported",
     "core_range",
     "binding_invalid",
@@ -182,7 +187,12 @@ def metadata_from_source(name: str, project: Path, provenance: dict[str, Any]) -
             return None
         return path.read_text() if path.is_file() else None
 
-    return _parse_metadata(name, manifests[0].read_text(), read, provenance)
+    try:
+        return _parse_metadata(name, manifests[0].read_text(), read, provenance)
+    except (OSError, UnicodeError) as error:
+        raise PreflightIncompatibleError(
+            "artifact_unavailable", f"package metadata in {project} is unreadable: {error}"
+        ) from error
 
 
 def metadata_from_wheel(name: str, wheel: Path) -> PackageMetadata:
@@ -289,6 +299,8 @@ def _core_compatibility(core_version: str, metadata: PackageMetadata) -> None:
 
 
 def _product_shape(root: Path, metadata: PackageMetadata) -> None:
+    """Read-only, the same ownership/provenance validation normal bind applies."""
+
     for service in ("backend", *(("tg_bot",) if metadata.binding else ())):
         if not (root / f"services/{service}/pyproject.toml").is_file():
             raise PreflightIncompatibleError(
@@ -299,6 +311,23 @@ def _product_shape(root: Path, metadata: PackageMetadata) -> None:
                 "environment_missing",
                 f"services/{service}/.venv is not installed; run the product's make setup",
             )
+        try:
+            require_service_environment(root, service)
+        except BindingError as error:
+            raise PreflightIncompatibleError("environment_invalid", str(error)) from error
+
+
+def effective_binding(
+    root: Path, metadata: PackageMetadata
+) -> tuple[Binding | BindingV2 | None, bool]:
+    """The binding the install will use: a retained product file wins over the default."""
+
+    retained = root / host_contract.TG_BOT / "bindings" / f"{metadata.manifest.name}.yaml"
+    if metadata.binding is None:
+        return None, False
+    if retained.is_file():
+        return load_binding(retained), True
+    return metadata.binding, False
 
 
 def prospective_bindings(
@@ -327,10 +356,18 @@ def _evaluate(root: Path, metadata: PackageMetadata) -> host_contract.HostContra
 
 
 def admit(root: Path, metadata: PackageMetadata) -> None:
-    """Refuse an install whose product would break the host contract, before any write."""
+    """Refuse an install whose product would break the host contract, before any write.
+
+    The order is the preflight's: environment, effective (retained or default) binding,
+    then core language references and command claims.
+    """
 
     host_contract.evaluate(root).require_valid()
     if metadata.binding is not None and (root / host_contract.TG_BOT).is_dir():
+        require_binding_product(root)
+        binding, _ = effective_binding(root, metadata)
+        if binding is not None:
+            validate_binding(binding, metadata.manifest, bundled_catalog())
         _evaluate(root, metadata).require_valid()
 
 
@@ -381,24 +418,28 @@ def evaluate_install(
     except BindingError as error:
         raise PreflightIncompatibleError("core_unsupported", str(error)) from error
     _core_compatibility(result.product_core, metadata)
-    if metadata.binding is not None:
-        try:
-            validate_binding(metadata.binding, metadata.manifest, catalog or bundled_catalog())
-        except BindingError as error:
-            raise PreflightIncompatibleError("binding_invalid", str(error)) from error
     try:
+        binding, retained = effective_binding(root, metadata)
         contract = _evaluate(root, metadata)
-    except BindingError as error:  # An existing product binding file cannot be read.
+    except BindingError as error:  # A product binding file cannot be read.
         raise PreflightIncompatibleError("binding_invalid", str(error)) from error
-    module_owned = [
-        item for item in contract.violations if item.code not in host_contract.GLUE_CODES
+    if binding is not None:
+        try:
+            validate_binding(binding, metadata.manifest, catalog or bundled_catalog())
+        except BindingError as error:
+            where = f" (retained services/tg_bot/bindings/{name}.yaml)" if retained else ""
+            raise PreflightIncompatibleError("binding_invalid", f"{error}{where}") from error
+    unresolvable = [
+        item
+        for item in contract.violations
+        if item.code not in host_contract.GLUE_CODES and item.owner != host_contract.PRODUCT_OWNER
     ]
-    if module_owned:
-        first = module_owned[0]
+    if unresolvable:
+        first = unresolvable[0]
         raise PreflightIncompatibleError(first.code, first.describe())
     glue = [item.as_dict() for item in contract.violations]
-    if metadata.binding is not None:
-        glue.extend(_library_glue(root, metadata.binding, catalog or bundled_catalog()))
+    if binding is not None:
+        glue.extend(_library_glue(root, binding, catalog or bundled_catalog()))
     result.glue = sorted(glue, key=_sort_key)
     result.status = "glue" if result.glue else "mechanical"
     return result

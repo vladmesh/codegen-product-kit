@@ -35,34 +35,45 @@ class BindingPlan:
 
 def require_binding_product(root: Path) -> None:
     for service in ("backend", "tg_bot"):
-        if not (root / f"services/{service}/pyproject.toml").is_file():
-            raise BindingError(f"BindingProductShapeError: {service} is required")
-        if not (root / f"services/{service}/.venv/bin/python").is_file():
-            raise BindingError(f"BindingEnvironmentError: {service} environment is not installed")
-        environment = root / f"services/{service}/.venv"
-        if (
-            not environment.resolve().is_relative_to(root.resolve())
-            or not (environment / "pyvenv.cfg").is_file()
-        ):
-            raise BindingError(f"BindingEnvironmentError: {service} must own a product virtualenv")
-        _environment(root, service)
+        require_service_environment(root, service)
+
+
+def require_service_environment(root: Path, service: str) -> None:
+    """Read-only: the service exists and owns a usable product virtualenv inside the product."""
+    if not (root / f"services/{service}/pyproject.toml").is_file():
+        raise BindingError(f"BindingProductShapeError: {service} is required")
+    if not (root / f"services/{service}/.venv/bin/python").is_file():
+        raise BindingError(f"BindingEnvironmentError: {service} environment is not installed")
+    environment = root / f"services/{service}/.venv"
+    if (
+        not environment.resolve().is_relative_to(root.resolve())
+        or not (environment / "pyvenv.cfg").is_file()
+    ):
+        raise BindingError(f"BindingEnvironmentError: {service} must own a product virtualenv")
+    _environment(root, service)
 
 
 def _environment(root: Path, service: str) -> tuple[list[str], str]:
     environment = root / f"services/{service}/.venv"
-    result = subprocess.run(  # noqa: S603
-        [
-            str(environment / "bin/python"),
-            "-I",
-            "-c",
-            "import site, platform, sys, json; "
-            "print(json.dumps([sys.prefix, site.getsitepackages(), platform.python_version()]))",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    prefix, sites, python_version = json.loads(result.stdout)
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                str(environment / "bin/python"),
+                "-I",
+                "-B",  # Read-only: no bytecode is written into the product environment.
+                "-c",
+                "import site, platform, sys, json; print(json.dumps("
+                "[sys.prefix, site.getsitepackages(), platform.python_version()]))",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        prefix, sites, python_version = json.loads(result.stdout)
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        raise BindingError(
+            f"BindingEnvironmentError: {service} interpreter is unusable: {error}"
+        ) from error
     if (
         Path(prefix).resolve() != environment.resolve()
         or not sites
