@@ -10,13 +10,15 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 FROM base AS deps
+# Environments are prepared only through scripts/prepare-env.sh; runtime gets runtime deps.
+COPY scripts/prepare-env.sh ./scripts/prepare-env.sh
 COPY shared/pyproject.toml ./shared/pyproject.toml
 RUN mkdir -p ./shared/shared && touch ./shared/shared/__init__.py
 COPY services/tg_bot/pyproject.toml services/tg_bot/uv.lock ./services/tg_bot/
 # kit add libraries are locked as local wheel dependencies.
 COPY services/tg_bot/packages ./services/tg_bot/packages
 RUN --mount=type=cache,target=/root/.cache/uv \
-    cd services/tg_bot && uv sync --frozen --no-install-project --no-dev
+    sh scripts/prepare-env.sh --runtime tg_bot
 COPY shared/shared ./shared/shared
 
 FROM base AS runtime

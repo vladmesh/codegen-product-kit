@@ -322,21 +322,16 @@ def test_main_push_commands_restore_real_package_entry_point_before_generation(
     _commit_baseline(product)
 
     workflow = yaml.safe_load((product / ".github/workflows/ci.yml").read_text())
-    main_push_commands = next(
-        step["run"].splitlines()
-        for step in workflow["jobs"]["build-and-push"]["steps"]
-        if step.get("name") == "Generate code from specs"
-    )
-    assert main_push_commands == [
-        "uv sync --frozen",
-        "uv sync --project services/backend --frozen",
-        "make generate-from-spec",
-    ]
+    steps = {step.get("name"): step for step in workflow["jobs"]["build-and-push"]["steps"]}
+    prepare = steps["Prepare generation environments"]["run"]
+    generate = steps["Generate code from specs"]["run"]
+    assert prepare == "sh scripts/prepare-env.sh root backend"
+    assert generate == "make generate-from-spec"
 
     shutil.rmtree(product / "services/backend/.venv")
-    _run(main_push_commands[0].split(), product)
+    _run(["sh", "scripts/prepare-env.sh", "root"], product)
     missing_entry_point = subprocess.run(  # noqa: S603
-        main_push_commands[2].split(),
+        generate.split(),
         cwd=product,
         capture_output=True,
         text=True,
@@ -347,8 +342,8 @@ def test_main_push_commands_restore_real_package_entry_point_before_generation(
         missing_entry_point.stdout + missing_entry_point.stderr
     )
 
-    _run(main_push_commands[1].split(), product)
-    _run(main_push_commands[2].split(), product)
+    _run(prepare.split(), product)
+    _run(generate.split(), product)
     resolved = _run(
         [
             str(product / "services/backend/.venv/bin/python"),

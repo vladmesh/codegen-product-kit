@@ -12,6 +12,14 @@
    `make setup` creates the generated modules under `shared/shared/generated/`
    and `services/*/src/generated/`.
 
+   Python environments are prepared by one command, `sh scripts/prepare-env.sh [--runtime] ENV...`,
+   where `ENV` is `root` (kit tooling) or a service name. `make setup` passes `root` and every
+   service;{% if 'backend' in modules %} CI image generation passes `root backend{% if 'tg_bot' in modules %} tg_bot{% endif %}`;{% endif %}
+   the Dockerfiles pass `--runtime <service>` for runtime images, which never include tooling or dev
+   dependencies. Each environment is `uv sync --frozen` into its own `.venv` in this checkout.
+   An unknown or missing requested environment, or any failed sync, stops with a non-zero
+   status, and running it again is safe.
+
 2. **Configure environment**
    ```bash
    cp .env.example .env
@@ -104,7 +112,7 @@ This project includes the following modules:
   `make makemigrations name="describe_change"`. The target starts the PostgreSQL dev container
   through the worker compose layer and runs Alembic inside a one-off backend container. It upgrades the database to the current
   head before autogeneration, and writes the revision to `services/backend/migrations/versions/`.
-  Without Docker, use `uv sync --project services/backend`, make sure PostgreSQL is already
+  Without Docker, use `sh scripts/prepare-env.sh backend`, make sure PostgreSQL is already
   reachable, then run `make SKIP_INFRA_START=1 makemigrations name="describe_change"`.
 - **Apply database migrations:** run `make migrate` or `make dev-start`.
 {% endif -%}

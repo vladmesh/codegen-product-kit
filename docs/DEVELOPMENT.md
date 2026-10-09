@@ -79,6 +79,11 @@ uvx copier copy . /tmp/codegen-product-kit-smoke \
 
 Then run the generated project's `make setup`, `make lint`, `make typecheck`, and `make tests`.
 
+Generated Python environments are prepared only by `template/scripts/prepare-env.sh`. A new setup
+step, CI job or Dockerfile stage calls it with exactly the environments it needs (`--runtime` for
+runtime images) instead of its own `uv sync`; `tests/copier/test_prepare_env.py` enforces this for
+every product shape, and the CI [runner proof](RUNNER_PROOF.md) exercises it end to end.
+
 ## Adding a predefined module
 
 Add the service under `template/services/`, then update `copier.yml`, `services.yml.jinja`, Compose

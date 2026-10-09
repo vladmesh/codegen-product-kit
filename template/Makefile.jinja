@@ -21,6 +21,8 @@ body ?=
 
 VENV := .venv/bin
 PYTHON := $(VENV)/python
+# setup prepares the root tooling and every Python service (scripts/prepare-env.sh).
+SETUP_ENVIRONMENTS := root $(sort $(patsubst services/%/pyproject.toml,%,$(wildcard services/*/pyproject.toml)))
 {% if 'backend' in modules %}
 ALEMBIC_CONFIG := services/backend/migrations/alembic.ini
 BACKEND_ALEMBIC := PYTHONPATH=. services/backend/.venv/bin/alembic -c $(ALEMBIC_CONFIG)
@@ -51,12 +53,7 @@ endif
 endif
 
 setup:
-	uv sync --frozen
-	@for svc in services/*/; do \
-		[ -f "$$svc/pyproject.toml" ] || continue; \
-		echo ">> Setting up $$svc"; \
-		(cd "$$svc" && uv sync --frozen); \
-	done
+	sh scripts/prepare-env.sh $(SETUP_ENVIRONMENTS)
 {%- if 'backend' in modules %}
 	@echo ">> Generating code from specs"
 	$(PYTHON) -m framework.generate
@@ -103,11 +100,13 @@ format:
 	$(VENV)/ruff check --fix .
 
 typecheck:
-	@for svc in services/*/; do \
+	@failed=0; \
+	for svc in services/*/; do \
 		[ -f "$$svc/.venv/bin/mypy" ] || continue; \
 		echo ">> Typechecking $$(basename $$svc)"; \
-		PYTHONPATH=. MYPYPATH=. "$$svc/.venv/bin/mypy" "$$svc"; \
-	done
+		PYTHONPATH=. MYPYPATH=. "$$svc/.venv/bin/mypy" "$$svc" || failed=1; \
+	done; \
+	exit $$failed
 
 tests:
 	@target="$(TEST_TARGET)"; \
@@ -131,7 +130,7 @@ tests:
 migrate:
 	@if [ "$(SKIP_INFRA_START)" != "1" ]; then $(MAKE) worker-start svc=db; fi
 	@if [ "$(SKIP_INFRA_START)" = "1" ] && [ ! -x "services/backend/.venv/bin/alembic" ]; then \
-		echo "services/backend/.venv/bin/alembic not found; run uv sync --project services/backend"; \
+		echo "services/backend/.venv/bin/alembic not found; run sh scripts/prepare-env.sh backend"; \
 		exit 1; \
 	fi
 	$(MIGRATE)
@@ -143,7 +142,7 @@ makemigrations:
 	fi
 	@if [ "$(SKIP_INFRA_START)" != "1" ]; then $(MAKE) worker-start svc=db; fi
 	@if [ "$(SKIP_INFRA_START)" = "1" ] && [ ! -x "services/backend/.venv/bin/alembic" ]; then \
-		echo "services/backend/.venv/bin/alembic not found; run uv sync --project services/backend"; \
+		echo "services/backend/.venv/bin/alembic not found; run sh scripts/prepare-env.sh backend"; \
 		exit 1; \
 	fi
 	$(ALEMBIC) upgrade head

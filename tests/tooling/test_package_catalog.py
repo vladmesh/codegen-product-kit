@@ -11,6 +11,7 @@ import tomllib
 from typing import Any
 import zipfile
 
+from packaging.version import Version
 import pytest
 import yaml
 
@@ -36,10 +37,12 @@ from framework.spec.events import EventsSpec
 from framework.spec.loader import AllSpecs, load_manifest
 from framework.spec.models import ModelsSpec
 from framework.spec.package_resolution import ENTRY_POINT_GROUP, resolve_active_packages
-from framework.spec.packages import load_package_manifest
+from framework.spec.packages import PackageManifest, parse_package_manifest
+from tests.runner import support
 
 KIT_ROOT = Path(__file__).parents[2]
 CATALOG = KIT_ROOT / "packages/catalog.yaml"
+PENDING_RELEASES = KIT_ROOT / support.PENDING_RELEASES
 OFFLINE_BACKEND = KIT_ROOT / "tests/fixtures/offline_wheel_backend/offline_backend.py"
 HATCH_BUILD_SYSTEM = '[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
 OFFLINE_BUILD_SYSTEM = (
@@ -159,24 +162,100 @@ def test_core_2_0_keeps_reminders_0_3_0_and_core_2_1_takes_the_timer_release() -
     assert reminders.select("2.2.0").version == "0.5.0"
 
 
-# --- the catalog tied to package sources at HEAD -------------------------------------------
+# --- the catalog tied to released tags and to package sources at HEAD -----------------------
+
+
+def _source_metadata(
+    read: Callable[[str], str], package: CatalogPackage
+) -> tuple[dict[str, Any], list[str], PackageManifest]:
+    """pyproject project table, entry point names and package.yaml of one package source."""
+    project = tomllib.loads(read("pyproject.toml"))["project"]
+    entry_points = project["entry-points"][ENTRY_POINT_GROUP]
+    module = entry_points[package.name].partition(":")[0]
+    manifest = parse_package_manifest(
+        yaml.safe_load(read(f"{module.replace('.', '/')}/package.yaml"))
+    )
+    return project, list(entry_points), manifest
+
+
+def _at_tag(tag: str, package: CatalogPackage) -> Callable[[str], str]:
+    def read(name: str) -> str:
+        result = subprocess.run(  # noqa: S603
+            ["git", "show", f"refs/tags/{tag}:{package.path}/{name}"],  # noqa: S607
+            cwd=KIT_ROOT,
+            capture_output=True,
+            text=True,
+            env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        )
+        if result.returncode != 0:
+            pytest.fail(f"released tag {tag} is not readable (fetch tags): {result.stderr}")
+        return result.stdout
+
+    return read
 
 
 @pytest.mark.parametrize("package", load_catalog(CATALOG).packages, ids=lambda item: item.name)
-def test_catalog_newest_version_matches_package_sources(package: CatalogPackage) -> None:
-    source = KIT_ROOT / package.path
-    project = tomllib.loads((source / "pyproject.toml").read_text())["project"]
-    entry_points = project["entry-points"][ENTRY_POINT_GROUP]
-    module = entry_points[package.name].partition(":")[0]
-    manifest = load_package_manifest(source / Path(*module.split(".")) / "package.yaml")
+def test_catalog_newest_release_matches_its_immutable_tag(package: CatalogPackage) -> None:
     newest = package.newest()
+    kind = _git("cat-file", "-t", f"refs/tags/{newest.tag}", cwd=KIT_ROOT).strip()
+    project, entry_points, manifest = _source_metadata(_at_tag(newest.tag, package), package)
 
-    assert list(entry_points) == [package.name]
+    assert kind == "tag", f"{newest.tag} must be an annotated release tag"
+    assert entry_points == [package.name]
     assert manifest.name == package.name
     assert project["name"] == package.distribution
     assert newest.version == project["version"] == manifest.version
-    assert newest.tag == package_tag(package.name, manifest.version)
     assert newest.requires_core == manifest.requires_core
+
+
+def _pending_releases() -> dict[str, Any]:
+    return yaml.safe_load(PENDING_RELEASES.read_text())
+
+
+def test_pending_releases_name_catalog_packages_not_their_published_versions() -> None:
+    catalog = load_catalog(CATALOG)
+    for release in _pending_releases()["releases"]:
+        package = catalog.get(release["package"])
+        assert release == support.pending_release(_pending_releases(), package.name)
+        assert (release["distribution"], release["path"]) == (package.distribution, package.path)
+        assert release["version"] not in [item.version for item in package.versions]
+        assert release["supersedes"] == package.newest().version
+        assert Version(release["version"]) > Version(package.newest().version)
+        assert (KIT_ROOT / release["notes"]).is_file()
+        # The candidate proof's catalog snapshot: this catalog plus exactly the pending entry.
+        snapshot = parse_catalog(yaml.safe_dump(support.fixture_catalog(_document(), release)))
+        selected = snapshot.get(package.name).newest()
+        assert (selected.version, selected.tag, selected.requires_core) == (
+            release["version"],
+            release["catalog_entry"]["tag"],
+            release["catalog_entry"]["requires_core"],
+        )
+        assert snapshot.get(package.name).versions[:-1] == package.versions
+
+
+@pytest.mark.parametrize("package", load_catalog(CATALOG).packages, ids=lambda item: item.name)
+def test_package_source_at_head_is_its_newest_or_pending_release(package: CatalogPackage) -> None:
+    """HEAD is the newest published release, or exactly the release pending publication."""
+    project, entry_points, manifest = _source_metadata(
+        lambda name: (KIT_ROOT / package.path / name).read_text(), package
+    )
+    pending = [item for item in _pending_releases()["releases"] if item["package"] == package.name]
+    expected = (
+        support.pending_release(_pending_releases(), package.name)["catalog_entry"]
+        if pending
+        else {
+            "version": package.newest().version,
+            "tag": package.newest().tag,
+            "requires_core": package.newest().requires_core,
+        }
+    )
+
+    assert entry_points == [package.name]
+    assert manifest.name == package.name
+    assert project["name"] == package.distribution
+    assert expected["version"] == project["version"] == manifest.version
+    assert expected["tag"] == package_tag(package.name, manifest.version)
+    assert expected["requires_core"] == manifest.requires_core
     assert [item.name for item in package.settings] == list(manifest.settings_schema["properties"])
     assert [(item.name, item.required) for item in package.environment] == [
         (item.name, item.required) for item in manifest.environment

@@ -389,9 +389,36 @@ version that is not canonical PEP 440 (`InvalidCatalogVersionError`). Component 
 across all three lists; distribution names are unique after Python distribution normalization
 (`DuplicateCatalogComponentError`). Function/action names and recommendation targets are unique
 within their owner. All version ranges use `packaging.specifiers.SpecifierSet`; malformed core,
-Python or parent ranges raise `InvalidCatalogEntryError`. A kit test ties the newest
-catalog version of every package to its `pyproject.toml` and `package.yaml` at HEAD: distribution,
-name, version, `requires_core`, settings names and environment names must agree.
+Python or parent ranges raise `InvalidCatalogEntryError`. Kit tests tie the newest catalog
+version of every package to its `pyproject.toml` and `package.yaml` on its annotated release tag
+(distribution, name, version, `requires_core`), and the package source at HEAD to that release
+or to its pending release (version, tag, `requires_core`, settings names and environment names).
+
+#### Pending releases
+
+The catalog lists published tags only. A package release prepared in kit source is pinned in
+`packages/pending-releases.yaml`, which nothing in production reads (`kit add`, the install
+probe and the orchestrator planner read only the catalog):
+
+```yaml
+format_version: 1
+releases:
+  - package: tg-channels
+    distribution: codegen-kit-tg-channels
+    path: packages/codegen-kit-tg-channels
+    version: 0.1.2
+    supersedes: 0.1.1                     # the catalog's newest version
+    notes: docs/releases/tg-channels-0.1.2.md
+    catalog_entry: {version: 0.1.2, tag: packages/tg-channels/v0.1.2, requires_core: '>=2.4,<3'}
+```
+
+While an entry is pending, the package source at HEAD must be exactly that release and newer
+than the catalog's newest version, and the catalog must not list it. The runner proof's
+`candidate_release` mode installs it from an isolated fixture catalog that appends only
+`catalog_entry` ([RUNNER_PROOF.md](RUNNER_PROOF.md)). Publication is a separate operation: the
+annotated tag at the reviewed merge commit, then a code change that appends `catalog_entry` to
+the catalog, removes the pending entry and proves the published release. A package release
+never adds its catalog entry before its tag exists.
 
 #### Additive component metadata in v1
 

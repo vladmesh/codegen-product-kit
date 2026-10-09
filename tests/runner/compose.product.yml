@@ -1,0 +1,47 @@
+# Runner proof overlay over the product's own infra/compose.base.yml + infra/compose.prod.yml,
+# applied exactly as the product deploy applies them (docs/RUNNER_PROOF.md). CI only.
+# It adds wiring, not product changes: the backend joins the runner's platform edge network so
+# PLATFORM_BASE_URL reaches the real Caddy, and the bot reaches a fake Telegram Bot API under
+# the network alias api.telegram.org, trusting the runner CA through SSL_CERT_FILE. Images are
+# the digests the runner pushed to its isolated registry.
+services:
+  backend:
+    networks: [default, platform-edge]
+
+  tg_bot:
+    environment:
+      SSL_CERT_FILE: /runner-telegram/ca.pem
+    volumes:
+      - ${RUNNER_TELEGRAM_DIR:?set RUNNER_TELEGRAM_DIR}/ca.pem:/runner-telegram/ca.pem:ro
+    networks: [default, telegram]
+    depends_on:
+      telegram-api:
+        condition: service_healthy
+
+  telegram-api:
+    image: ${RUNNER_PYTHON_IMAGE:?set RUNNER_PYTHON_IMAGE}
+    command: ["python", "/runner/telegram_api.py"]
+    environment:
+      TELEGRAM_FIXTURE_TOKEN: ${RUNNER_TELEGRAM_TOKEN:?set RUNNER_TELEGRAM_TOKEN}
+      TELEGRAM_FIXTURE_CERT: /runner/server.pem
+      TELEGRAM_FIXTURE_KEY: /runner/server.key
+    volumes:
+      - ${RUNNER_FIXTURES_DIR:?set RUNNER_FIXTURES_DIR}/telegram_api.py:/runner/telegram_api.py:ro
+      - ${RUNNER_TELEGRAM_DIR:?set RUNNER_TELEGRAM_DIR}/server.pem:/runner/server.pem:ro
+      - ${RUNNER_TELEGRAM_DIR:?set RUNNER_TELEGRAM_DIR}/server.key:/runner/server.key:ro
+    ports:
+      - "127.0.0.1::8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/control/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    networks:
+      telegram:
+        aliases: [api.telegram.org]
+
+networks:
+  platform-edge:
+    external: true
+    name: ${RUNNER_PLATFORM_EDGE_NETWORK:?set RUNNER_PLATFORM_EDGE_NETWORK}
+  telegram: {}

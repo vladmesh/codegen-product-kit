@@ -1,4 +1,4 @@
-# tg-channels 0.1.1
+# tg-channels 0.1.2
 
 In-process public Telegram channel reading through the platform's `tg-reader` Product API v1.
 There is no model, translation or content extraction. Text is delivered as plain text.
@@ -43,8 +43,11 @@ synchronization of later setting edits. Seeded channels are leased and checked l
 the platform on the first read; manually entered names always get an explicit resolve check.
 The product union is limited to 50 distinct channels, matching the declared quota.
 
-The core fires `tg-channels.tick` every 60 seconds. A single locked database row serializes
-polls and subscription changes across backend processes. Each poll reads one page (200
+The core fires the package job `tick` every 60 seconds under its core job name
+`tg_channels.tick` (the package prefix with `-` replaced by `_`, as the generated `JOB_TIMERS`
+lists it); the published event keeps its declared name `tg-channels.post`. Releases 0.1.0 and
+0.1.1 consumed `tg-channels.tick`, a name the core never fires, so their timer never polled.
+A single locked database row serializes polls and subscription changes across backend processes. Each poll reads one page (200
 changes), persists its cursor with seen post ids and delivery outbox rows, and continues
 the backlog on later ticks. The cursor covers the union of all users' channels. HTTP 409
 restarts from the saved `since` instant. The first poll reads up to 72 hours of history and

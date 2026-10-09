@@ -99,36 +99,36 @@ def test_template_ci_typechecks_a_single_exact_backend_candidate() -> None:
     assert "generated/" not in Path("template/mypy.ini.jinja").read_text()
 
 
-def test_main_push_generation_syncs_the_locked_backend_environment(
+def test_main_push_generation_prepares_its_declared_environments(
     project_backend: Path,
     project_backend_tg_bot: Path,
     project_standalone: Path,
 ) -> None:
-    """Backend main-push generation must install package entry points before generation."""
-    expected_commands = [
-        "uv sync --frozen",
-        "uv sync --project services/backend --frozen",
-        "make generate-from-spec",
-    ]
+    """Main-push generation prepares root, backend and, with a bot, tg_bot before generation.
 
-    for project in (project_backend, project_backend_tg_bot):
+    Binding preflight reads both service environments, so the bound backend,tg_bot product's
+    image job must prepare tg_bot too (the 0.10.1 recipe synced root and backend only).
+    """
+    expected = {
+        project_backend: "sh scripts/prepare-env.sh root backend",
+        project_backend_tg_bot: "sh scripts/prepare-env.sh root backend tg_bot",
+    }
+    for project, preparation in expected.items():
         workflow = yaml.safe_load((project / ".github/workflows/ci.yml").read_text())
         steps = workflow["jobs"]["build-and-push"]["steps"]
-        generation_index = next(
-            index
-            for index, step in enumerate(steps)
-            if step.get("name") == "Generate code from specs"
-        )
-        commands = steps[generation_index]["run"].splitlines()
+        names = [step.get("name") for step in steps]
+        prepare_index = names.index("Prepare generation environments")
+        generation_index = names.index("Generate code from specs")
         build_index = next(
             index
             for index, step in enumerate(steps)
             if str(step.get("uses", "")).startswith("docker/build-push-action")
         )
 
-        assert commands == expected_commands
-        assert generation_index < build_index
-        assert "reminders" not in steps[generation_index]["run"]
+        assert steps[prepare_index]["run"] == preparation
+        assert steps[generation_index]["run"] == "make generate-from-spec"
+        assert prepare_index < generation_index < build_index
+        assert not any("uv sync" in step.get("run", "") for step in steps)
         assert (
             yaml.safe_load((project / "services/backend/manifest.yaml").read_text())["packages"]
             == []
@@ -138,10 +138,11 @@ def test_main_push_generation_syncs_the_locked_backend_environment(
         (project_standalone / ".github/workflows/ci.yml").read_text()
     )
     standalone_steps = standalone_workflow["jobs"]["build-and-push"]["steps"]
-    assert all(step.get("name") != "Generate code from specs" for step in standalone_steps)
     assert all(
-        "uv sync --project services/backend" not in step.get("run", "") for step in standalone_steps
+        step.get("name") not in ("Prepare generation environments", "Generate code from specs")
+        for step in standalone_steps
     )
+    assert not any("prepare-env" in step.get("run", "") for step in standalone_steps)
 
 
 def test_default_tooling_requirement_uses_template_commit(tmp_path: Path) -> None:
@@ -391,7 +392,7 @@ class TestStandaloneGeneration:
         assert dockerfile.exists()
         content = dockerfile.read_text()
         assert "INSTALL_DEV_DEPS" not in content
-        assert "uv sync --frozen --no-install-project --no-dev" in content
+        assert "sh scripts/prepare-env.sh --runtime tg_bot" in content
 
     def test_no_jinja_artifacts(self, project_standalone: Path):
         """No Jinja artifacts in standalone generation."""
@@ -949,7 +950,7 @@ class TestIntegrationCompose:
         bot_environment = "/workspace/services/tg_bot/.venv"
         if fixture == "project_backend_tg_bot":
             assert bot_environment in volumes
-            sync = "uv sync --project services/tg_bot --frozen --no-install-project --no-dev"
+            sync = "sh scripts/prepare-env.sh --runtime tg_bot"
             wheels = "COPY services/tg_bot/packages ./services/tg_bot/packages"
             assert dev.index(wheels) < dev.index(sync)
             assert ("COPY --from=dev-deps /app/services/tg_bot/.venv " + bot_environment) in dev

@@ -11,6 +11,11 @@ from redis.exceptions import ResponseError
 
 from codegen_kit_tg_channels.polling import Poller
 
+#: The core fires package jobs under the package's identifier prefix, the name with "-" replaced
+#: by "_" (framework/spec/loader.py `_package_prefix`), so the declared `tick` job is fired as
+#: `tg_channels.tick`. The published `tg-channels.post` event keeps its own declared name.
+TICK_JOB = "tg_channels.tick"
+
 
 class TickArguments(BaseModel):
     at: AwareDatetime
@@ -23,7 +28,7 @@ class ChannelConsumer:
 
     async def handle_job(self, envelope: dict[str, Any]) -> None:
         payload = envelope.get("payload")
-        if not isinstance(payload, dict) or payload.get("name") != "tg-channels.tick":
+        if not isinstance(payload, dict) or payload.get("name") != TICK_JOB:
             return
         arguments = TickArguments.model_validate(payload.get("arguments"))
         await self.poller.tick(arguments.at)

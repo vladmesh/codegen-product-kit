@@ -1,0 +1,61 @@
+# Runner proof overlay over the pinned platform's own deploy/compose.yml (docs/RUNNER_PROOF.md).
+# CI only, never deployed. postgres, postgres-init, auth-migrate, auth and caddy run as the
+# platform deploys them, with the auth image built from the pinned source. Only tg-reader is
+# replaced, by the fixture reader with the published reader contract. runner-admin plays the
+# orchestrator (admin API over orch-link) and cloudflared (ingress over edge) for registration
+# and refusal probes. The orch-link network is created and removed by the runner under its own
+# name; nothing here joins a pre-existing network.
+services:
+  tg-reader:
+    image: ghcr.io/vladmesh/codegen-platform-services/auth:${PLATFORM_IMAGE_TAG:?set PLATFORM_IMAGE_TAG}
+    command: ["python", "/fixture/reader.py"]
+    environment: !override
+      FIXTURE_CHANNEL: ${RUNNER_FIXTURE_CHANNEL:?set RUNNER_FIXTURE_CHANNEL}
+      FIXTURE_POST_TEXT: ${RUNNER_FIXTURE_POST_TEXT:?set RUNNER_FIXTURE_POST_TEXT}
+      FIXTURE_PRODUCT_ID: ${RUNNER_PRODUCT_ID:?set RUNNER_PRODUCT_ID}
+      FIXTURE_SCOPE: tg-reader:read
+    secrets: !reset []
+    depends_on: !reset {}
+    networks: !override [platform]
+    configs:
+      - source: runner_reader
+        target: /fixture/reader.py
+
+  runner-admin:
+    image: ghcr.io/vladmesh/codegen-platform-services/auth:${PLATFORM_IMAGE_TAG:?set PLATFORM_IMAGE_TAG}
+    command: ["python", "/runner/platform_admin.py"]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    restart: "no"
+    healthcheck:
+      disable: true
+    environment:
+      INGRESS_URL: http://caddy:8080
+      AUTH_ADMIN_URL: http://auth:8000
+      AUTH_ADMIN_TOKEN_FILE: /run/secrets/auth_admin_token
+      RUNNER_PRODUCT_KEY_FILE: /run/secrets/runner_product_key
+      RUNNER_PRODUCT_ID: ${RUNNER_PRODUCT_ID:?set RUNNER_PRODUCT_ID}
+      RUNNER_FIXTURE_CHANNEL: ${RUNNER_FIXTURE_CHANNEL:?set RUNNER_FIXTURE_CHANNEL}
+      RUNNER_GRANT: ${RUNNER_GRANT:?set RUNNER_GRANT}
+    secrets: [auth_admin_token, runner_product_key]
+    configs:
+      - source: runner_admin
+        target: /runner/platform_admin.py
+    depends_on:
+      caddy: {condition: service_healthy}
+    networks: [edge, orch-link]
+
+networks:
+  orch-link:
+    name: ${RUNNER_ORCH_LINK_NETWORK:?set RUNNER_ORCH_LINK_NETWORK}
+
+configs:
+  runner_reader:
+    file: ${RUNNER_FIXTURES_DIR:?set RUNNER_FIXTURES_DIR}/reader.py
+  runner_admin:
+    file: ${RUNNER_FIXTURES_DIR:?set RUNNER_FIXTURES_DIR}/platform_admin.py
+
+secrets:
+  runner_product_key:
+    file: ${PLATFORM_SECRETS_DIR:?set PLATFORM_SECRETS_DIR}/runner_product_key

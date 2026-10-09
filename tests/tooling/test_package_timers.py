@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 from pathlib import Path
 import runpy
+import shutil
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 from framework.generate import generate_all
+from framework.generators.jobs_manifest import JobsManifestGenerator
+from framework.spec.loader import load_specs
 from framework.spec.package_resolution import ActivePackage
-from framework.spec.packages import parse_package_manifest
+from framework.spec.packages import load_package_manifest, parse_package_manifest
 
+KIT_ROOT = Path(__file__).parents[2]
+CHANNELS = KIT_ROOT / "packages/codegen-kit-tg-channels/codegen_kit_tg_channels"
 META = "https://json-schema.org/draft/2020-12/schema"
 AT_ONLY = {
     "type": "object",
@@ -106,3 +116,73 @@ def test_the_template_ships_the_rendered_empty_timer_contract() -> None:
     )
 
     assert runpy.run_path(str(shipped))["JOB_TIMERS"] == {}
+
+
+def _channel_runtime(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The package's own consumer module, with only its transport imports stubbed offline."""
+    namespace = ModuleType("codegen_kit_tg_channels")
+    namespace.__path__ = [str(CHANNELS)]  # type: ignore[attr-defined]
+    for name, module in {
+        "codegen_kit_tg_channels": namespace,
+        "codegen_kit_tg_channels.polling": SimpleNamespace(Poller=object),
+        "faststream": ModuleType("faststream"),
+        "faststream.redis": SimpleNamespace(RedisBroker=object, StreamSub=object),
+        "faststream.redis.parser": SimpleNamespace(BinaryMessageFormatV1=object()),
+        "redis": ModuleType("redis"),
+        "redis.exceptions": SimpleNamespace(ResponseError=Exception),
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delitem(sys.modules, "codegen_kit_tg_channels.runtime", raising=False)
+    return importlib.import_module("codegen_kit_tg_channels.runtime")
+
+
+def test_channel_consumer_runs_the_tick_the_core_generates_from_its_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (tg-channels 0.1.1): the consumer waited for a name the core never fires.
+
+    The job name comes from the shipped package.yaml through the loader and the generated
+    JOB_TIMERS, never from a string written here, and is handed to the package's consumer.
+    """
+    manifest = load_package_manifest(CHANNELS / "package.yaml")
+    package = ActivePackage(
+        name=manifest.name,
+        manifest=manifest,
+        package_root=CHANNELS,
+        manifest_sha256="0" * 64,
+    )
+    # A product core: the template's shared specs declare the job_fired event the package
+    # consumes; the backend manifest allowlists the package.
+    repo = tmp_path / "product"
+    (repo / "shared").mkdir(parents=True)
+    shutil.copytree(KIT_ROOT / "template/shared/spec", repo / "shared/spec")
+    (repo / "services/backend/src/generated").mkdir(parents=True)
+    (repo / "services/backend/manifest.yaml").write_text(
+        f"version: 1\nsettings_schema: {{'$schema': '{META}', type: object, "
+        f"properties: {{}}, additionalProperties: false}}\npackages: [{manifest.name}]\n"
+    )
+    monkeypatch.setattr(
+        "framework.spec.loader.resolve_active_packages", lambda *_args, **_kwargs: [package]
+    )
+    JobsManifestGenerator(load_specs(repo), repo).generate()
+    jobs = runpy.run_path(str(repo / "services/backend/src/generated/jobs_schemas.py"))
+    fired = [
+        name
+        for name in jobs["JOB_TIMERS"]
+        if jobs["JOB_SCHEMA_SOURCES"][name] == f"package:{manifest.name}"
+    ]
+    assert len(fired) == 1, jobs["JOB_TIMERS"]
+    runtime = _channel_runtime(monkeypatch)
+    poller = SimpleNamespace(tick=AsyncMock())
+    consumer = runtime.ChannelConsumer(poller)
+
+    async def deliver(name: str) -> None:
+        await consumer.handle_job(
+            {"payload": {"name": name, "arguments": {"at": "2026-10-09T17:00:00Z"}}}
+        )
+
+    asyncio.run(deliver(fired[0]))
+    poller.tick.assert_awaited_once()
+    # A job the core fires for another owner is still not this package's tick.
+    asyncio.run(deliver(fired[0].replace(".", "_other.", 1)))
+    poller.tick.assert_awaited_once()

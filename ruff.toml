@@ -29,6 +29,7 @@ max-statements = 60
 [lint.per-file-ignores]
 "shared/shared/generated/**" = ["PLR0915", "PLR0913", "C901", "B008"]
 "tests/copier/**" = ["S603", "S607"]
+"tests/runner/**" = ["S603", "S607"]
 "tests/**" = ["PLR2004"]  # Magic values acceptable in tests
 
 [lint.isort]

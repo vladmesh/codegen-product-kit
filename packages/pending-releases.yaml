@@ -1,0 +1,23 @@
+# Pending package releases: package sources at HEAD that are prepared but not yet published.
+#
+# Nothing in production reads this file. `kit add`, `install_probe` and the orchestrator's
+# planner read only packages/catalog.yaml, which lists published tags only. A pending entry pins
+# the release a separate publication operation creates (docs/releases/tg-channels-0.1.2.md):
+# the annotated tag at the reviewed merge commit, then a later code change that appends
+# `catalog_entry` to the package's catalog `versions` and removes the pending entry.
+#
+# Before publication the runner proof (docs/RUNNER_PROOF.md, proof_mode=candidate_release)
+# installs exactly this entry from an isolated fixture repository, and the kit tests require
+# the package source at HEAD to match it (tests/tooling/test_package_catalog.py).
+format_version: 1
+releases:
+  - package: tg-channels
+    distribution: codegen-kit-tg-channels
+    path: packages/codegen-kit-tg-channels
+    version: 0.1.2
+    supersedes: 0.1.1
+    notes: docs/releases/tg-channels-0.1.2.md
+    catalog_entry:
+      version: 0.1.2
+      tag: packages/tg-channels/v0.1.2
+      requires_core: '>=2.4,<3'

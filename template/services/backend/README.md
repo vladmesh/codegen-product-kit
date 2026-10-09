@@ -44,7 +44,7 @@ builds can install the locked dependency before application sources are copied.
 For an already reachable PostgreSQL instance, install the backend environment and bypass Compose:
 
 ```bash
-uv sync --project services/backend
+sh scripts/prepare-env.sh backend
 make SKIP_INFRA_START=1 POSTGRES_HOST=localhost POSTGRES_PORT=5432 migrate
 ```
 
