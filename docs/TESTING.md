@@ -57,6 +57,15 @@ its entry in `packages/pending-releases.yaml`, and each published release the ru
 package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
+Jobs that pull, build or run containers (`test-generation`, `test-pytest`, both runner legs)
+first add the credential-free public mirror `https://mirror.gcr.io` to the runner's Docker daemon
+(keeping its other `daemon.json` keys), restart it and log the effective mirror and the `docker`
+builder driver before any container exists. Image references in the product, template and
+platform stay Docker Hub names; only this throwaway runner's transport changes, and the daemon
+falls back to Docker Hub for an image the mirror lacks. `test-pytest` therefore starts its binding
+Redis (`redis:7-alpine` on port 6379, database 14) itself after the mirror and removes only that
+container, instead of an Actions service pulled before the first step.
+`tests/tooling/test_ci_image_transport.py` checks that order.
 Keep required job names stable unless branch protection is updated at the same time.
 
 `tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording

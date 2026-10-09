@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Kit CI pulls Docker Hub images through the credential-free public mirror `mirror.gcr.io`
+  instead of failing on Docker Hub's unauthenticated rate limit and token timeouts: the
+  `test-generation`, `test-pytest` and runner-proof jobs configure the runner's Docker daemon
+  before any container, and `test-pytest` starts its binding Redis itself after that. Image
+  references in products, the template and the platform are unchanged.
 - tg-channels 0.1.2 (package release, tagged 2026-10-09 and added to the catalog afterwards): the
   timer consumer runs on `tg_channels.tick`, the job name the core generates and fires for the
   package, instead of `tg-channels.tick`, which the core never fires; 0.1.0 and 0.1.1 therefore

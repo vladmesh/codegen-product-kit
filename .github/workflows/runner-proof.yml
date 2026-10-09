@@ -152,6 +152,30 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
           df -h /
 
+      # Docker Hub pulls go through the credential-free public mirror (mirror.gcr.io) before
+      # this job creates any container; the image references themselves stay unchanged and the
+      # daemon falls back to Docker Hub for an image the mirror lacks. Other daemon.json keys are
+      # kept. Builds use the daemon's own BuildKit (the docker driver), which shares the mirror.
+      - name: Pull Docker Hub images through the public mirror
+        env:
+          REGISTRY_MIRROR: https://mirror.gcr.io
+        run: |
+          sudo python3 - "$REGISTRY_MIRROR" <<'EOF'
+          import json, pathlib, sys
+          path = pathlib.Path("/etc/docker/daemon.json")
+          text = path.read_text() if path.exists() else ""
+          config = json.loads(text) if text.strip() else {}
+          mirrors = [item for item in config.get("registry-mirrors", []) if item != sys.argv[1]]
+          config["registry-mirrors"] = [sys.argv[1], *mirrors]
+          path.write_text(json.dumps(config, indent=2) + "\n")
+          EOF
+          sudo cat /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info --format '{{json .RegistryConfig.Mirrors}}' | tee "$RUNNER_TEMP/mirrors.json"
+          grep -F mirror.gcr.io "$RUNNER_TEMP/mirrors.json"
+          docker buildx inspect | tee "$RUNNER_TEMP/builder.txt"
+          grep -Eq '^Driver: +docker$' "$RUNNER_TEMP/builder.txt"
+
       - name: Check out the kit candidate
         uses: actions/checkout@v4
         with:
