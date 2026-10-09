@@ -398,7 +398,8 @@ or to its pending release (version, tag, `requires_core`, settings names and env
 
 The catalog lists published tags only. A package release prepared in kit source is pinned in
 `packages/pending-releases.yaml`, which nothing in production reads (`kit add`, the install
-probe and the orchestrator planner read only the catalog):
+probe and the orchestrator planner read only the catalog). With nothing pending the document is
+`{format_version: 1, releases: []}`; an entry has this shape:
 
 ```yaml
 format_version: 1
@@ -406,19 +407,31 @@ releases:
   - package: tg-channels
     distribution: codegen-kit-tg-channels
     path: packages/codegen-kit-tg-channels
-    version: 0.1.2
-    supersedes: 0.1.1                     # the catalog's newest version
-    notes: docs/releases/tg-channels-0.1.2.md
-    catalog_entry: {version: 0.1.2, tag: packages/tg-channels/v0.1.2, requires_core: '>=2.4,<3'}
+    version: 0.1.3                        # example
+    supersedes: 0.1.2                     # the catalog's newest version
+    notes: docs/releases/tg-channels-0.1.3.md
+    catalog_entry: {version: 0.1.3, tag: packages/tg-channels/v0.1.3, requires_core: '>=2.4,<3'}
 ```
 
 While an entry is pending, the package source at HEAD must be exactly that release and newer
 than the catalog's newest version, and the catalog must not list it. The runner proof's
-`candidate_release` mode installs it from an isolated fixture catalog that appends only
-`catalog_entry` ([RUNNER_PROOF.md](RUNNER_PROOF.md)). Publication is a separate operation: the
-annotated tag at the reviewed merge commit, then a code change that appends `catalog_entry` to
-the catalog, removes the pending entry and proves the published release. A package release
-never adds its catalog entry before its tag exists.
+`candidate_release` mode (`catalog_mode=pending_fixture`) installs it from an isolated fixture
+catalog that appends only `catalog_entry` ([RUNNER_PROOF.md](RUNNER_PROOF.md)). Publication is
+a separate operation: the annotated tag at the reviewed merge commit, then a code change that
+appends `catalog_entry` to the catalog, removes the pending entry, pins the published tag
+(object, peeled commit, package tree) in the runner's `support.PUBLISHED_RELEASES` and proves
+the published release. A package release never adds its catalog entry before its tag exists.
+
+That activation change is proven in two steps, because the planner and the install probe read
+the catalog at the real default branch's `HEAD`, which lists the new entry only after the merge:
+its pull request runs `published_release` against the candidate's own committed catalog served
+as an isolated `HEAD` (`catalog_mode=candidate_snapshot`, evidence labelled prospective), and the
+push of the merge commit to `main` runs it against the real `HEAD` with no fixture
+(`catalog_mode=remote_head`). Only the latter shows the activated path. tg-channels 0.1.2 was the
+first release activated this way: its tag `packages/tg-channels/v0.1.2` (object
+`4f5918dba1a3afc7ad9012715cb8f83c33a8e1bc` at `29f481f213544b0b7a5055451d5b4e55a6249b35`,
+package tree `676ee7061c6b08d17923f7c1fad3742798c9870f`) was published on 2026-10-09 before its
+catalog entry.
 
 #### Additive component metadata in v1
 

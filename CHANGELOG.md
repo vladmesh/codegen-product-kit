@@ -29,10 +29,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production readers ignore it and the public catalog lists published tags only. The newest
   catalog release of every package is now checked against its annotated tag, and the source at
   HEAD against that release or its pending entry.
+- tg-channels 0.1.2 in the catalog: its tag `packages/tg-channels/v0.1.2` (object `4f5918d`,
+  commit `29f481f`, package tree `676ee70`) was published on 2026-10-09 before this entry; the
+  pending entry is removed and nothing is pending. New products' `kit add tg-channels` selects
+  0.1.2 once this is on the default branch; existing products are not upgraded.
+- Runner proof catalog modes, explicit and recorded beside the proof mode: the runner now defaults
+  to `published_release` of tg-channels 0.1.2, reads the tag from the real remote first and
+  requires its pinned object, commit and tree. A pull request plans and installs against the
+  candidate's own committed catalog served as an isolated, prospective `HEAD`
+  (`candidate_snapshot`, with the real remote's package tags by object id); a push to `main` uses
+  the real default branch's catalog with no fixture (`remote_head`) and is the only proof of the
+  published path. `candidate_release` remains, only explicitly, with `pending_fixture` for a
+  future pending release. Planner, HTTP reads and probes must reach one catalog digest.
 
 ### Fixed
 
-- tg-channels 0.1.2 (package release, prepared, pending publication; not in the catalog): the
+- tg-channels 0.1.2 (package release, tagged 2026-10-09 and added to the catalog afterwards): the
   timer consumer runs on `tg_channels.tick`, the job name the core generates and fires for the
   package, instead of `tg-channels.tick`, which the core never fires; 0.1.0 and 0.1.1 therefore
   never polled the reader or delivered a post. No core naming, event or template change. A

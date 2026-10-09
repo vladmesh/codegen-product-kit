@@ -9,7 +9,8 @@ from __future__ import annotations
 import base64
 from collections.abc import Iterable, Mapping
 import copy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import hashlib
 import json
 import re
 import secrets
@@ -30,7 +31,36 @@ BASELINE_MAIN_GENERATION = (
 BASELINE_FAILURE = "BindingEnvironmentError: tg_bot environment is not installed"
 #: How the proof obtains the target package release (docs/RUNNER_PROOF.md, "Proof modes").
 PROOF_MODES = ("candidate_release", "published_release")
+#: Which catalog the planner and the executor read (docs/RUNNER_PROOF.md, "Catalog modes"), and
+#: the only catalog modes each proof mode admits. Nothing falls back from one to another.
+CATALOG_MODES = ("remote_head", "candidate_snapshot", "pending_fixture")
+ADMITTED_CATALOG_MODES = {
+    "published_release": ("remote_head", "candidate_snapshot"),
+    "candidate_release": ("pending_fixture",),
+}
 PENDING_RELEASES = "packages/pending-releases.yaml"
+
+
+@dataclass(frozen=True)
+class PublishedRelease:
+    """A package release tag as the kit's real remote published it; immutable once pinned."""
+
+    tag: str
+    tag_object: str
+    target: str
+    tree: str
+
+
+#: Published releases a `published_release` proof may install. The runner reads the tag from
+#: the real remote before planning and refuses any other object, target or package tree.
+PUBLISHED_RELEASES = {
+    ("tg-channels", "0.1.2"): PublishedRelease(
+        tag="packages/tg-channels/v0.1.2",
+        tag_object="4f5918dba1a3afc7ad9012715cb8f83c33a8e1bc",
+        target="29f481f213544b0b7a5055451d5b4e55a6249b35",
+        tree="676ee7061c6b08d17923f7c1fad3742798c9870f",
+    ),
+}
 
 
 class WorkflowError(ValueError):
@@ -249,3 +279,130 @@ def fixture_resource(path: str, refs: Iterable[str]) -> tuple[str, str] | None:
         if path.startswith(prefix) and len(path) > len(prefix) and ".." not in path.split("/"):
             return ref, path.removeprefix(prefix)
     return None
+
+
+# -- published release and catalog snapshot (proof_mode=published_release) ------------------
+
+
+def check_modes(proof_mode: str, catalog_mode: str) -> None:
+    """Refuse a catalog mode the proof mode does not admit; there is no default pairing."""
+    if proof_mode not in ADMITTED_CATALOG_MODES:
+        raise ValueError(f"unknown proof mode {proof_mode!r}")
+    if catalog_mode not in ADMITTED_CATALOG_MODES[proof_mode]:
+        raise ValueError(
+            f"{proof_mode} admits catalog modes {ADMITTED_CATALOG_MODES[proof_mode]}, "
+            f"not {catalog_mode!r}"
+        )
+
+
+def published_release(package: str, version: str) -> PublishedRelease:
+    """The pinned published release; an unpinned version cannot be proven as published."""
+    try:
+        return PUBLISHED_RELEASES[(package, version)]
+    except KeyError:
+        raise ValueError(f"{package} {version} is not a pinned published release") from None
+
+
+def ls_remote_refs(text: str) -> dict[str, str]:
+    """`git ls-remote` output as {ref: object id}; a repeated or malformed line is refused."""
+    refs: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"([0-9a-f]{40})\t(\S+)", line)
+        if match is None or match.group(2) in refs:
+            raise ValueError(f"unexpected ls-remote line {line!r}")
+        refs[match.group(2)] = match.group(1)
+    return refs
+
+
+def verify_published_tag(
+    pin: PublishedRelease, remote: Mapping[str, str], fetched: Mapping[str, str]
+) -> dict[str, str]:
+    """Bind the real remote's tag (ls-remote) and its fetched copy to the pinned release.
+
+    ``remote`` is the ls-remote listing, which must carry the tag and its peeled commit;
+    ``fetched`` is what the fetched copy resolves to: object type, tag object, target and tree.
+    """
+    ref = f"refs/tags/{pin.tag}"
+    expected = {
+        "tag": pin.tag,
+        "type": "tag",
+        "tag_object": pin.tag_object,
+        "target": pin.target,
+        "tree": pin.tree,
+    }
+    listed = {"tag_object": remote.get(ref), "target": remote.get(f"{ref}^{{}}")}
+    if listed["tag_object"] is None:
+        raise ValueError(f"the real remote has no tag {pin.tag}")
+    if listed != {"tag_object": pin.tag_object, "target": pin.target}:
+        raise ValueError(f"the real remote's {pin.tag} is {listed}, not the pinned release")
+    found = {"tag": pin.tag, **{key: fetched.get(key) for key in expected if key != "tag"}}
+    if found != expected:
+        raise ValueError(f"the fetched {pin.tag} is {found}, not the pinned release")
+    return expected
+
+
+def verify_copied_tags(remote: Mapping[str, str], copied: Mapping[str, str]) -> None:
+    """Every copied package tag is the real remote's object id; a missing one is refused."""
+    problems = {
+        name: (remote.get(f"refs/tags/{name}"), value)
+        for name, value in copied.items()
+        if remote.get(f"refs/tags/{name}") != value
+    }
+    if problems:
+        raise ValueError(f"copied tags differ from the real remote (remote, copy): {problems}")
+
+
+def catalog_package(catalog: Mapping, name: str) -> dict:
+    """The package entry `name` of a catalog document."""
+    found = [item for item in catalog.get("packages") or [] if item["name"] == name]
+    if len(found) != 1:
+        raise ValueError(f"catalog has {len(found)} packages named {name}")
+    return dict(found[0])
+
+
+def released_tags(catalog: Mapping) -> set[str]:
+    """Every release tag a catalog document names, across packages, libraries and extensions."""
+    return {
+        item["tag"]
+        for section in ("packages", "libraries", "extensions")
+        for component in catalog.get(section) or []
+        for item in component["versions"]
+    }
+
+
+def catalog_digest(text: str) -> str:
+    """The catalog digest the orchestrator planner puts in a payload and the probe recomputes.
+
+    Same formula as the planner's `installable` and `install_probe.py`: SHA-256 of the parsed
+    catalog's sorted JSON, so a reformatted file with the same content has the same digest.
+    """
+    from framework.catalog import parse_catalog  # noqa: PLC0415  # the candidate tooling
+
+    catalog = parse_catalog(text, "runner snapshot")
+    return hashlib.sha256(
+        json.dumps(
+            asdict(catalog), sort_keys=True, default=lambda value: value.model_dump(mode="json")
+        ).encode()
+    ).hexdigest()
+
+
+def verify_snapshot_reads(requests: Iterable[Mapping], served: Mapping[str, str]) -> None:
+    """Every HTTP fixture read succeeded, and every read of a snapshot file got its bytes.
+
+    ``served`` maps a request path (``/HEAD/packages/catalog.yaml``) to the SHA-256 the
+    snapshot holds; each of them must have been read at least once.
+    """
+    seen = set()
+    for request in requests:
+        if request["status"] != 200:
+            raise ValueError(f"catalog fixture answered {request['status']} for {request['path']}")
+        path = request["path"].split("?", 1)[0]
+        for suffix, digest in served.items():
+            if path.endswith(suffix):
+                if request["sha256"] != digest:
+                    raise ValueError(f"{path} was served other bytes than the snapshot")
+                seen.add(suffix)
+    if missing := sorted(set(served) - seen):
+        raise ValueError(f"the planner never read {missing} from the snapshot")

@@ -208,12 +208,42 @@ def test_catalog_newest_release_matches_its_immutable_tag(package: CatalogPackag
     assert newest.requires_core == manifest.requires_core
 
 
+@pytest.mark.parametrize(
+    ("package", "version"), sorted(support.PUBLISHED_RELEASES), ids=lambda item: str(item)
+)
+def test_pinned_published_release_is_the_catalog_entry_and_its_tag(
+    package: str, version: str
+) -> None:
+    """The runner's published-release pin is a catalog entry and the tag as published.
+
+    Framework CI fetches tags from GitHub, so the local tag is the real remote's. While the pin
+    is the package's newest release and nothing is pending for it, the package source at HEAD is
+    exactly the published tree: the published tag is not rebuilt from other sources.
+    """
+    pin = support.PUBLISHED_RELEASES[(package, version)]
+    entry = load_catalog(CATALOG).get(package)
+    listed = next(item for item in entry.versions if item.version == version)
+    ref = f"refs/tags/{pin.tag}"
+
+    assert listed.tag == pin.tag == package_tag(package, version)
+    assert _git("cat-file", "-t", ref, cwd=KIT_ROOT).strip() == "tag"
+    assert _git("rev-parse", ref, cwd=KIT_ROOT).strip() == pin.tag_object
+    assert _git("rev-parse", f"{ref}^{{commit}}", cwd=KIT_ROOT).strip() == pin.target
+    assert _git("rev-parse", f"{pin.target}:{entry.path}", cwd=KIT_ROOT).strip() == pin.tree
+    pending = [item for item in _pending_releases()["releases"] if item["package"] == package]
+    if entry.newest().version == version and not pending:
+        assert _git("rev-parse", f"HEAD:{entry.path}", cwd=KIT_ROOT).strip() == pin.tree
+
+
 def _pending_releases() -> dict[str, Any]:
     return yaml.safe_load(PENDING_RELEASES.read_text())
 
 
 def test_pending_releases_name_catalog_packages_not_their_published_versions() -> None:
     catalog = load_catalog(CATALOG)
+    # An empty document stays valid: nothing is pending once a release is in the catalog.
+    assert _pending_releases()["format_version"] == 1
+    assert isinstance(_pending_releases()["releases"], list)
     for release in _pending_releases()["releases"]:
         package = catalog.get(release["package"])
         assert release == support.pending_release(_pending_releases(), package.name)

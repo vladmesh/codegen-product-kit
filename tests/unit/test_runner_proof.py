@@ -250,17 +250,46 @@ def test_runner_workflow_guards_the_platform_key_and_requires_the_evidence() -> 
     assert 'evidence["status"] == "passed"' in steps["Require passed SHA-bound evidence"]["run"]
 
 
-def _pending() -> dict:
-    return yaml.safe_load((ROOT / support.PENDING_RELEASES).read_text())
+#: A pending release as packages/pending-releases.yaml pins one; nothing is pending now that
+#: tg-channels 0.1.2 is published, so the candidate_release helpers are checked on this sample.
+SAMPLE_PENDING = {
+    "package": "tg-channels",
+    "distribution": "codegen-kit-tg-channels",
+    "path": "packages/codegen-kit-tg-channels",
+    "version": "0.1.3",
+    "supersedes": "0.1.2",
+    "notes": "docs/releases/tg-channels-0.1.3.md",
+    "catalog_entry": {
+        "version": "0.1.3",
+        "tag": "packages/tg-channels/v0.1.3",
+        "requires_core": ">=2.4,<3",
+    },
+}
+PIN = support.PUBLISHED_RELEASES[("tg-channels", "0.1.2")]
 
 
-def test_pending_release_is_the_runner_default_and_refuses_ambiguity() -> None:
+def test_runner_default_is_the_pinned_newest_published_release() -> None:
     workflow = (ROOT / ".github/workflows/runner-proof.yml").read_text()
     default = re.search(r"inputs\.package_version \|\| '([^']+)'", workflow)
-    release = support.pending_release(_pending(), "tg-channels")
+    catalog = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
+    newest = support.catalog_package(catalog, "tg-channels")["versions"][-1]
+    pending = yaml.safe_load((ROOT / support.PENDING_RELEASES).read_text())
 
-    assert default is not None and release["version"] == default.group(1)
-    assert release["catalog_entry"]["tag"] == f"packages/tg-channels/v{release['version']}"
+    assert default is not None and newest["version"] == default.group(1)
+    assert support.published_release("tg-channels", default.group(1)) == PIN
+    assert newest == {"version": "0.1.2", "tag": PIN.tag, "requires_core": ">=2.4,<3"}
+    assert pending == {"format_version": 1, "releases": []}
+    with pytest.raises(ValueError, match="pending releases: expected one tg-channels entry"):
+        support.pending_release(pending, "tg-channels")
+    with pytest.raises(ValueError, match="not a pinned published release"):
+        support.published_release("tg-channels", "0.1.1")
+
+
+def test_pending_release_refuses_ambiguity() -> None:
+    release = SAMPLE_PENDING
+    assert support.pending_release({"format_version": 1, "releases": [release]}, "tg-channels") == (
+        release
+    )
     for broken in (
         {"format_version": 2, "releases": [release]},
         {"format_version": 1, "releases": [release, release]},
@@ -277,7 +306,9 @@ def test_pending_release_is_the_runner_default_and_refuses_ambiguity() -> None:
 def test_fixture_catalog_appends_only_the_pending_entry() -> None:
     published = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
     before = json.dumps(published, sort_keys=True)
-    release = support.pending_release(_pending(), "tg-channels")
+    release = support.pending_release(
+        {"format_version": 1, "releases": [SAMPLE_PENDING]}, "tg-channels"
+    )
 
     snapshot = support.fixture_catalog(published, release)
 
@@ -293,6 +324,97 @@ def test_fixture_catalog_appends_only_the_pending_entry() -> None:
         support.fixture_catalog(published, release | {"version": listed["version"]})
     with pytest.raises(ValueError, match="another distribution"):
         support.fixture_catalog(published, release | {"distribution": "other"})
+
+
+def test_catalog_modes_pair_only_with_their_proof_mode() -> None:
+    for proof_mode, catalog_modes in support.ADMITTED_CATALOG_MODES.items():
+        for catalog_mode in support.CATALOG_MODES:
+            if catalog_mode in catalog_modes:
+                support.check_modes(proof_mode, catalog_mode)
+            else:
+                with pytest.raises(ValueError, match="admits catalog modes"):
+                    support.check_modes(proof_mode, catalog_mode)
+    assert support.ADMITTED_CATALOG_MODES["published_release"] == (
+        "remote_head",
+        "candidate_snapshot",
+    )
+    with pytest.raises(ValueError, match="unknown proof mode"):
+        support.check_modes("published", "remote_head")
+
+
+def _remote(**changes: str) -> dict[str, str]:
+    listing = (
+        f"{PIN.tag_object}\trefs/tags/{PIN.tag}\n"
+        f"{PIN.target}\trefs/tags/{PIN.tag}^{{}}\n"
+        "448a2ad6cbfcf562c8ea96ef9e57d0003cc7f8de\trefs/tags/packages/tg-channels/v0.1.1\n"
+        "644a0d253a5f669dce9ac46537c92e628131fd8e\trefs/tags/packages/tg-channels/v0.1.1^{}\n"
+    )
+    remote = support.ls_remote_refs(listing)
+    for key, value in changes.items():
+        ref = f"refs/tags/{PIN.tag}" + ("^{}" if key == "target" else "")
+        if value:
+            remote[ref] = value
+        else:
+            remote.pop(ref)
+    return remote
+
+
+def test_published_tag_must_be_the_pinned_remote_tag_and_its_fetched_copy() -> None:
+    fetched = {"type": "tag", "tag_object": PIN.tag_object, "target": PIN.target, "tree": PIN.tree}
+    other = "0" * 40
+
+    assert support.verify_published_tag(PIN, _remote(), fetched) == {"tag": PIN.tag, **fetched}
+    with pytest.raises(ValueError, match="has no tag"):
+        support.verify_published_tag(PIN, _remote(tag_object=""), fetched)
+    for remote in (_remote(tag_object=other), _remote(target=other), _remote(target="")):
+        with pytest.raises(ValueError, match="not the pinned release"):
+            support.verify_published_tag(PIN, remote, fetched)
+    for key, value in (("type", "commit"), ("tree", other), ("target", other), ("tree", None)):
+        with pytest.raises(ValueError, match="the fetched"):
+            support.verify_published_tag(PIN, _remote(), fetched | {key: value})
+
+
+def test_copied_tags_and_ls_remote_listing_are_exact() -> None:
+    remote = _remote()
+    support.verify_copied_tags(remote, {PIN.tag: PIN.tag_object})
+    with pytest.raises(ValueError, match="differ from the real remote"):
+        support.verify_copied_tags(remote, {PIN.tag: PIN.target})
+    with pytest.raises(ValueError, match="differ from the real remote"):
+        support.verify_copied_tags(remote, {"packages/tg-channels/v0.1.3": PIN.tag_object})
+    for listing in ("abc\trefs/tags/x", f"{PIN.target}\tHEAD\n{PIN.target}\tHEAD"):
+        with pytest.raises(ValueError, match="unexpected ls-remote line"):
+            support.ls_remote_refs(listing)
+    catalog = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
+    assert PIN.tag in support.released_tags(catalog)
+    assert "packages/textparse/v0.1.0" in support.released_tags(catalog)
+
+
+def test_catalog_digest_follows_content_not_formatting() -> None:
+    text = (ROOT / "packages/catalog.yaml").read_text()
+    document = yaml.safe_load(text)
+    digest = support.catalog_digest(text)
+
+    assert support.catalog_digest(yaml.safe_dump(document, sort_keys=True)) == digest
+    support.catalog_package(document, "tg-channels")["versions"].pop()
+    assert support.catalog_digest(yaml.safe_dump(document)) != digest
+
+
+def test_snapshot_reads_must_all_reach_the_snapshot_bytes() -> None:
+    catalog = "/vladmesh/codegen-product-kit/HEAD/packages/catalog.yaml"
+    binding = f"/vladmesh/codegen-product-kit/{PIN.tag}/packages/x/bindings/default.yaml"
+    served = {"/HEAD/packages/catalog.yaml": "a" * 64}
+    reads = [
+        {"path": catalog, "status": 200, "sha256": "a" * 64},
+        {"path": binding, "status": 200, "sha256": "b" * 64},
+    ]
+
+    support.verify_snapshot_reads(reads, served)
+    with pytest.raises(ValueError, match="answered 404"):
+        support.verify_snapshot_reads([*reads, {"path": binding, "status": 404}], served)
+    with pytest.raises(ValueError, match="other bytes"):
+        support.verify_snapshot_reads([reads[0] | {"sha256": "c" * 64}], served)
+    with pytest.raises(ValueError, match="never read"):
+        support.verify_snapshot_reads(reads[1:], served)
 
 
 def test_catalog_fixture_routes_raw_paths_to_served_refs_only() -> None:
@@ -315,23 +437,38 @@ def test_runner_workflow_runs_the_explicit_mode_release_matrix() -> None:
     steps = {step["name"]: step for step in job["steps"]}
 
     assert inputs["proof_mode"]["required"] is True
+    assert inputs["catalog_mode"]["required"] is True
     assert inputs["package_version"]["required"] is True
-    assert job["env"]["PROOF_MODE"] == "${{ inputs.proof_mode || 'candidate_release' }}"
+    assert job["env"]["PROOF_MODE"] == "${{ inputs.proof_mode || 'published_release' }}"
+    # Own runs: a pull request proves the prospective snapshot, a main push the real HEAD.
+    assert job["env"]["CATALOG_MODE"] == (
+        "${{ inputs.catalog_mode || (github.event_name == 'pull_request' && "
+        "'candidate_snapshot') || 'remote_head' }}"
+    )
+    assert job["env"]["CALLED"] == "${{ inputs.kit_sha != '' }}"
     assert job["strategy"]["fail-fast"] is False
     assert {item["leg"]: item["packages"] for item in job["strategy"]["matrix"]["include"]} == {
         "fresh": "tg-channels",
         "coexistence": "reminders,tg-channels",
     }
     runner = steps["Run the fresh product runner proof"]["run"]
-    for argument in ("--proof-mode", "--package-version", "--packages"):
+    for argument in ("--proof-mode", "--catalog-mode", "--package-version", "--packages"):
         assert argument in runner
     guard = steps["Require a trusted source and the platform deploy key"]["run"]
-    assert "candidate_release|published_release" in guard
+    assert "published_release/remote_head|published_release/candidate_snapshot)" in guard
+    assert "candidate_release/pending_fixture)" in guard
+    assert 'if [ "$EVENT" = pull_request ]; then expected=candidate_snapshot; fi' in guard
+    assert '[ "$CATALOG_MODE" != "$expected" ]' in guard
     required = steps["Require passed SHA-bound evidence"]["run"]
     for check in (
         'evidence["proof_mode"] == release["mode"] == mode',
+        'evidence["catalog_mode"] == catalog["mode"] == catalog_mode',
         'release["source_sha"] == release["tag_target"] == pinned["kit"]',
         'evidence["module"]["version"] == release["version"] == version',
+        'pin = support.published_release("tg-channels", version)',
+        'catalog["prospective"] is True and catalog["commit"] == pinned["kit"]',
+        'catalog["prospective"] is False and "http_requests" not in catalog',
+        'catalog["after_install"]["catalog_digest"] == catalog["catalog_digest"]',
         'scenario["reminders"]',
     ):
         assert check in required
