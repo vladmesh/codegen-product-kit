@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Core host contract, façade `CORE_VERSION` 2.5.0 (package protocol stays 1). The product
+  `language` setting (`{type: string, enum: [ru, en]}`, product scope) is owned by core: every fresh
+  product's settings registry carries it, bindings reference it, and `kit bind` no longer declares
+  it in `services/tg_bot/manifest.yaml`; a manifest or package that declares it again fails with its
+  source. The bot registers every command through one generated registry
+  (`services/tg_bot/src/generated/commands.py`): core `/start` and `/command`, product commands
+  declared as `ProductCommand` entries in the new product-owned `services/tg_bot/src/commands.py`,
+  bound module commands, then a core RU/EN reply to unknown commands and text. Collisions, reserved
+  names, other declaration forms and direct handler registration in product code fail
+  `make generate-from-spec`, `make lint`, `kit add` and `kit bind` before any write, naming both
+  sources. `kit check-install <name> --json` (and `framework.preflight.check_install`) is a
+  read-only, versioned `mechanical`/`glue`/`incompatible` preflight from an explicit package
+  source or catalog source and ref. Published tg-channels 0.1.2 and reminders 0.5.0 admit 2.5.0
+  unchanged. The runner proof requires the core language owner and checks RU/EN unknown input and
+  `/channel` through the fake Bot API, after a product-scope readback of each language, with each
+  of the six probes in its own granted chat keeping its native update id and first reply. The
+  core language is enforced in product scope by the generated settings router, so upgraded
+  products whose controllers Copier keeps enforce it too;
+  registered bot handlers and the application's `handlers` field are final at runtime (the bot
+  is built with PTB's `application_class(CoreApplication)`), and the hard lint follows ordinary
+  aliases of the application such as `bot = context.application`; preflight and `kit bind` require valid product
+  environments and `kit add` refuses an existing foreign one (it still prepares a missing one);
+  both validate the retained effective binding, and malformed manifests fail
+  closed as typed results. The generated durable-event integration test runs in its own Redis
+  database with event identity assertions. See
+  [the core host contract](docs/CONTRACTS.md#core-host-contract-v1).
+
 - Runner proof (`.github/workflows/runner-proof.yml`, required on every PR and main push): a fresh
   Copier backend,tg_bot product from the exact candidate is installed with tg-channels by the
   orchestrator's real `run_install`, passes its own CI job, builds its runtime
@@ -44,6 +71,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/settings/set` and `/settings/get` commit before answering. FastAPI (0.118+, products lock
+  0.133.1) runs the session dependency's commit after the response is sent, so the bot could read
+  the previous core `language` right after a `200`; the runner proof's RU/EN check hit it once
+  (fresh leg on bad1daf replied in RU after `language` was set to `en`). The commit is in the
+  generated settings router, so products keep their own settings controller.
+- Kit CI pulls Docker Hub images through the credential-free public mirror `mirror.gcr.io`
+  instead of failing on Docker Hub's unauthenticated rate limit and token timeouts: the
+  `test-generation`, `test-pytest` and runner-proof jobs configure the runner's Docker daemon
+  before any container, and `test-pytest` starts its binding Redis itself after that. Image
+  references in products, the template and the platform are unchanged.
 - tg-channels 0.1.2 (package release, tagged 2026-10-09 and added to the catalog afterwards): the
   timer consumer runs on `tg_channels.tick`, the job name the core generates and fires for the
   package, instead of `tg-channels.tick`, which the core never fires; 0.1.0 and 0.1.1 therefore

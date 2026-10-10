@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
-SETTINGS_SCHEMAS: dict[str, object] = {}
+SETTINGS_SCHEMAS: dict[str, object] = {"language": {"enum": ["ru", "en"], "type": "string"}}
 
-SETTINGS_SCHEMA_SOURCES: dict[str, str] = {}
+SETTINGS_SCHEMA_SOURCES: dict[str, str] = {"language": "core"}
+
+# The only scope a core-owned setting may be read or written in.
+SETTINGS_SCHEMA_SCOPES: dict[str, str] = {"language": "product"}

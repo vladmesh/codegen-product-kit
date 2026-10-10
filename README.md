@@ -31,6 +31,12 @@ targets `services/tg_bot`, with no backend activation. Its three-form English 0.
 prepared; independent tag publication follows merge. See the
 [library contract](docs/CONTRACTS.md#library-api-and-installation).
 
+Core façade 2.5.0 owns the product `language` setting (`ru`/`en`) and the bot's single command
+registry: core built-ins, product commands declared as `ProductCommand` entries in
+`services/tg_bot/src/commands.py`, bound module commands, and a core reply to unknown input.
+`kit check-install <name> --json` previews an install read-only as `mechanical`, `glue` or
+`incompatible`. See the [core host contract](docs/CONTRACTS.md#core-host-contract-v1).
+
 ## Generate a project
 
 ```bash

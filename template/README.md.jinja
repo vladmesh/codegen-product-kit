@@ -58,9 +58,10 @@ value as the backend's `USERS_GRANT_CAPABILITY` generated secret, which is never
 project.
 
 `POST /settings/set` is the equivalent write capability for manifest-declared product settings.
-It requires one `X-Settings-Capability` header. Product values such as user-selected languages
-belong in `services/<service>/manifest.yaml`, are validated and persisted through
-`/settings/set`, and are never copied into environment variables.
+It requires one `X-Settings-Capability` header. Product values belong in
+`services/<service>/manifest.yaml`, are validated and persisted through `/settings/set`, and are
+never copied into environment variables. The product-scoped `language` (`ru` or `en`) is a core
+setting declared by the kit, not by a manifest; set it through the same API. It has no default.
 
 `POST /jobs/fire` is the equivalent capability for firing a manifest-declared behaviour by name. It
 requires one `X-Jobs-Capability` header; `POST /jobs/evidence` reads the recorded evidence back and

@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck tests infra-start ps worker-start worker-stop worker-clean smoke-probe worker-call down dev-start dev-smoke dev-stop dev-clean prod-start prod-stop {% if 'backend' in modules %}migrate makemigrations generate-from-spec validate-specs lint-controllers openapi test-integration{% endif %} log tooling-tests check-deps
+.PHONY: setup lint format typecheck tests infra-start ps worker-start worker-stop worker-clean smoke-probe worker-call down dev-start dev-smoke dev-stop dev-clean prod-start prod-stop generate-from-spec {% if 'backend' in modules %}migrate makemigrations validate-specs lint-controllers openapi test-integration{% endif %} log tooling-tests check-deps
 
 -include .env
 export
@@ -74,6 +74,7 @@ lint:
 	$(PYTHON) -c "from framework.spec.loader import validate_specs_cli; from framework.lib.env import get_repo_root; ok, msg = validate_specs_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
 	$(PYTHON) -m framework.enforce_spec_compliance
 	$(PYTHON) -c "from framework.lint.controller_sync import lint_controllers_cli; from framework.lib.env import get_repo_root; ok, msg = lint_controllers_cli(get_repo_root()); print(msg); exit(0 if ok else 1)"
+	$(PYTHON) -m framework.host_contract
 {% if 'backend' in modules %}
 	$(PYTHON) -m framework.lint.package_imports --site-packages "$$(services/backend/.venv/bin/python -c 'import site; print(site.getsitepackages()[0])')"
 {% endif %}
@@ -238,7 +239,11 @@ tooling-tests:
 	else \
 		$(VENV)/pytest -q --cov=framework --cov-report=term-missing --cov-fail-under=70 $$dirs; \
 	fi
-{% if 'backend' in modules %}
+{% if 'backend' not in modules %}
+generate-from-spec:
+	$(PYTHON) -m framework.host_contract --write
+
+{% endif %}{% if 'backend' in modules %}
 generate-from-spec:
 	$(PYTHON) -m framework.generate
 

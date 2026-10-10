@@ -269,13 +269,15 @@ def test_released_core_21_native_upgrade_and_published_bindings(tmp_path: Path) 
     assert "tooling_requirement" not in answers_after
     assert _git("rev-parse", answers_after["_commit"], cwd=source).stdout.strip() == candidate
     _assert_tooling_revision(product, candidate)
-    assert 'CORE_VERSION = "2.4.0"' in (product / "codegen_kit/packages.py").read_text()
+    assert 'CORE_VERSION = "2.5.0"' in (product / "codegen_kit/packages.py").read_text()
     assert (product / "services/backend").is_dir() and (product / "services/tg_bot").is_dir()
     seed = product / "services/tg_bot/src/generated/bindings.py"
     assert "No product bindings" in seed.read_text()
     main = (product / "services/tg_bot/src/main.py").read_text()
     for hook in (
-        "bindings.register(application, BackendClient)",
+        "commands.register(",
+        "bindings=bindings",
+        "client_factory=BackendClient",
         "await bindings.start(application)",
         "await bindings.stop(application)",
     ):
@@ -307,7 +309,7 @@ def test_released_core_21_native_upgrade_and_published_bindings(tmp_path: Path) 
 
     run(["make", "setup"], mapping=True)
     tooling = _installed_tooling(run, product, candidate)
-    runtime = _runtime(run, product, "2.4.0")
+    runtime = _runtime(run, product, "2.5.0")
     run(["make", "validate-specs"])
     run(["make", "generate-from-spec"])
     unbound_typecheck = run(["make", "typecheck"])

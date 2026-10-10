@@ -248,7 +248,22 @@ after moving its kit pin. The runner refuses a planner whose tooling is not the 
     only requests with auth's identity for the throwaway product. The core timer fires the
     package's `tg_channels.tick`; nothing calls the poller or consumer directly. In the
     `coexistence` leg `/remind <text> in 1 minute` must then answer `Scheduled for ...` and the
-    reminders timer and relay must deliver `Reminder: <text>` to the same chat.
+    reminders timer and relay must deliver `Reminder: <text>` to the same chat. Last, the core
+    `language` is set to `ru` and then back to `en` through the same `/settings/set`, and each
+    phase reads it back through `/settings/get` (product scope) before any probe is sent. In
+    each language an unknown command and plain text must get the core registry's localized
+    unknown-input reply listing `/channel`, and `/channel` without a name the binding's localized
+    `on_empty` reply, all through the fake Bot API transport. Each of these six probes runs in
+    its own Telegram user and chat (`424242101`–`424242106`, granted through `/users/grant`,
+    never the delivery chat), keeps the native `update_id` the fixture assigned to its input, and
+    takes the first bot message in that chat after the input as its reply, whatever its
+    language: the reply is checked, never selected by its text, so a late reply to another
+    input cannot be attributed to it. After the probes no chat may hold a second reply and no
+    message may go to a chat that is neither a probe nor the delivery chat. Every phase and
+    probe is written into the evidence before it is checked; on a failure the evidence also
+    keeps the fixture's messages and inputs since the language scenario began. A user-scoped
+    `language` set and get must both be refused (422) by the real backend: the core language
+    exists only in product scope.
 
 ## Fixtures and controlled edges
 
@@ -289,12 +304,12 @@ environment contract artifact and one log per command. Every known synthetic sec
 | `template` | Copier source, `_commit`, its resolved SHA, modules, tooling requirement |
 | `install_payloads`, `installs` | per package: typed payload; executor stages with argv and exit codes, preflight and readback probe output, protected hashes, fence checkpoints, credential boundary (`install_payload`, `install`: tg-channels) |
 | `modules`, `module` | per package (and tg-channels): version, tag, tag object/tree/target and installed distribution |
-| `coexistence` | active packages, published and generated events, job timers and owners, settings and bindings |
+| `coexistence` | active packages, published and generated events, job timers and owners, settings and bindings, the product's core command registry and host-contract violations; the language owner must be `core` and the registry exactly core `/start`, `/command` plus the bound modules' commands |
 | `product_ci` | each `lint-and-test` step and its exit code |
 | `cold_main_regression` | the old recipe, prepared environments, exit code and the reproduced error |
 | `main_images` | each `build-and-push` step; per image Dockerfile, context, tag, digest and reference |
 | `integration_without_host_environments` | the cold `make test-integration` summary |
 | `platform` | auth image, throwaway product id, grant, admin read-back and ingress refusals |
 | `deployment` | the digest references the running backend and bot use |
-| `scenario` | initialization responses, negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery |
+| `scenario` | initialization responses, negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery; `languages`: the refused user-scoped set/get statuses, the sent-message watermark, the granted probe chats, then per `ru`/`en` the language write, its product-scope readback and per probe its text, chat, native `update_id`, watermark, first reply, seconds and problems; `ledger` (duplicate, unmatched and delivery-chat messages) on success, `fixture_state` (messages and inputs since the watermark) on failure |
 | `commands`, `resources` | every command with cwd, exit code, duration and log; created resources and their clean-up |

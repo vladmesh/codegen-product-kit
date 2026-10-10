@@ -57,6 +57,15 @@ its entry in `packages/pending-releases.yaml`, and each published release the ru
 package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
+Jobs that pull, build or run containers (`test-generation`, `test-pytest`, both runner legs)
+first add the credential-free public mirror `https://mirror.gcr.io` to the runner's Docker daemon
+(keeping its other `daemon.json` keys), restart it and log the effective mirror and the `docker`
+builder driver before any container exists. Image references in the product, template and
+platform stay Docker Hub names; only this throwaway runner's transport changes, and the daemon
+falls back to Docker Hub for an image the mirror lacks. `test-pytest` therefore starts its binding
+Redis (`redis:7-alpine` on port 6379, database 14) itself after the mirror and removes only that
+container, instead of an Actions service pulled before the first step.
+`tests/tooling/test_ci_image_transport.py` checks that order.
 Keep required job names stable unless branch protection is updated at the same time.
 
 `tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording
@@ -117,6 +126,18 @@ emission before the replacement process runs; creating a new consumer group at t
 latest entry after that publication would skip the event. Early registration preserves the
 delivery observation while retaining the crash exit, pending database state, replacement exit,
 event identity and stream-count assertions. This Redis/PostgreSQL scenario runs in CI only.
+
+The generated product's `tests/integration/test_durable_events.py` runs every backlog, live,
+reclaimed, duplicate and generated-adapter case through one fixture transport boundary: its own
+Redis logical database (15, never the product's), into which the generated publishers and every
+reader are redirected. It deletes only its own streams, never flushes the live backend's Redis,
+and asserts the identity of each delivery: the duplicate phase checks both deliveries carry the
+duplicate UUID with one effect, and the adapter guard sees exactly the published event twice.
+While these tests run, they publish real current-slot core-timer `job_fired` events (the
+`core-timer:<job>:<slot>` identity of the first `JOB_TIMERS` entry) into the product's live
+database, where the backend's packages consume them as ordinary module deliveries; none may
+reach the owned stream. Products without timers skip that publication. Redis/Postgres runs are
+CI-only (product CI inside the runner proof and the slow Copier integration lanes).
 
 When a Docker-dependent test cannot run, skip it explicitly at the pytest boundary with a reason;
 do not silently return from the test.
@@ -210,10 +231,13 @@ that each fixture resolves to its own product directory before the CI-only comma
 product's unchanged `make test-integration`, default-bound with exact candidate tooling:
 published reminders 0.5.0/textparse 0.1.0 through the default live catalog, and the candidate
 commit's tg-channels release. For channels, the test exports the candidate commit's catalog,
-pending release metadata and package tree into a scratch catalog source, appends the pending
-entry to the catalog there (the public catalog lists published tags only), checks it against the
-package manifest, creates the release tag only there and installs with `--catalog-source`; it
-proves the unpublished release, not a published tag. Channels verifies its platform environment
+pending release metadata and package tree into a scratch catalog source. Only when
+`packages/pending-releases.yaml` holds a tg-channels entry does it append that entry to the
+scratch catalog (the public catalog lists published tags only); otherwise it uses the candidate's
+committed catalog unchanged. It checks the newest entry against the package manifest, creates a
+synthetic release tag only in that scratch source and installs with `--catalog-source`. That
+scratch tag is a test artifact, distinct from the real published tag the mandatory runner proof
+requires. Channels verifies its platform environment
 declarations and, as in a real product CI, the product `.env` has no `PLATFORM_KEY` or
 `PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. The fast
 `test_candidate_channels_source_releases_exactly_the_candidate_commit` checks that scratch
@@ -224,3 +248,59 @@ exit status, candidate/component identities and contract hashes, including faile
 Fast Compose tests cover image-seeded workspace environment volumes and the bot wheel/sync
 ordering for both backend-only and backend,tg_bot shapes. Workers do not run these Docker or
 published-package proofs locally.
+
+## Core host contract
+
+`tests/tooling/test_host_contract.py` covers the core `language` owner in the loader and in a fresh
+product, manifest redeclaration (equal schema included) with its file and line, product commands
+between core built-ins and modules, every refused product declaration form, collisions with both
+sources (product/module, product/core, module/module), reserved names per shape, fail-closed
+registration bypasses (names, aliases, attributes, strings and unreadable files), excluded
+tests/generated/environment trees, a binding naming another language key, registry drift and
+`--write`, and that the shipped template registry equals the render for both bot shapes.
+`tests/tooling/test_preflight.py` is the `check-install` regression matrix on a synthetic product
+and the actual tg-channels 0.1.2 source: fresh product `mechanical` (deterministic payload),
+language redeclaration and a product `/channel` each `glue` with their sources and actions, all
+simultaneous conflicts in one sorted list, and every incompatible reason, including an old core
+and an unreachable catalog. Each case compares every product file, including environments, by
+size, mtime and bytes before and after. A local catalog repository proves the explicit
+catalog/ref/tag route without a network. The CLI JSON and exit codes and `kit add` refusing both
+conflicts before any command or write are covered with a metadata-only wheel.
+
+`tests/copier/test_host_contract.py` repeats the matrix in a generated, synced backend,tg_bot
+product with environment snapshots, then applies the returned glue through the product's own
+manifest and `ProductCommand` file, regenerates, sees `mechanical`, installs the local
+tg-channels source, binds the default and checks the registry order, the core `language` source,
+the product's tg_bot unit tests, the bound drift/lint regression and
+`command_registry_scenarios.py` in RU and EN: product, built-in and module commands and the core
+unknown reply through a real PTB `Application` with only Bot API sends and the backend transport
+replaced, plus fail-closed refusal of an undeclared product command and of a module catch-all.
+Bypass forms fail generation before any write and `python -m framework.host_contract` with their
+location; the standalone shape lints and rewrites its registry. The slow case (CI only) refuses
+the real `kit add --wheel` before writes, then installs the built wheel after the glue and binds.
+The runner proof adds the RU/EN unknown-input and `/channel` checks through its fake Bot API.
+
+Review 11 repairs are covered in the same suites. Tooling tests refuse unpacked, duplicate and
+extra `ProductCommand` arguments before any registry write while admitting the positional and
+named forms the runtime accepts; flag `context.application.handlers` callback/clear/remove,
+`getattr(application, "handlers")` and, since review 41, replacement or deletion through ordinary
+aliases (`bot = context.application`, chains, typed names, `setattr`/`delattr`, `:=`, closures,
+`self.bot`), including the reviewer's exact `ProductCommand` source as glue and a refused `kit add`
+before writes, but not ordinary `handlers`, `callback` or `clear` fields, `context.bot` or a
+shadowing parameter. `tests/copier/command_registry_scenarios.py` drives a real PTB 21.4
+`CoreApplication` offline: a plain `Application` is refused, a declared product command's
+alias replacement and deletion raise and leave the registry object identical, and `/start`,
+allowed/denied access and the RU/EN unknown reply still work;
+fail closed on list, invalid-YAML and incomplete manifests; and classify a retained binding that
+names core language as its timezone, or another language key, as product glue at its file and
+line (as a package default: incompatible). Preflight fixtures are real empty virtualenvs
+(`venv`, no installs); a host venv symlinked from outside the product, an empty placeholder and
+a failing interpreter are `environment_invalid`, unreadable metadata `artifact_unavailable`, and
+a malformed manifest is versioned JSON with exit 4 from the CLI. `kit add` refuses a retained
+conflict before any command or write. In a generated product the retained conflict refuses
+generation and bind with unchanged files and environments, and the glue leads to `mechanical`,
+install and bind. `command_registry_scenarios.py` dispatches a product command that tries to
+replace the core fallback callback, clear, extend and shrink the registry; each attempt fails
+and the core unknown reply and `/start` still answer. The product template's settings test
+refuses user-scoped `language` with no stored row and round-trips product RU/EN; the runner
+proof repeats the refusal against the real deployed backend.

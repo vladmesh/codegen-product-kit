@@ -1,7 +1,8 @@
 """Entry point for the Telegram bot service.
 
-This module wires a minimal python-telegram-bot application that can be
-extended with real handlers later on.
+This module builds the python-telegram-bot application. Commands are registered only
+through the core registry (``generated/commands.py``); add product commands to
+``services/tg_bot/src/commands.py``.
 """
 
 from __future__ import annotations
@@ -22,9 +23,7 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     ApplicationHandlerStop,
-    CommandHandler,
     ContextTypes,
-    TypeHandler,
 )
 {% if 'backend' in modules %}
 from services.tg_bot.src.access import (
@@ -36,7 +35,7 @@ from services.tg_bot.src.access import (
     telegram_external_id,
 )
 {% else -%}{{ '\n' }}{% endif -%}
-from services.tg_bot.src.generated import bindings
+from services.tg_bot.src.generated import bindings, commands
 {% if 'backend' in modules -%}
 from shared.generated.events import get_broker, publish_command_received
 from shared.generated.schemas import CommandReceived, UserAccess
@@ -210,25 +209,40 @@ async def enforce_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def build_application() -> Application:
-    """Create the telegram bot application with all handlers wired in."""
+    """Create the bot application; the core command registry wires every handler.
+
+    Product commands are declared in ``services/tg_bot/src/commands.py``, not here.
+    """
     from services.tg_bot.src.middleware import install_update_logging
 {% if 'backend' in modules %}
     application = (
         ApplicationBuilder()
+        .application_class(commands.CoreApplication)
         .token(_get_token())
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()
     )
-    application.add_handler(TypeHandler(Update, enforce_access), group=-1)
-    application.add_handler(CommandHandler("start", handle_start))
-    application.add_handler(CommandHandler("command", handle_command))
-    bindings.register(application, BackendClient)
+    commands.register(
+        application,
+        access=enforce_access,
+        builtins={"start": handle_start, "command": handle_command},
+        bindings=bindings,
+        client_factory=BackendClient,
+    )
 {% else %}
-    application = ApplicationBuilder().token(_get_token()).build()
-    application.add_handler(TypeHandler(Update, enforce_access), group=-1)
-    application.add_handler(CommandHandler("start", handle_start))
-    bindings.register(application)
+    application = (
+        ApplicationBuilder()
+        .application_class(commands.CoreApplication)
+        .token(_get_token())
+        .build()
+    )
+    commands.register(
+        application,
+        access=enforce_access,
+        builtins={"start": handle_start},
+        bindings=bindings,
+    )
 {% endif %}
     install_update_logging(application)
     return application

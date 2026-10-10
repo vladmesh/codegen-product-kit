@@ -16,9 +16,11 @@ from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel
 from packaging.version import Version
 import yaml
 
+from framework import host_contract
 from framework.binding_product import (
     binding_files,
     binding_settings,
+    binding_sources,
     default_binding_resource,
     require_binding_product,
     validate_product_bindings,
@@ -46,6 +48,14 @@ from framework.package_source import (
     read_catalog,
     verify_wheel,
 )
+from framework.preflight import (
+    PreflightIncompatibleError,
+    admit,
+    check_install,
+    metadata_from_source,
+    metadata_from_wheel,
+)
+from framework.spec.core_settings import CORE_SETTINGS
 from framework.spec.loader import SpecValidationError, load_manifest, load_specs
 from framework.spec.manifests import ServiceManifest, empty_declaration_schema
 from framework.spec.package_resolution import CORE_VERSION, resolve_active_packages
@@ -211,7 +221,20 @@ def add_package(name: str, wheel: Path, repo_root: Path, catalog: Catalog | None
         raise ValueError(f"wheel is not {package.distribution}: {wheel.name}")
     _require_backend_product(repo_root)
     _require_extension_parent(package, repo_root)
+    _admit(repo_root, name, lambda: metadata_from_wheel(name, wheel))
     _install_wheel(package, wheel, repo_root)
+
+
+def _admit(repo_root: Path, name: str, read_metadata) -> None:
+    """Run the preflight's host-contract admission before the product is touched."""
+
+    host_contract.evaluate(repo_root).require_valid()
+    if not (repo_root / host_contract.TG_BOT).is_dir():
+        return  # No bot: the package's commands cannot reach this product.
+    try:
+        admit(repo_root, read_metadata())
+    except PreflightIncompatibleError as error:
+        raise BindingError(f"PreflightError: {name}: {error}") from error
 
 
 def add_released_package(
@@ -238,6 +261,9 @@ def add_released_package(
     with TemporaryDirectory(prefix="kit-add-") as scratch:
         workdir = Path(scratch)
         project = fetch_package_source(source, package, version, workdir)
+        if not isinstance(package, CatalogLibrary):
+            provenance = {"route": "catalog", "tag": version.tag}
+            _admit(repo_root, name, lambda: metadata_from_source(name, project, provenance))
         wheel = build_wheel(project, workdir / "dist")
         if isinstance(package, CatalogLibrary):
             verify_wheel(wheel, package, version, python_version)
@@ -250,6 +276,7 @@ def add_released_package(
 def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None) -> str:
     """Validate a prospective whole product before writing its owned binding/manifest."""
     require_binding_product(repo_root)
+    host_contract.evaluate(repo_root).require_valid()
     specs = load_specs(repo_root)
     package = next((item for item in specs.packages if item.name == name), None)
     if package is None:
@@ -268,6 +295,8 @@ def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None
         )
     selected = binding_files(repo_root)
     selected[target.name] = binding
+    sources = binding_sources(repo_root, selected) | {target.name: source}
+    host_contract.evaluate(repo_root, selected, sources).require_valid()
     manifest_path = repo_root / "services/tg_bot/manifest.yaml"
     manifest_text = manifest_path.read_text() if manifest_path.exists() else None
     manifest = (
@@ -281,7 +310,8 @@ def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None
     changed = False
     for item in selected.values():
         for key, schema in binding_settings(item).items():
-            if key not in specs.settings_schemas:
+            # Core settings (language) are referenced, never declared by the product.
+            if key not in specs.settings_schemas and key not in CORE_SETTINGS:
                 manifest["settings_schema"]["properties"][key] = schema
                 changed = True
     prospective = load_specs(
@@ -333,13 +363,47 @@ def _parser() -> argparse.ArgumentParser:
     route.add_argument("--default", action="store_true", help="copy the installed package default")
     route.add_argument("--file", type=Path, help="use this explicit product override")
     bind.add_argument("--product-root", type=Path, default=Path.cwd())
+    check = commands.add_parser(
+        "check-install",
+        help="read-only preflight: mechanical, glue or incompatible for one runtime package",
+    )
+    check.add_argument("name")
+    check.add_argument("--json", action="store_true", help="print the versioned JSON result")
+    check.add_argument("--package-source", type=Path, help="a package source directory to read")
+    check.add_argument("--catalog-source", help="git repository holding the catalog and tags")
+    check.add_argument("--catalog-ref", help="explicit catalog ref; there is no live default")
+    check.add_argument("--version", help="require this exact package version")
+    check.add_argument("--product-root", type=Path, default=Path.cwd())
     return parser
+
+
+def _check_install(arguments: argparse.Namespace) -> int:
+    result = check_install(
+        arguments.product_root.resolve(),
+        arguments.name,
+        package_source=arguments.package_source,
+        catalog_source=arguments.catalog_source,
+        catalog_ref=arguments.catalog_ref,
+        version=arguments.version,
+    )
+    if arguments.json:
+        print(result.to_json())
+    else:
+        print(f"kit: {arguments.name} install is {result.status}")
+        for item in result.glue:
+            where = f"{item['path']}:{item['line']}" if item["line"] else item["path"]
+            print(f"  glue {item['code']} at {where}: {item['conflict']}; {item['action']}")
+        if result.incompatible:
+            print(f"  {result.incompatible['code']}: {result.incompatible['explanation']}")
+    return result.exit_code
 
 
 def main() -> None:
     """Run the product-kit command line."""
 
     arguments = _parser().parse_args()
+    if arguments.command == "check-install":
+        raise SystemExit(_check_install(arguments))
     try:
         if arguments.command == "bind":
             result = bind_package(

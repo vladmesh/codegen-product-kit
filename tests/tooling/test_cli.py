@@ -14,7 +14,13 @@ def _product(root: Path) -> None:
     (backend / "pyproject.toml").write_text(
         "[project]\nname = 'backend'\n\n[tool.deptry.per_rule_ignores]\nDEP002 = [\"uvicorn\"]\n"
     )
-    (backend / "manifest.yaml").write_text("version: 1\npackages: []\n")
+    # A valid version 1 manifest: the host contract refuses a malformed one.
+    (backend / "manifest.yaml").write_text(
+        "version: 1\nsettings_schema:\n"
+        "  $schema: https://json-schema.org/draft/2020-12/schema\n"
+        "  type: object\n  properties: {}\n  additionalProperties: false\n"
+        "packages: []\n"
+    )
 
 
 def test_add_reminders_runs_the_complete_recipe(
