@@ -1,16 +1,18 @@
-"""The core settings router refuses the core language outside its scope, commits, then answers.
+"""Core settings and users routers: scope refusal, then commit, then event and answer.
 
-The settings controller is product-owned (Copier keeps it on update), so the core contract
-lives in generated code every product regenerates.
+The settings and users controllers are product-owned (Copier keeps them on update), so the core
+contract lives in generated code every product regenerates.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 import shutil
 import sys
 from types import ModuleType
+from typing import Any
 
 from fastapi import HTTPException
 import pytest
@@ -63,12 +65,15 @@ def test_template_settings_router_is_the_generated_one(tmp_path: Path) -> None:
             name == "routers/settings.py"
         )
         assert generated.count("_require_core_scope(") == shipped.count("_require_core_scope(")
+        # Every core write commits; the read-only users access lookup does not.
+        assert generated.count("await session.commit()") == 2
+        assert shipped.count("await session.commit()") == 2
 
 
-def test_core_language_outside_product_scope_never_reaches_the_controller(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _import_product(
+    product: Path, monkeypatch: pytest.MonkeyPatch, publish_event: object = None
 ) -> None:
-    product = _product(tmp_path)
+    """Make the generated product importable without a database driver or a broker."""
     for name in ("sqlalchemy", "sqlalchemy.ext", "sqlalchemy.ext.asyncio"):
         module = ModuleType(name)
         module.AsyncSession = object  # type: ignore[attr-defined]
@@ -78,6 +83,15 @@ def test_core_language_outside_product_scope_never_reaches_the_controller(
     monkeypatch.syspath_prepend(str(product / "shared"))
     for name in [item for item in sys.modules if item.split(".")[0] in {"services", "shared"}]:
         monkeypatch.delitem(sys.modules, name)
+    events = ModuleType("shared.generated.events")
+    events.publish_event = publish_event  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "shared.generated.events", events)
+
+
+def test_core_language_outside_product_scope_never_reaches_the_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _import_product(_product(tmp_path), monkeypatch)
     from services.backend.src.generated.routers.settings import create_router
     from shared.generated.schemas import SettingGet, SettingSet
 
@@ -127,3 +141,108 @@ def test_core_language_outside_product_scope_never_reaches_the_controller(
         ("get", default_scope),
         ("commit", None),
     ]
+
+
+class _CommitFailed(Exception):
+    """The database refused the commit."""
+
+
+def _users_router(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, object]]
+) -> dict[str, Callable[..., Any]]:
+    async def publish_event(channel: str, payload: object) -> None:
+        calls.append(("publish", channel))
+
+    _import_product(_product(tmp_path), monkeypatch, publish_event)
+    from services.backend.src.generated.routers.users import create_router
+
+    router = create_router(get_session=lambda: None, get_controller=lambda: None)
+    return {route.path.rsplit("/", 1)[1]: route.endpoint for route in router.routes}
+
+
+class _UsersController:
+    """Records each controller call and answers with the access the caller would receive."""
+
+    def __init__(self, calls: list[tuple[str, object]]) -> None:
+        self.calls = calls
+
+    async def grant(self, session: object, payload: object) -> object:
+        self.calls.append(("grant", payload))
+        return "granted"
+
+    async def revoke(self, session: object, payload: object) -> object:
+        self.calls.append(("revoke", payload))
+        return "revoked"
+
+    async def resolve(self, session: object, channel: str, external_id: str) -> object:
+        self.calls.append(("resolve", external_id))
+        return "resolved"
+
+
+class _Session:
+    """Records the commit among the controller and event calls; it may refuse the commit."""
+
+    def __init__(self, calls: list[tuple[str, object]], *, fails: bool = False) -> None:
+        self.calls = calls
+        self.fails = fails
+
+    async def commit(self) -> None:
+        self.calls.append(("commit", None))
+        if self.fails:
+            raise _CommitFailed
+
+
+def test_core_user_writes_commit_before_their_event_and_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, object]] = []
+    handlers = _users_router(tmp_path, monkeypatch, calls)
+    from shared.generated.schemas import UserGrant, UserRevoke
+
+    session, controller = _Session(calls), _UsersController(calls)
+    identity = {"channel": "telegram", "external_id": "424242105"}
+    grant, revoke = UserGrant(**identity), UserRevoke(**identity)
+
+    answers = [
+        asyncio.run(handlers["grant"](payload=grant, session=session, controller=controller)),
+        asyncio.run(handlers["revoke"](payload=revoke, session=session, controller=controller)),
+        asyncio.run(
+            handlers["access"](
+                channel="telegram", external_id="424242105", session=session, controller=controller
+            )
+        ),
+    ]
+
+    assert answers == ["granted", "revoked", "resolved"]
+    assert calls == [
+        ("grant", grant),
+        ("commit", None),
+        ("publish", "user_granted"),
+        ("revoke", revoke),
+        ("commit", None),
+        # The access lookup stays read-only: nothing to commit.
+        ("resolve", "424242105"),
+    ]
+
+
+@pytest.mark.parametrize("name", ["grant", "revoke"])
+def test_core_user_write_whose_commit_fails_is_neither_published_nor_answered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    calls: list[tuple[str, object]] = []
+    handlers = _users_router(tmp_path, monkeypatch, calls)
+    from shared.generated.schemas import UserGrant, UserRevoke
+
+    payload = {"grant": UserGrant, "revoke": UserRevoke}[name](
+        channel="telegram", external_id="424242105"
+    )
+    with pytest.raises(_CommitFailed):
+        asyncio.run(
+            handlers[name](
+                payload=payload,
+                session=_Session(calls, fails=True),
+                controller=_UsersController(calls),
+            )
+        )
+
+    assert calls == [(name, payload), ("commit", None)]

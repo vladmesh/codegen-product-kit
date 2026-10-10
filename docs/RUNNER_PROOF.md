@@ -240,7 +240,10 @@ after moving its kit pin. The runner refuses a planner whose tooling is not the 
     pulled by digest from the registry; running containers must use exactly those references.
 12. **Scenario.** Every binding setting (`language` = `en`, and `timezone` = `UTC` with
     reminders) and the user's access are set through the product's own `/settings/set` and
-    `/users/grant`. The negative control comes first: with an unknown key,
+    `/users/grant`. A dedicated identity (`424242201`, never a chat) is then granted, revoked
+    and granted again through `/users/grant` and `/users/revoke`; each `200` is followed at once,
+    with no wait or retry, by an ordinary `/users/access` read that must return exactly the
+    acknowledged access. Then the negative control: with an unknown key,
     `/channel @runner_fixture` is answered `Service is not configured.`, Caddy logs the 401s, the
     reader receives nothing and no post is sent. The backend is then recreated with the registered
     key: the same command answers `Channel added: @runner_fixture`, the package's timer, poller
@@ -311,5 +314,5 @@ environment contract artifact and one log per command. Every known synthetic sec
 | `integration_without_host_environments` | the cold `make test-integration` summary |
 | `platform` | auth image, throwaway product id, grant, admin read-back and ingress refusals |
 | `deployment` | the digest references the running backend and bot use |
-| `scenario` | initialization responses, negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery; `languages`: the refused user-scoped set/get statuses, the sent-message watermark, the granted probe chats, then per `ru`/`en` the language write, its product-scope readback and per probe its text, chat, native `update_id`, watermark, first reply, seconds and problems; `ledger` (duplicate, unmatched and delivery-chat messages) on success, `fixture_state` (messages and inputs since the watermark) on failure |
+| `scenario` | initialization responses, `access_acknowledgments` (per grant/revoke/grant step the write and the immediate access read), negative control, reader requests with identity, Caddy statuses, the delivered post text, chat id, URL and post id; in `coexistence` the reminder command, reply and delivery; `languages`: the refused user-scoped set/get statuses, the sent-message watermark, the granted probe chats, then per `ru`/`en` the language write, its product-scope readback and per probe its text, chat, native `update_id`, watermark, first reply, seconds and problems; `ledger` (duplicate, unmatched and delivery-chat messages) on success, `fixture_state` (messages and inputs since the watermark) on failure |
 | `commands`, `resources` | every command with cwd, exit code, duration and log; created resources and their clean-up |

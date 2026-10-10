@@ -71,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/users/grant` and `/users/revoke` commit before they publish `user_granted` and answer. The
+  session dependency's commit runs after the response is sent, so an ordinary `/users/access`
+  read right after a `200` could miss the grant: the runner proof hit it (grant `200`, then access
+  `404` for probe chat `424242105`). The commit is in the generated users router, the same
+  boundary as the settings fix, so products keep their own users controller; a commit that fails
+  publishes no event and returns no success. `/users/access` stays read-only. The runner proof now
+  grants, revokes and re-grants a dedicated identity and requires each `200` to be what the very
+  next access read returns.
 - `/settings/set` and `/settings/get` commit before answering. FastAPI (0.118+, products lock
   0.133.1) runs the session dependency's commit after the response is sent, so the bot could read
   the previous core `language` right after a `200`; the runner proof's RU/EN check hit it once

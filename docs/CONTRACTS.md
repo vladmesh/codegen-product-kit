@@ -893,8 +893,14 @@ because Copier keeps a product's controllers on update, so an upgraded product e
 The same router commits the session after the controller and before it answers: with FastAPI
 0.118 and later the `get_async_db` dependency's own commit runs only after the response is sent,
 so a caller (the bot reading `language` right after an operator set it) could otherwise read the
-previous value. A `200` from `/settings/set` therefore means the value is stored. Other generated
-routers keep the dependency's commit-after-response behaviour; this contract does not change them.
+previous value. A `200` from `/settings/set` therefore means the value is stored. The generated
+users router (`services/backend/src/generated/routers/users.py`) does the same for its writes:
+`POST /users/grant` and `POST /users/revoke` commit after the product-owned controller, then
+`grant` publishes `user_granted`, then the router answers, so a `200` means the identity is stored
+active or inactive and an immediate `GET /users/access` reads that state; a commit that fails
+publishes nothing and answers no success. `GET /users/access` is read-only and does not commit.
+Other generated routers keep the dependency's commit-after-response behaviour; this contract does
+not change them.
 
 ## Core host contract v1
 
