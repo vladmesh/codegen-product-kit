@@ -82,6 +82,10 @@ REGISTRY_IMAGE = "registry:2.8.3"
 PLATFORM_IMAGE = "ghcr.io/vladmesh/codegen-platform-services/auth"
 FIXTURE_CHANNEL = "runner_fixture"
 TELEGRAM_USER = 424242001
+#: An identity only the users API touches (no chat, no probe): granted, revoked, granted again.
+ACCESS_CYCLE_USER = 424242201
+#: Each users write and the access status its acknowledgment must already have stored.
+ACCESS_CYCLE = (("grant", "active"), ("revoke", "inactive"), ("grant", "active"))
 NOT_CONFIGURED = "Service is not configured."
 CHANNEL_ADDED = f"Channel added: @{FIXTURE_CHANNEL}"
 DELIVERY_TIMEOUT = 300
@@ -1532,6 +1536,40 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             raise ProofError(f"product initialization failed: {self.redact(json.dumps(steps))}")
         return {name: {"status": status, "body": body} for name, (status, body) in steps.items()}
 
+    def access_acknowledgments(self, deployment: SimpleNamespace) -> dict:
+        """Every acknowledged users write is what the very next ordinary access read sees.
+
+        A dedicated identity is granted, revoked and granted again (reactivation); each `200`
+        is followed at once by an independent `GET /users/access`, with no wait or retry, and
+        that read must return the acknowledged access exactly.
+        """
+        url = f"http://127.0.0.1:{deployment.port}"
+        identity = {"channel": "telegram", "external_id": str(ACCESS_CYCLE_USER)}
+        headers = {"X-Grant-Capability": deployment.values["USERS_GRANT_CAPABILITY"]}
+        steps: list[dict] = []
+        for operation, expected in ACCESS_CYCLE:
+            written = http("POST", f"{url}/users/{operation}", identity, headers)
+            read = http(
+                "GET", f"{url}/users/access?channel=telegram&external_id={ACCESS_CYCLE_USER}"
+            )
+            steps.append(
+                {
+                    "operation": operation,
+                    "expected": expected,
+                    "write": {"status": written[0], "body": written[1]},
+                    "access": {"status": read[0], "body": read[1]},
+                }
+            )
+            if (
+                written[0] != 200
+                or not isinstance(written[1], dict)
+                or written[1].get("status") != expected
+                or read[0] != 200
+                or read[1] != written[1]
+            ):
+                raise ProofError(f"acknowledged users write was not stored: {steps}")
+        return {"external_id": str(ACCESS_CYCLE_USER), "steps": steps}
+
     def telegram(self, deployment: SimpleNamespace) -> str:
         mapped = self.run(
             [*deployment.compose, "port", "telegram-api", "8081"],
@@ -1565,6 +1603,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
 
     def scenario(self, deployment: SimpleNamespace, platform_env: dict[str, str], key: str) -> None:
         initialized = self.initialize_product(deployment)
+        access = self.access_acknowledgments(deployment)
         control = self.telegram(deployment)
         wait_until(
             "bot polling the Bot API",
@@ -1672,6 +1711,7 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             raise ProofError(f"post delivery evidence is incomplete: {positive}")
         self.evidence["scenario"] = {
             "initialization": initialized,
+            "access_acknowledgments": access,
             "telegram_user": TELEGRAM_USER,
             "fixture_channel": FIXTURE_CHANNEL,
             "fixture_post_text": self.post_text,

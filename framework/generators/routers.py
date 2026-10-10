@@ -6,6 +6,17 @@ from typing import Any
 from framework.generators.base import BaseGenerator
 from framework.generators.context import OperationContextBuilder
 
+# The core users writes. With every core settings call they are durable before they are
+# acknowledged: FastAPI runs the session dependency's own commit only after the response is sent,
+# so the generated router commits first.
+CORE_USER_WRITES = frozenset({"grant", "revoke"})
+
+
+def _commits_before_response(service_name: str, domain_name: str, operation: str) -> bool:
+    if service_name != "backend":
+        return False
+    return domain_name == "settings" or (domain_name == "users" and operation in CORE_USER_WRITES)
+
 
 class RoutersGenerator(BaseGenerator):
     """Generate FastAPI routers and service-level router registry."""
@@ -67,9 +78,14 @@ class RoutersGenerator(BaseGenerator):
                 "needs_query": needs_query,
                 "needs_broker": needs_broker,
                 # The core settings contract: a core-owned setting (language) is refused
-                # outside its canonical scope here, before any product-owned controller, and
-                # a settings call commits before its response is sent.
+                # outside its canonical scope here, before any product-owned controller.
                 "core_setting_scopes": service_name == "backend" and domain.name == "settings",
+                # A core settings call or users write commits before its event and its answer.
+                "commit_before_response": {
+                    handler.name
+                    for handler in handlers
+                    if _commits_before_response(service_name, domain.name, handler.name)
+                },
             }
             service_data["domains"].append(domain_context)
 

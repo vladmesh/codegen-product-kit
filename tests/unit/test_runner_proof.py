@@ -675,3 +675,89 @@ def test_a_readback_that_disagrees_stops_before_any_probe(monkeypatch: pytest.Mo
     ru = runner.evidence["scenario"]["languages"]["ru"]
     assert ru["setting"]["status"] == 200 and ru["readback"]["body"]["value"] == "en"
     assert ru["probes"] == {} and product.api.state()["inputs"] == []
+
+
+class _UsersApi:
+    """The users API; `lagging` stores each write only after the next request (commit after 200)."""
+
+    def __init__(self, *, lagging: bool = False) -> None:
+        self.lagging = lagging
+        self.status: dict[str, str] = {}
+        self.pending: tuple[str, str] | None = None
+
+    def __call__(self, method, url, body=None, headers=None):
+        from urllib.parse import parse_qs, urlsplit
+
+        target = urlsplit(url)
+        assert headers is None or headers == {"X-Grant-Capability": "g"}
+        if target.path == "/users/access":
+            external_id = parse_qs(target.query)["external_id"][0]
+            answer = self._access(external_id)
+            self._store()
+            return answer
+        self._store()
+        external_id = body["external_id"]
+        if target.path == "/users/revoke" and external_id not in self.status:
+            return 404, {"detail": "User identity not found"}
+        status = "active" if target.path == "/users/grant" else "inactive"
+        self.pending = (external_id, status)
+        if not self.lagging:
+            self._store()
+        return 200, self._body(external_id, status)
+
+    def _store(self) -> None:
+        if self.pending is not None:
+            external_id, status = self.pending
+            self.status[external_id] = status
+            self.pending = None
+
+    def _access(self, external_id: str):
+        if external_id not in self.status:
+            return 404, {"detail": "User identity not found"}
+        return 200, self._body(external_id, self.status[external_id])
+
+    @staticmethod
+    def _body(external_id: str, status: str) -> dict:
+        return {"user_id": 1, "status": status, "channel": "telegram", "external_id": external_id}
+
+
+def _access_runner(monkeypatch: pytest.MonkeyPatch, users: _UsersApi):
+    import importlib
+    from types import SimpleNamespace
+
+    monkeypatch.syspath_prepend(str(ROOT / "tests/runner"))
+    fresh_product = importlib.import_module("fresh_product")
+    monkeypatch.setattr(fresh_product, "http", users)
+    runner = fresh_product.Runner.__new__(fresh_product.Runner)
+    deployment = SimpleNamespace(port=8000, values={"USERS_GRANT_CAPABILITY": "g"})
+    return fresh_product, runner, deployment
+
+
+def test_access_acknowledgments_read_each_write_back_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh_product, runner, deployment = _access_runner(monkeypatch, _UsersApi())
+    evidence = runner.access_acknowledgments(deployment)
+    assert evidence["external_id"] == str(fresh_product.ACCESS_CYCLE_USER)
+    assert [(step["operation"], step["expected"]) for step in evidence["steps"]] == [
+        ("grant", "active"),
+        ("revoke", "inactive"),
+        ("grant", "active"),
+    ]
+    for step in evidence["steps"]:
+        assert step["write"]["status"] == step["access"]["status"] == 200
+        assert step["access"]["body"] == step["write"]["body"]
+        assert step["write"]["body"]["status"] == step["expected"]
+    assert fresh_product.ACCESS_CYCLE_USER not in {
+        support.probe_chat(locale, kind)
+        for locale in support.LANGUAGES
+        for kind, _ in support.LANGUAGE_PROBES
+    } | {fresh_product.TELEGRAM_USER}
+
+
+def test_a_write_stored_after_its_acknowledgment_fails_the_first_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh_product, runner, deployment = _access_runner(monkeypatch, _UsersApi(lagging=True))
+    with pytest.raises(fresh_product.ProofError, match="acknowledged users write was not stored"):
+        runner.access_acknowledgments(deployment)

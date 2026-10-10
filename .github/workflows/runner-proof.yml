@@ -318,6 +318,14 @@ jobs:
               assert catalog["after_install"]["catalog_digest"] == catalog["catalog_digest"]
           scenario = evidence["scenario"]
           assert scenario["delivered_post"]["text"] and scenario["delivered_post"]["chat_id"]
+          # Grant, revoke, grant again: each 200 is what the next ordinary access read returns.
+          cycle = scenario["access_acknowledgments"]["steps"]
+          assert [(step["operation"], step["expected"]) for step in cycle] == [
+              ("grant", "active"), ("revoke", "inactive"), ("grant", "active")], cycle
+          for step in cycle:
+              assert step["write"]["status"] == step["access"]["status"] == 200, step
+              assert step["write"]["body"]["status"] == step["expected"], step
+              assert step["access"]["body"] == step["write"]["body"], step
           if "reminders" in packages:
               assert scenario["reminders"]["delivered"]["text"].startswith("Reminder: ")
           # RU/EN: stored and read back first, then six probes, each in its own chat with its
