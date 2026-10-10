@@ -23,8 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only, versioned `mechanical`/`glue`/`incompatible` preflight from an explicit package
   source or catalog source and ref. Published tg-channels 0.1.2 and reminders 0.5.0 admit 2.5.0
   unchanged. The runner proof requires the core language owner and checks RU/EN unknown input and
-  `/channel` through the fake Bot API. The core language is enforced in product scope by the
-  generated settings router, so upgraded products whose controllers Copier keeps enforce it too;
+  `/channel` through the fake Bot API, after a product-scope readback of each language, with each
+  of the six probes in its own granted chat keeping its native update id and first reply. The
+  core language is enforced in product scope by the generated settings router, so upgraded
+  products whose controllers Copier keeps enforce it too;
   registered bot handlers and the application's `handlers` field are final at runtime (the bot
   is built with PTB's `application_class(CoreApplication)`), and the hard lint follows ordinary
   aliases of the application such as `bot = context.application`; preflight and `kit bind` require valid product

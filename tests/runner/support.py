@@ -425,3 +425,87 @@ def host_problems(found: dict) -> list[str]:
     if found["host_violations"] or dict(found["registry"]) != expected:
         problems.append(f"command registry {found['registry']} {found['host_violations']}")
     return problems
+
+
+#: What the core registry and the channels binding answer in each product language.
+LANGUAGE_REPLIES = {
+    "en": {
+        "unknown": "I don't understand this message. Available commands: ",
+        "channel": "Enter a public channel username.",
+    },
+    "ru": {
+        "unknown": "Не понимаю это сообщение. Доступные команды: ",
+        "channel": "Введите имя публичного канала.",
+    },
+}
+LANGUAGES = ("ru", "en")
+#: The RU/EN probes: core unknown command, core unknown text and the module's /channel usage.
+LANGUAGE_PROBES = (
+    ("unknown_command", "/runner_unknown_command"),
+    ("unknown_text", "runner plain text"),
+    ("channel_without_name", "/channel"),
+)
+#: Each probe runs in its own fixture chat, so a reply belongs to exactly one input; the post
+#: and reminder scenario keeps its own chat, which these never share.
+LANGUAGE_PROBE_CHAT_BASE = 424242101
+
+
+def probe_chat(locale: str, kind: str) -> int:
+    """The isolated fixture chat (and Telegram user) of one RU/EN probe."""
+    kinds = [name for name, _ in LANGUAGE_PROBES]
+    return LANGUAGE_PROBE_CHAT_BASE + LANGUAGES.index(locale) * len(kinds) + kinds.index(kind)
+
+
+def probe_replies(sent: Iterable[Mapping], chat_id: int, watermark: int) -> list[dict]:
+    """Every bot message to the probe's own chat after its input, in send order.
+
+    The chat is the association: nothing is chosen by its text, so a reply in the wrong
+    language is still the probe's reply, and a late reply to another chat is never one.
+    """
+    return sorted(
+        (dict(item) for item in sent if item["chat_id"] == chat_id and item["seq"] > watermark),
+        key=lambda item: item["seq"],
+    )
+
+
+def language_reply_problems(kind: str, locale: str, reply: Mapping | None) -> list[str]:
+    """Why the probe's first reply is not the expected one in ``locale``; empty when it is."""
+    if reply is None:
+        return ["no reply in the probe chat"]
+    expected = LANGUAGE_REPLIES[locale]
+    text = reply["text"]
+    if kind == "channel_without_name":
+        return [] if text == expected["channel"] else [f"expected {expected['channel']!r}"]
+    problems = []
+    if not text.startswith(expected["unknown"]):
+        problems.append(f"expected the {locale} unknown reply {expected['unknown']!r}")
+    if "/channel" not in text:
+        problems.append("the unknown reply does not list /channel")
+    return problems
+
+
+def language_ledger(
+    sent: Iterable[Mapping], probes: Iterable[Mapping], watermark: int, background: Iterable[int]
+) -> dict:
+    """All bot messages since the language scenario began, by owner.
+
+    ``probes`` are the recorded probes (chat and input watermark); ``background`` are the chats
+    of the earlier post/reminder scenario, whose messages keep their own evidence there.
+    """
+    probes = list(probes)
+    later = [dict(item) for item in sent if item["seq"] > watermark]
+    chats = {probe["chat_id"] for probe in probes}
+    background = set(background)
+    return {
+        "duplicates": {
+            f"{probe['locale']}/{probe['kind']}": replies
+            for probe in probes
+            if len(replies := probe_replies(later, probe["chat_id"], probe["watermark"])) > 1
+        },
+        "unmatched": [item for item in later if item["chat_id"] not in chats | background],
+        "background": [
+            {"seq": item["seq"], "chat_id": item["chat_id"]}
+            for item in later
+            if item["chat_id"] in background
+        ],
+    }

@@ -70,17 +70,6 @@ RAW_CATALOG_TIMEOUT = 900
 COMPANIONS = ("reminders",)
 #: Product-scope values the scenario sets through `/settings/set` for each binding setting.
 BINDING_SETTING_VALUES = {"language": "en", "timezone": "UTC"}
-#: What the core registry and the channels binding answer in each product language.
-LANGUAGE_REPLIES = {
-    "en": {
-        "unknown": "I don't understand this message. Available commands: ",
-        "channel": "Enter a public channel username.",
-    },
-    "ru": {
-        "unknown": "Не понимаю это сообщение. Доступные команды: ",
-        "channel": "Введите имя публичного канала.",
-    },
-}
 PROJECT_NAME = "runner-proof"
 REPOSITORY_ID = "runner-product"
 #: The executor requires an owned GitHub URL; `remote get-url origin` answers it while the
@@ -1697,33 +1686,27 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         }
         if "reminders" in self.packages:
             self.evidence["scenario"]["reminders"] = self.reminder_scenario(control)
-        self.evidence["scenario"]["languages"] = self.language_scenario(deployment, control)
+        self.language_scenario(deployment, control)
 
-    def set_language(self, deployment: SimpleNamespace, value: str) -> dict:
+    def write_language(self, deployment: SimpleNamespace, value: str) -> dict:
         status, body = http(
             "POST",
             f"http://127.0.0.1:{deployment.port}/settings/set",
             {"key": support.LANGUAGE_KEY, "scope": "product", "value": value},
             {"X-Settings-Capability": deployment.values["SETTINGS_WRITE_CAPABILITY"]},
         )
-        if status != 200 or body.get("value") != value:
-            raise ProofError(f"core language {value} was not set: {status} {body}")
         return {"status": status, "body": body}
 
-    def reply_to(self, control: str, text: str) -> dict:
-        watermark = self.say(control, text)
-        return wait_until(
-            f"reply to {text!r}",
-            lambda: self.sent_after(
-                control,
-                watermark,
-                lambda item: (
-                    not item["text"].startswith(("New post", "Новая публикация"))
-                    and not item["text"].startswith("Reminder: ")
-                ),
-            ),
-            timeout=120,
+    def read_language(self, deployment: SimpleNamespace) -> dict:
+        status, body = http(
+            "POST",
+            f"http://127.0.0.1:{deployment.port}/settings/get",
+            {"key": support.LANGUAGE_KEY, "scope": "product"},
         )
+        return {"status": status, "body": body}
+
+    def fixture_state(self, control: str) -> dict:
+        return http("GET", f"{control}/control/state")[1]
 
     def user_language_refused(self, deployment: SimpleNamespace) -> dict:
         """The core language exists only in product scope: user scope is refused before storage."""
@@ -1740,26 +1723,112 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
             raise ProofError(f"user-scoped core language was not refused: {written} {read}")
         return {"set": {"status": written[0]}, "get": {"status": read[0]}}
 
-    def language_scenario(self, deployment: SimpleNamespace, control: str) -> dict:
-        """Core unknown input and a module command answer in RU and EN via the Bot API."""
-        results: dict = {"user_scope": self.user_language_refused(deployment)}
-        for language in ("ru", "en"):  # End on the language the delivery scenario used.
-            expected = LANGUAGE_REPLIES[language]
-            setting = self.set_language(deployment, language)
-            replies = {
-                "unknown_command": self.reply_to(control, "/runner_unknown_command"),
-                "unknown_text": self.reply_to(control, "runner plain text"),
-                "channel_without_name": self.reply_to(control, "/channel"),
+    def grant_probe_chats(self, deployment: SimpleNamespace, granted: dict) -> None:
+        """Each RU/EN probe's own Telegram user, active through the ordinary users API."""
+        url = f"http://127.0.0.1:{deployment.port}"
+        for locale in support.LANGUAGES:
+            for kind, _ in support.LANGUAGE_PROBES:
+                chat = support.probe_chat(locale, kind)
+                grant = http(
+                    "POST",
+                    f"{url}/users/grant",
+                    {"channel": "telegram", "external_id": str(chat)},
+                    {"X-Grant-Capability": deployment.values["USERS_GRANT_CAPABILITY"]},
+                )
+                access = http("GET", f"{url}/users/access?channel=telegram&external_id={chat}")
+                granted[str(chat)] = {
+                    "probe": f"{locale}/{kind}",
+                    "grant": grant[0],
+                    "access": {"status": access[0], "body": access[1]},
+                }
+                if grant[0] != 200 or access[0] != 200 or access[1].get("status") != "active":
+                    raise ProofError(f"probe chat {chat} was not granted: {granted[str(chat)]}")
+
+    def language_probe(self, control: str, phase: dict, locale: str, kind: str, text: str) -> dict:
+        """Queue one probe input in its own chat and record the first bot reply there.
+
+        The record is attached to the phase before anything is awaited, and the reply is the
+        chat's first message after the input whatever its language: it is checked, not chosen.
+        """
+        chat = support.probe_chat(locale, kind)
+        watermark = len(self.fixture_state(control)["sent"])
+        probe = phase["probes"][kind] = {
+            "locale": locale,
+            "kind": kind,
+            "text": text,
+            "chat_id": chat,
+            "watermark": watermark,
+        }
+        status, body = http("POST", f"{control}/control/messages", {"user_id": chat, "text": text})
+        if status != 200:
+            raise ProofError(f"telegram fixture refused the update: {body}")
+        probe["update_id"] = body["update_id"]
+        started = time.monotonic()
+        replies = wait_until(
+            f"{locale} {kind} reply in chat {chat}",
+            lambda: support.probe_replies(self.fixture_state(control)["sent"], chat, watermark),
+            timeout=120,
+        )
+        probe["reply"] = replies[0]
+        probe["seconds"] = round(time.monotonic() - started, 3)
+        probe["problems"] = support.language_reply_problems(kind, locale, probe["reply"])
+        return probe
+
+    def language_scenario(self, deployment: SimpleNamespace, control: str) -> None:
+        """Core unknown input and a module command answer in RU and EN via the Bot API.
+
+        One boundary per phase and probe, recorded in the evidence as it happens: the product
+        language is written and read back through the ordinary settings API, then each of the
+        three probes is queued in its own granted chat with its native update id, and the
+        chat's first reply is recorded and checked. A failure keeps everything recorded so far
+        and the fixture's sent messages and inputs since the scenario began.
+        """
+        languages: dict = {"user_scope": self.user_language_refused(deployment)}
+        self.evidence["scenario"]["languages"] = languages
+        watermark = languages["watermark"] = len(self.fixture_state(control)["sent"])
+        try:
+            self.grant_probe_chats(deployment, languages.setdefault("chats", {}))
+            for locale in support.LANGUAGES:  # End on en, the language delivery used.
+                phase = languages[locale] = {"probes": {}}
+                phase["setting"] = self.write_language(deployment, locale)
+                phase["readback"] = self.read_language(deployment)
+                if (
+                    phase["setting"]["status"] != 200
+                    or phase["readback"]["status"] != 200
+                    or (phase["readback"]["body"] or {}).get("value") != locale
+                ):
+                    raise ProofError(f"core language {locale} was not stored: {phase}")
+                for kind, text in support.LANGUAGE_PROBES:
+                    probe = self.language_probe(control, phase, locale, kind, text)
+                    if probe["problems"]:
+                        raise ProofError(f"{locale} {kind} reply is wrong: {probe}")
+                unknown_command, unknown_text = (
+                    phase["probes"][kind]["reply"]["text"]
+                    for kind in ("unknown_command", "unknown_text")
+                )
+                if unknown_command != unknown_text:
+                    raise ProofError(f"{locale} unknown command and text replies differ: {phase}")
+            probes = [
+                probe
+                for locale in support.LANGUAGES
+                for probe in languages[locale]["probes"].values()
+            ]
+            ledger = languages["ledger"] = support.language_ledger(
+                self.fixture_state(control)["sent"], probes, watermark, [TELEGRAM_USER]
+            )
+            if ledger["duplicates"] or ledger["unmatched"]:
+                raise ProofError(f"language probes got duplicate or unmatched replies: {ledger}")
+        except Exception:
+            try:
+                state = self.fixture_state(control)
+            except (OSError, ValueError, TypeError):
+                state = None
+            languages["fixture_state"] = state and {
+                "sent": [item for item in state["sent"] if item["seq"] > watermark],
+                "inputs": state.get("inputs"),
+                "calls": state.get("calls"),
             }
-            if (
-                not replies["unknown_command"]["text"].startswith(expected["unknown"])
-                or "/channel" not in replies["unknown_command"]["text"]
-                or replies["unknown_text"]["text"] != replies["unknown_command"]["text"]
-                or replies["channel_without_name"]["text"] != expected["channel"]
-            ):
-                raise ProofError(f"{language} command replies are wrong: {replies}")
-            results[language] = {"setting": setting, "replies": replies}
-        return results
+            raise
 
     def reminder_scenario(self, control: str) -> dict:
         """The companion module keeps working: its command, timer and relay deliver a reminder."""

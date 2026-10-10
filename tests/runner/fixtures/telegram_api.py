@@ -5,9 +5,10 @@ alias `api.telegram.org` with a certificate from a runner-generated CA, which th
 trusts through SSL_CERT_FILE; the bot image and its configuration are otherwise unchanged.
 
 A plain HTTP control port (:8081, published to the runner's loopback only) queues a user's
-message as an update and reads what the bot sent. Sent messages can only be recorded by the
-bot's own Bot API calls carrying its token: the control port has no way to add one. Every
-record has a sequence number, so the runner accepts only messages sent after its watermark.
+message as an update, answering its native update id, and reads what the bot sent and every
+queued input (update id, chat, text). Sent messages can only be recorded by the bot's own Bot
+API calls carrying its token: the control port has no way to add one. Every record has a
+sequence number, so the runner accepts only messages sent after its watermark.
 Standard library only.
 """
 
@@ -149,6 +150,14 @@ class BotApi:
                 "calls": dict(self.calls),
                 "sent": list(self.sent),
                 "queued": len(self.updates),
+                "inputs": [
+                    {
+                        "update_id": item["update_id"],
+                        "chat_id": item["message"]["chat"]["id"],
+                        "text": item["message"]["text"],
+                    }
+                    for item in self.updates
+                ],
             }
 
 

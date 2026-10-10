@@ -320,6 +320,20 @@ jobs:
           assert scenario["delivered_post"]["text"] and scenario["delivered_post"]["chat_id"]
           if "reminders" in packages:
               assert scenario["reminders"]["delivered"]["text"].startswith("Reminder: ")
+          # RU/EN: stored and read back first, then six probes, each in its own chat with its
+          # native update id and its first reply there, checked without problems.
+          languages = scenario["languages"]
+          assert not languages["ledger"]["duplicates"] and not languages["ledger"]["unmatched"]
+          for locale in support.LANGUAGES:
+              phase = languages[locale]
+              assert phase["readback"]["body"]["value"] == locale, phase["readback"]
+              assert [probe["kind"] for probe in phase["probes"].values()] == [
+                  kind for kind, _ in support.LANGUAGE_PROBES]
+              for kind, probe in phase["probes"].items():
+                  assert probe["chat_id"] == support.probe_chat(locale, kind), probe
+                  assert probe["reply"]["chat_id"] == probe["chat_id"], probe
+                  assert probe["reply"]["seq"] > probe["watermark"], probe
+                  assert isinstance(probe["update_id"], int) and probe["problems"] == [], probe
           print(json.dumps({"mode": mode, "catalog_mode": catalog_mode, "packages": packages,
                             "catalog_commit": catalog["commit"],
                             "delivered_post": scenario["delivered_post"]}, indent=2))

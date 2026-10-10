@@ -494,3 +494,184 @@ def test_host_problems_require_core_language_and_the_exact_registry() -> None:
     ]
     assert support.host_problems(found | {"registry": found["registry"][:-1]})
     assert support.host_problems(found | {"host_violations": ["command_collision: x"]})
+
+
+def test_language_probes_have_their_own_chats_and_replies_are_associated_by_chat() -> None:
+    chats = [
+        support.probe_chat(locale, kind)
+        for locale in support.LANGUAGES
+        for kind, _ in support.LANGUAGE_PROBES
+    ]
+    assert len(set(chats)) == 6 and 424242001 not in chats
+    probe = support.probe_chat("en", "unknown_command")
+    previous = support.probe_chat("ru", "channel_without_name")
+    sent = [
+        {"seq": 4, "chat_id": probe, "text": "before the input"},
+        # A late reply to the previous input lands after this input's watermark: not this one's.
+        {"seq": 6, "chat_id": previous, "text": "Введите имя публичного канала."},
+        {
+            "seq": 7,
+            "chat_id": probe,
+            "text": "Не понимаю это сообщение. Доступные команды: /channel",
+        },
+        {"seq": 8, "chat_id": probe, "text": "I don't understand this message. /channel"},
+    ]
+    replies = support.probe_replies(sent, probe, watermark=5)
+    # The first reply is the evidence even in the wrong language; nothing is filtered by text.
+    assert [item["seq"] for item in replies] == [7, 8]
+    assert support.language_reply_problems("unknown_command", "en", replies[0]) == [
+        'expected the en unknown reply "I don\'t understand this message. Available commands: "'
+    ]
+    assert support.language_reply_problems("unknown_command", "ru", replies[0]) == []
+    assert support.language_reply_problems("channel_without_name", "ru", None) == [
+        "no reply in the probe chat"
+    ]
+    recorded = [
+        {"locale": "en", "kind": "unknown_command", "chat_id": probe, "watermark": 5},
+        {"locale": "ru", "kind": "channel_without_name", "chat_id": previous, "watermark": 2},
+    ]
+    sent.append({"seq": 9, "chat_id": 424242001, "text": "New post: @runner_fixture"})
+    sent.append({"seq": 10, "chat_id": 31337, "text": "stray"})
+    ledger = support.language_ledger(sent, recorded, watermark=3, background=[424242001])
+    assert list(ledger["duplicates"]) == ["en/unknown_command"]
+    assert [item["seq"] for item in ledger["duplicates"]["en/unknown_command"]] == [7, 8]
+    assert ledger["unmatched"] == [{"seq": 10, "chat_id": 31337, "text": "stray"}]
+    assert ledger["background"] == [{"seq": 9, "chat_id": 424242001}]
+
+
+class _LanguageProduct:
+    """The settings/users API and a bot answering through the real fixture `BotApi`, offline."""
+
+    def __init__(self, *, stale_reply: str | None = None, late: bool = False) -> None:
+        self.api = telegram_api.BotApi("123:token")
+        self.language = "en"
+        self.readback: str | None = None  # A readback that disagrees with the stored value.
+        self.stale_reply = stale_reply  # "en/unknown_command": answered in the other language.
+        self.late = late  # Each input also brings a late second reply to the previous chat.
+        self.granted: set[str] = set()
+        self.previous: int | None = None
+
+    def __call__(self, method, url, body=None, headers=None):
+        from urllib.parse import parse_qs, urlsplit
+
+        target = urlsplit(url)
+        if target.path in ("/settings/set", "/settings/get"):
+            if body["scope"] != "product":
+                return 422, {"detail": "Setting is only available in product scope"}
+            if target.path == "/settings/set":
+                self.language = body["value"]
+            return 200, {**body, "value": self.readback or self.language}
+        if target.path == "/users/grant":
+            self.granted.add(body["external_id"])
+            return 200, {"status": "active"}
+        if target.path == "/users/access":
+            granted = parse_qs(target.query)["external_id"][0] in self.granted
+            return 200, {"status": "active" if granted else "inactive"}
+        if target.path == "/control/state":
+            return 200, self.api.state()
+        assert target.path == "/control/messages"
+        update_id = self.api.queue(body["user_id"], body["text"])
+        if self.late and self.previous is not None:
+            self.api.message(self.previous, "late second reply")
+        self._answer(body["user_id"], body["text"])
+        self.previous = body["user_id"]
+        return 200, {"update_id": update_id}
+
+    def _answer(self, chat: int, text: str) -> None:
+        kind = next(kind for kind, probe in support.LANGUAGE_PROBES if probe == text)
+        language = self.language
+        if self.stale_reply == f"{language}/{kind}":
+            language = "ru" if language == "en" else "en"
+        replies = support.LANGUAGE_REPLIES[language]
+        if kind == "channel_without_name":
+            self.api.message(chat, replies["channel"])
+        else:
+            self.api.message(chat, replies["unknown"] + "/start, /command, /channel")
+
+
+def _language_runner(monkeypatch: pytest.MonkeyPatch, product: _LanguageProduct):
+    import importlib
+    from types import SimpleNamespace
+
+    monkeypatch.syspath_prepend(str(ROOT / "tests/runner"))
+    fresh_product = importlib.import_module("fresh_product")
+    monkeypatch.setattr(fresh_product, "http", product)
+    runner = fresh_product.Runner.__new__(fresh_product.Runner)
+    runner.evidence = {"scenario": {}}
+    deployment = SimpleNamespace(
+        port=8000, values={"SETTINGS_WRITE_CAPABILITY": "w", "USERS_GRANT_CAPABILITY": "g"}
+    )
+    product.api.message(424242001, "New post: @runner_fixture")  # The earlier delivery.
+    return fresh_product, runner, deployment
+
+
+def test_language_scenario_records_readback_inputs_and_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product = _LanguageProduct()
+    fresh_product, runner, deployment = _language_runner(monkeypatch, product)
+    runner.language_scenario(deployment, "http://control")
+    languages = runner.evidence["scenario"]["languages"]
+    assert languages["user_scope"] == {"set": {"status": 422}, "get": {"status": 422}}
+    assert languages["watermark"] == 1 and len(languages["chats"]) == 6
+    inputs = {item["update_id"]: item for item in product.api.state()["inputs"]}
+    for locale in support.LANGUAGES:
+        phase = languages[locale]
+        assert phase["setting"]["status"] == 200
+        assert phase["readback"]["body"]["value"] == locale
+        for kind, text in support.LANGUAGE_PROBES:
+            probe = phase["probes"][kind]
+            assert inputs[probe["update_id"]] == {
+                "update_id": probe["update_id"],
+                "chat_id": support.probe_chat(locale, kind),
+                "text": text,
+            }
+            assert probe["reply"]["chat_id"] == probe["chat_id"] and probe["problems"] == []
+    assert languages["ledger"]["duplicates"] == {} and languages["ledger"]["unmatched"] == []
+    assert "fixture_state" not in languages
+
+
+def test_wrong_locale_reply_fails_and_keeps_the_partial_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product = _LanguageProduct(stale_reply="en/unknown_command")
+    fresh_product, runner, deployment = _language_runner(monkeypatch, product)
+    with pytest.raises(fresh_product.ProofError, match="en unknown_command reply is wrong"):
+        runner.language_scenario(deployment, "http://control")
+    languages = runner.evidence["scenario"]["languages"]
+    assert all(not probe["problems"] for probe in languages["ru"]["probes"].values())
+    en = languages["en"]
+    assert en["readback"]["body"]["value"] == "en"
+    assert list(en["probes"]) == ["unknown_command"]  # Nothing after the failing probe.
+    probe = en["probes"]["unknown_command"]
+    assert probe["reply"]["text"].startswith("Не понимаю")  # Kept, not filtered out.
+    assert probe["problems"] and isinstance(probe["update_id"], int)
+    state = languages["fixture_state"]
+    assert [item["chat_id"] for item in state["sent"]][-1] == probe["chat_id"]
+    assert state["inputs"][-1]["update_id"] == probe["update_id"]
+
+
+def test_a_late_reply_to_a_previous_probe_is_a_duplicate_not_the_next_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product = _LanguageProduct(late=True)
+    fresh_product, runner, deployment = _language_runner(monkeypatch, product)
+    with pytest.raises(fresh_product.ProofError, match="duplicate or unmatched"):
+        runner.language_scenario(deployment, "http://control")
+    languages = runner.evidence["scenario"]["languages"]
+    for locale in support.LANGUAGES:
+        for probe in languages[locale]["probes"].values():
+            assert probe["reply"]["text"] != "late second reply" and probe["problems"] == []
+    assert len(languages["ledger"]["duplicates"]) == 5  # Every probe chat but the last.
+    assert languages["fixture_state"]["sent"]
+
+
+def test_a_readback_that_disagrees_stops_before_any_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    product = _LanguageProduct()
+    product.readback = "en"
+    fresh_product, runner, deployment = _language_runner(monkeypatch, product)
+    with pytest.raises(fresh_product.ProofError, match="core language ru was not stored"):
+        runner.language_scenario(deployment, "http://control")
+    ru = runner.evidence["scenario"]["languages"]["ru"]
+    assert ru["setting"]["status"] == 200 and ru["readback"]["body"]["value"] == "en"
+    assert ru["probes"] == {} and product.api.state()["inputs"] == []
