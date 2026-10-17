@@ -37,8 +37,10 @@ see [0.10.0 preparation](releases/0.10.0.md). The 0.9.0 platform environment sou
 and v1 bindings remain compatible.
 Façade 2.5.0 adds the [core host contract](#core-host-contract-v1): the core-owned `language`
 setting, one Telegram command registry with a core unknown-input reply, its hard lint and the
-read-only `kit check-install` preflight. The façade semver is versioned independently of the kit's
-Git release tags; package protocol stays 1 because its serialized manifest surface is unchanged.
+read-only `kit check-install` preflight. Façade 2.6.0 adds the product text handler and
+product inline-button callbacks to that registry. The façade semver is versioned independently
+of the kit's Git release tags; package protocol stays 1 because its serialized manifest surface
+is unchanged.
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target
@@ -917,30 +919,49 @@ same validated claims, so lint, preflight and runtime registration cannot disagr
 `services/tg_bot/src/generated/commands.py` is the only place the bot registers handlers. Its
 `register(application, access=..., builtins=..., bindings=..., client_factory=...)` adds the
 access check in group -1, then in group 0 and in this order: core `/start` (and `/command` in
-backend shapes), product commands, bound module commands in binding-file order, and last the
-core unknown-input reply. Module bindings are admitted through a guard that accepts exactly the
+backend shapes), product commands, product callbacks, bound module commands and callbacks in
+binding-file order, the product text handler, and last the core unknown-input reply. Module bindings are admitted through a guard that accepts exactly the
 registry's next module command or the `b1:` callback handler and refuses anything else. At
 startup the registry refuses product declarations that differ from the generated registry.
 `start` and `command` are reserved in every shape. Names match `[a-z][a-z0-9_]*` with at most
 32 characters. A name claimed by two owners fails with the command and both source locations.
 
-The admitted product contribution form is one module-level tuple in
+The admitted product contribution forms are three module-level declarations in
 `services/tg_bot/src/commands.py` (product-owned, never overwritten by Copier):
 
 ```python
-from services.tg_bot.src.generated.commands import ProductCommand
+from services.tg_bot.src.generated.commands import (
+    ProductCallback, ProductCommand, ProductText, callback_data, callback_payload,
+)
 
-async def handle_ping(update, context) -> None: ...
+async def handle_list(update, context) -> None: ...
+async def add_item(update, context) -> None: ...      # any non-command text
+async def mark_bought(update, context) -> None: ...   # callback_payload(update) == "42"
 
-COMMANDS: tuple[ProductCommand, ...] = (ProductCommand("ping", handle_ping),)
+COMMANDS: tuple[ProductCommand, ...] = (ProductCommand("list", handle_list),)
+TEXT = ProductText(add_item)
+CALLBACKS = (ProductCallback("bought", mark_bought),)
+# A button: InlineKeyboardButton("Bought", callback_data=callback_data("bought", "42"))
 ```
 
-Each entry is `ProductCommand("<literal name>", <function name>)`, or the same two arguments
-named (`name=`, `handler=`), exactly the shapes the runtime constructor accepts. The lint reads
-the file as data and fails closed on any other form before anything is written: a non-literal
-name, unpacked (`*`/`**`) or extra arguments, an argument given twice, a non-tuple value,
-reassignment or augmentation. Product tg_bot code outside `src/generated/`, `tests/`, `packages/`
-and environments may not mention `BaseHandler`, `CommandHandler`, `ConversationHandler`,
+`COMMANDS` is required; `TEXT` and `CALLBACKS` are optional. Each `COMMANDS` and `CALLBACKS`
+entry is `ProductCommand`/`ProductCallback("<literal name>", <function name>)`, or the same two
+arguments named (`name=`, `handler=`); `TEXT` is `ProductText(<function name>)` or
+`ProductText(handler=...)`: exactly the shapes the runtime constructors accept. The lint reads the
+file as data and fails closed on any other form before anything is written: a non-literal name,
+unpacked (`*`/`**`) or extra arguments, an argument given twice, a non-tuple value,
+reassignment or augmentation; for callbacks also an invalid or repeated name.
+
+The text handler receives every non-command text message; unknown commands still get the core
+reply, and without `TEXT` so does text. A product callback receives exactly the callback queries
+whose data is `p:<name>:<payload>`, built by `callback_data(name, payload)`, which refuses an
+undeclared name and data over Telegram's 64 bytes; `callback_payload(update)` returns the payload.
+Module binding callbacks own `b1:` data and are registered after the product callbacks, so the
+two namespaces never meet even for a product callback named `b1`. The payload is client data;
+product handlers authorize through the backend as the update's user, never through the payload.
+
+Product tg_bot code outside `src/generated/`, `tests/`, `packages/` and environments may not
+mention `BaseHandler`, `CommandHandler`, `ConversationHandler`,
 `MessageHandler`, `PrefixHandler`, `StringCommandHandler`, `StringRegexHandler`, `TypeHandler`,
 `add_handler`, `add_handlers` or `remove_handler` as a name, attribute, import or string, nor
 reach the registry itself as `<application>.handlers`, read, assigned or deleted, or through
@@ -950,23 +971,25 @@ Python scopes names: `bot = context.application`, chained `b = bot`, tuple and `
 `with ... as bot`, a name or parameter typed `Application`/`CoreApplication`, and an attribute
 assigned the application (`self.bot = context.application`, module-wide); a parameter of the
 same name shadows an outer alias. These would register, replace or remove a command, the access
-check or the unknown-input reply. Other attributes called `handlers`, `callback` or `clear` in
-product logic, and `context.bot` (the Bot API client), are not restricted.
+check or the unknown-input reply; each such violation's repair action names the three admitted
+forms. Other attributes called `handlers`, `callback` or `clear` in product logic, and
+`context.bot` (the Bot API client), are not restricted.
 
 At runtime the bot is built with PTB's `ApplicationBuilder().application_class(CoreApplication)`
 (`CoreApplication` is in the generated registry) and `register` refuses any other application or
 a second registration. Registration runs in one order: access (group -1), core built-ins,
-product commands, module commands and callbacks, the core unknown-input reply, then the seal:
+product commands, product callbacks, module commands and callbacks, the product text handler,
+the core unknown-input reply, then the seal:
 every handler group becomes a fixed tuple, every registered handler is sealed and finally the
 application's `handlers` field itself. From then on adding, removing or clearing handlers,
 replacing a handler's callback, or assigning or deleting `handlers` through any name raises
 (`CommandRegistryError`, or `AttributeError` from PTB's list operations) inside the offending
 handler, and the core access, commands and unknown-input reply keep working. The callback context
 and every other application attribute (`bot_data`, `bot`, `job_queue`, …) stay ordinary. This
-protects the registry; it is not a Python sandbox. Product callbacks and other update types are not
-contributable in this version. Other product logic is not linted by this contract.
+protects the registry; it is not a Python sandbox. Update types other than commands, text and
+callback queries are not contributable. Other product logic is not linted by this contract.
 
-Unknown commands and text reach the core reply, which lists the registry's commands in the core
+Unknown commands, and text when the product declares no `TEXT`, reach the core reply, which lists the registry's commands in the core
 `language`: `I don't understand this message. Available commands: /start, …` or
 `Не понимаю это сообщение. Доступные команды: /start, …`. When the language is unset or the
 settings read fails, both lines are sent; a backend-less bot always sends both.
@@ -1048,10 +1071,30 @@ satisfies the contract as is. Exit status is 0 for `mechanical`, 3 for `glue`, 4
 product write and refuse with `HostContractError`, leaving owned files and locks unchanged for
 these conflicts. This is not a general install recovery mechanism.
 
-Façade 2.5.0 is a minor version: the host surface and `ProductCommand` API are additive, the
-published tg-channels 0.1.2 (`>=2.4,<3`, binding key `language`) and reminders 0.5.0
-(`>=2.2,<3`, binding v1 without language) admit it unchanged, and package protocol stays 1.
-Products generated earlier keep their pinned tooling; there is no automatic upgrade.
+Façade 2.6.0 is a minor version: `ProductText`, `ProductCallback`, `callback_data` and
+`callback_payload` are additive, a product declaring neither `TEXT` nor `CALLBACKS` registers
+exactly as before, the published tg-channels 0.1.2 (`>=2.4,<3`, binding key `language`) and
+reminders 0.5.0 (`>=2.2,<3`, binding v1 without language) admit it unchanged, and package
+protocol stays 1.
+
+### Upgrading a generated product
+
+A product generated from an earlier 2.x kit commit takes a newer core with one command in its
+clean, committed checkout:
+
+```bash
+uvx copier update --defaults --trust --vcs-ref=<kit commit> --conflict=rej
+```
+
+Copier refuses a checkout with uncommitted changes. It rewrites only kit-owned files (the
+façade, generated registry, tooling requirement and lock, kit tests and docs) and never writes a
+product-owned one: `services/tg_bot/src/commands.py`, `services/*/src/app/**`,
+`services/*/src/controllers/**`, `.env`, `.env.example` and the shared specs are skipped when
+they exist, and bindings and manifests are not template files. The product's own commands in
+the generated registry merge into the new registry. A kit-owned file the product edited so that
+the merge does not apply stays unchanged with a `.rej` beside it; the step then did not apply
+mechanically, and `git checkout . && git clean -fd` restores the product. After the update,
+`make setup` installs the new tooling and `make lint` checks the contract.
 
 ## Environment contract v1
 

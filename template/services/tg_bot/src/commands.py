@@ -1,18 +1,7 @@
-"""Product-owned Telegram commands.
+"""Product-owned Telegram commands, text handler and inline-button callbacks.
 
-Declare each command as ``ProductCommand("name", handler)`` in ``COMMANDS`` and run
-``make generate-from-spec``; the core registry then registers it after the core built-ins
-and before bound module commands. Core owns /start, /command, unknown commands and text.
-A name another owner claims (for example a module's /channel or /remind), any other
-declaration form and direct handler registration fail generation and product CI.
-
-Example::
-
-    async def handle_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if update.message:
-            await update.message.reply_text("pong")
-
-    COMMANDS = (ProductCommand("ping", handle_ping),)
+The admitted forms are described in ``services/tg_bot/AGENTS.md`` (Command registry); run
+``make generate-from-spec`` after changing them.
 """
 
 from __future__ import annotations

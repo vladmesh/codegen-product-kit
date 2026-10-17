@@ -7,7 +7,8 @@ binding data only; it never imports product, package or binding runtime code.
 Order: collect typed declarations with their source locations, resolve core ownership and
 exclusive command claims, then report every violation before anything is written. The
 generated tg_bot registry (``services/tg_bot/src/generated/commands.py``) renders the same
-validated claims, and the bot registers commands, module bindings and unknown input from it.
+validated claims, and the bot registers commands, product text and callbacks, module bindings
+and unknown input from it.
 """
 
 from __future__ import annotations
@@ -51,8 +52,17 @@ CORE_COMMAND_SOURCE = f"{TG_BOT}/src/main.py"
 PRODUCT_COMMANDS = f"{TG_BOT}/src/commands.py"
 REGISTRY = f"{TG_BOT}/src/generated/commands.py"
 PRODUCT_COMMAND_TYPE = "ProductCommand"
+PRODUCT_TEXT_TYPE = "ProductText"
+PRODUCT_CALLBACK_TYPE = "ProductCallback"
+#: The admitted product declarations, as the lint's repair actions name them.
+PRODUCT_FORMS = (
+    f'COMMANDS = ({PRODUCT_COMMAND_TYPE}("name", handler), ...) for commands, '
+    f"TEXT = {PRODUCT_TEXT_TYPE}(handler) for non-command text and "
+    f'CALLBACKS = ({PRODUCT_CALLBACK_TYPE}("name", handler), ...) for inline buttons, whose '
+    f'callback_data comes from callback_data("name", payload), in {PRODUCT_COMMANDS}'
+)
 #: Names that register Telegram handlers or match arbitrary input. Product tg_bot code may
-#: not mention them: commands go through ``COMMANDS`` and unknown input belongs to core.
+#: not mention them: product input goes through ``PRODUCT_FORMS`` and the rest belongs to core.
 BYPASS_NAMES = frozenset(
     {
         "BaseHandler",
@@ -110,6 +120,15 @@ class CommandClaim:
 
     command: str
     owner: str
+    location: Location
+    symbol: str
+
+
+@dataclass(frozen=True)
+class InputClaim:
+    """The product text handler (``name`` None) or one product callback, with its handler."""
+
+    name: str | None
     location: Location
     symbol: str
 
@@ -173,6 +192,8 @@ class HostContract:
     tg_bot: bool
     settings: dict[str, str] = field(default_factory=dict)
     commands: list[CommandClaim] = field(default_factory=list)
+    text: InputClaim | None = None
+    callbacks: list[InputClaim] = field(default_factory=list)
     violations: list[Violation] = field(default_factory=list)
 
     def require_valid(self) -> HostContract:
@@ -245,124 +266,207 @@ def manifest_setting_violations(root: Path) -> list[Violation]:
     return violations
 
 
-def _command_arguments(node: ast.Call) -> dict[str, ast.expr] | str:
-    """Bind a call like the runtime constructor (name, handler), or name the unsupported form."""
+def _call_arguments(
+    node: ast.Call, kind: str, parameters: tuple[str, ...]
+) -> dict[str, ast.expr] | str:
+    """Bind a call like the runtime constructor of ``kind``, or name the unsupported form."""
 
-    parameters = ("name", "handler")
+    expected = " and ".join(f"a {name}" for name in parameters)
     if any(isinstance(item, ast.Starred) for item in node.args) or any(
         keyword.arg is None for keyword in node.keywords
     ):
-        return f"{PRODUCT_COMMAND_TYPE} arguments may not be unpacked"
+        return f"{kind} arguments may not be unpacked"
     if len(node.args) > len(parameters):
-        return f"{PRODUCT_COMMAND_TYPE} takes at most a name and a handler positionally"
+        return f"{kind} takes at most {expected} positionally"
     arguments: dict[str, ast.expr] = dict(zip(parameters, node.args, strict=False))
     for keyword in node.keywords:
         if keyword.arg not in parameters:
-            return f"{PRODUCT_COMMAND_TYPE} has no argument {keyword.arg!r}"
+            return f"{kind} has no argument {keyword.arg!r}"
         if keyword.arg in arguments:
-            return f"{PRODUCT_COMMAND_TYPE} receives {keyword.arg!r} twice"
+            return f"{kind} receives {keyword.arg!r} twice"
         arguments[str(keyword.arg)] = keyword.value
     if set(arguments) != set(parameters):
-        return f"{PRODUCT_COMMAND_TYPE} takes exactly a name and a handler"
+        return f"{kind} takes exactly {expected}"
     return arguments
 
 
-def _product_command(node: ast.expr, location: Location) -> tuple[CommandClaim | None, str]:
-    """Admit exactly the runtime constructor's shapes: name and handler, positional or named."""
+def _declaration(
+    node: ast.expr, kind: str, parameters: tuple[str, ...]
+) -> tuple[str | None, str] | str:
+    """Admit exactly the runtime constructor's shapes and return (name, handler symbol)."""
 
     if not (
         isinstance(node, ast.Call)
         and (
-            (isinstance(node.func, ast.Name) and node.func.id == PRODUCT_COMMAND_TYPE)
-            or (isinstance(node.func, ast.Attribute) and node.func.attr == PRODUCT_COMMAND_TYPE)
+            (isinstance(node.func, ast.Name) and node.func.id == kind)
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == kind)
         )
     ):
-        return None, f"each COMMANDS entry must be a {PRODUCT_COMMAND_TYPE}(...) call"
-    arguments = _command_arguments(node)
+        return f"each declaration must be a {kind}(...) call"
+    arguments = _call_arguments(node, kind, parameters)
     if isinstance(arguments, str):
-        return None, arguments
-    name, handler = arguments["name"], arguments["handler"]
-    if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
-        return None, "the command name must be a string literal"
+        return arguments
+    name, handler = arguments.get("name"), arguments["handler"]
+    if name is not None and not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+        return f"the {kind} name must be a string literal"
     if not isinstance(handler, ast.Name | ast.Attribute):
-        return None, "the handler must name a function"
-    return CommandClaim(name.value, PRODUCT_OWNER, location, ast.unparse(handler)), ""
+        return "the handler must name a function"
+    return (name.value if name is not None else None), ast.unparse(handler)
 
 
-def product_command_claims(root: Path) -> tuple[list[CommandClaim], list[Violation]]:
-    """Read ``COMMANDS`` from the product command module as data, never importing it."""
-
-    path = root / PRODUCT_COMMANDS
-    if not path.is_file():
-        return [], []
-    try:
-        module = ast.parse(path.read_text(), filename=str(path))
-    except (OSError, SyntaxError) as error:
-        return [], [
-            Violation(
-                code="unsupported_product_command",
-                owner=PRODUCT_OWNER,
-                location=Location(PRODUCT_COMMANDS, getattr(error, "lineno", None)),
-                conflict=f"the product command module cannot be read: {error}",
-                action=f"make {PRODUCT_COMMANDS} valid Python",
-            )
-        ]
-    claims: list[CommandClaim] = []
-    violations: list[Violation] = []
-    assignments = [
+def _assignments(
+    module: ast.Module, target: str
+) -> list[ast.Assign | ast.AnnAssign | ast.AugAssign]:
+    return [
         node
         for node in ast.walk(module)
         if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign)
         and any(
-            isinstance(target, ast.Name) and target.id == "COMMANDS"
-            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+            isinstance(item, ast.Name) and item.id == target
+            for item in (node.targets if isinstance(node, ast.Assign) else [node.target])
         )
     ]
-    form = (
-        f"declare product commands only as one top-level `COMMANDS = ({PRODUCT_COMMAND_TYPE}"
-        '("name", handler), ...)` tuple in ' + PRODUCT_COMMANDS
-    )
+
+
+def _declared_value(
+    module: ast.Module, target: str, *, required: bool
+) -> tuple[ast.expr | None, int | None, str]:
+    """The one top-level value assigned to ``target``, its line, or why there is none."""
+
+    assignments = _assignments(module, target)
+    if not assignments and not required:
+        return None, None, ""
     top_level = [node for node in assignments if node in module.body]
-    if len(assignments) != 1 or len(top_level) != 1 or isinstance(top_level[0], ast.AugAssign):
+    if (
+        len(assignments) != 1
+        or len(top_level) != 1
+        or isinstance(top_level[0], ast.AugAssign)
+        or top_level[0].value is None
+    ):
         line = assignments[0].lineno if assignments else None
-        violations.append(
+        return None, line, f"{target} must be assigned exactly once at module level"
+    return top_level[0].value, top_level[0].lineno, ""
+
+
+@dataclass
+class ProductDeclarations:
+    """The product's commands, text handler and callbacks, read from its command module."""
+
+    commands: list[CommandClaim] = field(default_factory=list)
+    text: InputClaim | None = None
+    callbacks: list[InputClaim] = field(default_factory=list)
+    violations: list[Violation] = field(default_factory=list)
+
+    def refuse(self, line: int | None, conflict: str, form: str) -> None:
+        self.violations.append(
             Violation(
                 code="unsupported_product_command",
                 owner=PRODUCT_OWNER,
                 location=Location(PRODUCT_COMMANDS, line),
-                conflict="COMMANDS must be assigned exactly once at module level",
+                conflict=conflict,
                 action=form,
             )
         )
-        return claims, violations
-    value = top_level[0].value
+
+
+def _entries(
+    module: ast.Module,
+    target: str,
+    kind: str,
+    form: str,
+    declared: ProductDeclarations,
+    *,
+    required: bool,
+) -> list[tuple[str, str, Location]]:
+    """The (name, handler, location) entries of a literal tuple of ``kind`` calls."""
+
+    value, line, problem = _declared_value(module, target, required=required)
+    if problem:
+        declared.refuse(line, problem, form)
+        return []
+    if value is None:
+        return []
     if not isinstance(value, ast.Tuple):  # Immutable: nothing can append after the lint.
-        violations.append(
-            Violation(
-                code="unsupported_product_command",
-                owner=PRODUCT_OWNER,
-                location=Location(PRODUCT_COMMANDS, top_level[0].lineno),
-                conflict="COMMANDS must be a literal tuple of ProductCommand entries",
-                action=form,
-            )
-        )
-        return claims, violations
+        declared.refuse(line, f"{target} must be a literal tuple of {kind} entries", form)
+        return []
+    entries = []
     for element in value.elts:
         location = Location(PRODUCT_COMMANDS, element.lineno)
-        claim, problem = _product_command(element, location)
-        if claim is None:
-            violations.append(
-                Violation(
-                    code="unsupported_product_command",
-                    owner=PRODUCT_OWNER,
-                    location=location,
-                    conflict=problem,
-                    action=form,
-                )
-            )
+        result = _declaration(element, kind, ("name", "handler"))
+        if isinstance(result, str):
+            declared.refuse(element.lineno, result, form)
         else:
-            claims.append(claim)
-    return claims, violations
+            entries.append((str(result[0]), result[1], location))
+    return entries
+
+
+def _callback_claims(module: ast.Module, declared: ProductDeclarations) -> None:
+    form = (
+        "declare product callbacks only as one top-level `CALLBACKS = "
+        f'({PRODUCT_CALLBACK_TYPE}("name", handler), ...)` tuple in {PRODUCT_COMMANDS} and '
+        """build each button's callback_data with `callback_data("name", payload)`"""
+    )
+    for name, symbol, location in _entries(
+        module, "CALLBACKS", PRODUCT_CALLBACK_TYPE, form, declared, required=False
+    ):
+        if len(name) > MAX_COMMAND_LENGTH or not COMMAND_PATTERN.fullmatch(name):
+            declared.refuse(
+                location.line,
+                f"callback {name!r} is not a callback name ([a-z][a-z0-9_]*, at most 32)",
+                form,
+            )
+        elif any(item.name == name for item in declared.callbacks):
+            declared.refuse(location.line, f"callback {name!r} is declared twice", form)
+        else:
+            declared.callbacks.append(InputClaim(name, location, symbol))
+
+
+def _text_claim(module: ast.Module, declared: ProductDeclarations) -> None:
+    form = (
+        f"declare the product text handler only as one top-level `TEXT = {PRODUCT_TEXT_TYPE}"
+        f"(handler)` in {PRODUCT_COMMANDS}"
+    )
+    value, line, problem = _declared_value(module, "TEXT", required=False)
+    if value is None:
+        if problem:
+            declared.refuse(line, problem, form)
+        return
+    result = _declaration(value, PRODUCT_TEXT_TYPE, ("handler",))
+    if isinstance(result, str):
+        declared.refuse(line, result, form)
+    else:
+        declared.text = InputClaim(None, Location(PRODUCT_COMMANDS, line), result[1])
+
+
+def product_declarations(root: Path) -> ProductDeclarations:
+    """Read ``COMMANDS``, ``TEXT`` and ``CALLBACKS`` from the product module as data."""
+
+    declared = ProductDeclarations()
+    path = root / PRODUCT_COMMANDS
+    if not path.is_file():
+        return declared
+    try:
+        module = ast.parse(path.read_text(), filename=str(path))
+    except (OSError, SyntaxError) as error:
+        declared.refuse(
+            getattr(error, "lineno", None),
+            f"the product command module cannot be read: {error}",
+            f"make {PRODUCT_COMMANDS} valid Python",
+        )
+        return declared
+    form = (
+        f"declare product commands only as one top-level `COMMANDS = ({PRODUCT_COMMAND_TYPE}"
+        f'("name", handler), ...)` tuple in {PRODUCT_COMMANDS}'
+    )
+    declared.commands = [
+        CommandClaim(name, PRODUCT_OWNER, location, symbol)
+        for name, symbol, location in _entries(
+            module, "COMMANDS", PRODUCT_COMMAND_TYPE, form, declared, required=True
+        )
+    ]
+    _text_claim(module, declared)
+    _callback_claims(module, declared)
+    return declared
 
 
 def _bypass_names(node: ast.AST) -> Iterable[str]:
@@ -556,10 +660,7 @@ def registration_bypasses(root: Path) -> list[Violation]:
                     "replacing or deleting them, also through an alias of the application, "
                     "replaces commands, access or the unknown-input reply"
                 ),
-                action=(
-                    "remove the access to application.handlers; declare commands as "
-                    f"{PRODUCT_COMMAND_TYPE}(name, handler) in COMMANDS of {PRODUCT_COMMANDS}"
-                ),
+                action=f"remove the access to application.handlers; declare {PRODUCT_FORMS}",
             )
             for line, _ in sorted(seen)
         )
@@ -580,9 +681,8 @@ def registration_bypasses(root: Path) -> list[Violation]:
                             "command registry"
                         ),
                         action=(
-                            f"remove {name}; declare a command as {PRODUCT_COMMAND_TYPE}(name, "
-                            f"handler) in COMMANDS of {PRODUCT_COMMANDS}; unknown commands and "
-                            "text are answered by core"
+                            f"remove {name}; declare {PRODUCT_FORMS}; core answers unknown "
+                            "commands, and text when no TEXT is declared"
                         ),
                     )
                 )
@@ -791,14 +891,16 @@ def evaluate(
         builtins.append(
             CommandClaim("command", CORE_OWNER, Location(CORE_COMMAND_SOURCE), "handle_command")
         )
-    product, product_violations = product_command_claims(root)
+    product = product_declarations(root)
     modules, module_violations = binding_claims(bindings, sources)
-    contract.violations.extend(product_violations)
+    contract.text = product.text
+    contract.callbacks = product.callbacks
+    contract.violations.extend(product.violations)
     contract.violations.extend(registration_bypasses(root))
     contract.violations.extend(module_violations)
     contract.violations.extend(binding_setting_violations(bindings, sources, retained))
     claimed: dict[str, CommandClaim] = {}
-    for claim in [*builtins, *product, *modules]:
+    for claim in [*builtins, *product.commands, *modules]:
         violation = _command_violation(claim, claimed)
         if violation is None:
             claimed[claim.command] = claim
@@ -825,6 +927,8 @@ def render_registry(contract: HostContract) -> str:
             {"command": claim.command, "owner": claim.owner, "source": claim.location.path}
             for claim in contract.commands
         ],
+        text=contract.text is not None,
+        callbacks=[claim.name for claim in contract.callbacks],
         language_key=LANGUAGE_KEY,
     )
     return (GENERATED_HEADER + content).rstrip() + "\n"

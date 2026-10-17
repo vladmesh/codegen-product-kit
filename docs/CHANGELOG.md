@@ -1,5 +1,13 @@
 # Contract changelog
 
+## 2026-10-17
+
+- Façade `2.6.0`, package protocol v1 unchanged: the [command registry](CONTRACTS.md#command-registry)
+  admits a product text handler (`ProductText`) and product inline-button callbacks
+  (`ProductCallback`, `p:` callback data) beside `ProductCommand`; products without them register
+  as before, and [an earlier product upgrades](CONTRACTS.md#upgrading-a-generated-product) by
+  `copier update`.
+
 ## 2026-10-09
 
 - Façade `2.5.0`, package protocol v1 unchanged: the [core host contract](CONTRACTS.md#core-host-contract-v1).
