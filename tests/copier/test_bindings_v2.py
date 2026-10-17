@@ -121,7 +121,7 @@ def test_v2_product_refusals_do_not_mutate_outputs(request, bad):
             manifest_file.write_text(yaml.safe_dump(manifest, sort_keys=False))
         elif bad == "core":
             core_file.write_text(
-                core_file.read_text().replace('CORE_VERSION = "2.5.0"', 'CORE_VERSION = "2.3.0"')
+                core_file.read_text().replace('CORE_VERSION = "2.6.0"', 'CORE_VERSION = "2.3.0"')
             )
         else:
             data["timezone"] = {

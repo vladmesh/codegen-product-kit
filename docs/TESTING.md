@@ -280,6 +280,17 @@ location; the standalone shape lints and rewrites its registry. The slow case (C
 the real `kit add --wheel` before writes, then installs the built wheel after the glue and binds.
 The runner proof adds the RU/EN unknown-input and `/channel` checks through its fake Bot API.
 
+Product text and callbacks: tooling tests admit and render `TEXT = ProductText(...)` and
+`CALLBACKS = (ProductCallback(...), ...)`, report a stale registry until regeneration, refuse every
+other text/callback form before writes and check that bypass repairs name all three forms. In a
+generated product bound to tg-channels, `command_registry_scenarios.py input` routes plain text to
+`ProductText`, `p:b1:42` to the product callback named `b1` and a `b1:` selection to the module's
+stale reply, keeps the core reply for unknown commands and refuses undeclared text or callbacks at
+startup; the product's tg_bot unit tests pass there. A product copied at the producer commit, with
+a product command and product-only files, takes the candidate by `copier update --conflict=rej`
+with no rejection, unchanged product-owned bytes, façade 2.6.0 and a registry that already lints,
+then declares text and callbacks.
+
 Review 11 repairs are covered in the same suites. Tooling tests refuse unpacked, duplicate and
 extra `ProductCommand` arguments before any registry write while admitting the positional and
 named forms the runtime accepts; flag `context.application.handlers` callback/clear/remove,

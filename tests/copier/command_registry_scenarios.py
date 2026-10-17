@@ -6,6 +6,8 @@ registry drift are exercised through ``Application.process_update`` with only th
 send and the backend HTTP transport replaced. The application is the generated
 ``CoreApplication``; a declared product command that replaces or deletes its ``handlers``
 through an ordinary alias is refused, and access, ``/start`` and the unknown reply still work.
+With ``input`` the product declares a text handler and a ``b1`` product callback: text, the
+product callback and a module ``b1:`` callback each reach their own handler.
 """
 
 import asyncio
@@ -303,5 +305,160 @@ async def scenario(locale):  # noqa: C901, PLR0915
     print(f"registry {locale}: commands, module binding and unknown fallback passed")
 
 
+async def input_scenario(locale):  # noqa: C901, PLR0915
+    from services.tg_bot.src import commands as product
+    from services.tg_bot.src.generated import bindings, commands
+    from services.tg_bot.src.main import BackendClient, handle_command, handle_start
+    from telegram import CallbackQuery, Chat, Message, MessageEntity, Update, User
+    from telegram.ext import ApplicationBuilder
+
+    os.environ["BACKEND_API_URL"] = "http://backend.test"
+    os.environ["USER_IDENTITY_CAPABILITY"] = "test-capability"
+
+    def respond(request):
+        data = json.loads(request.content)
+        assert request.url.path == "/settings/get", request.url.path
+        return httpx.Response(200, json={**data, "value": locale})
+
+    class FakeClient(BackendClient):
+        async def __aenter__(self):
+            await super().__aenter__()
+            await self._client.aclose()
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url, transport=httpx.MockTransport(respond)
+            )
+            return self
+
+    async def allow(update, context):
+        return None
+
+    sent = []
+    answers = []
+
+    async def send_message(self, chat_id, text, *args, **kwargs):
+        sent.append(text)
+        return Message(
+            message_id=len(sent) + 1000,
+            date=datetime.now(UTC),
+            chat=Chat(id=chat_id, type="private"),
+            text=text,
+        )
+
+    async def answer_callback_query(self, callback_query_id, text=None, *args, **kwargs):
+        answers.append(text)
+        return True
+
+    user = User(id=123, is_bot=False, first_name="Test")
+    bot_user = User(id=1, is_bot=True, first_name="Bot", username="registry_bot")
+
+    async def get_me(self, *args, **kwargs):
+        self._bot_user = bot_user
+        return bot_user
+
+    builtins = {"start": handle_start, "command": handle_command}
+    assert commands.PRODUCT_TEXT is True
+    assert commands.PRODUCT_CALLBACKS == ("b1",)
+    assert [item.name for item in product.CALLBACKS] == ["b1"]
+
+    def build():
+        application = (
+            ApplicationBuilder()
+            .application_class(commands.CoreApplication)
+            .token("test:token")
+            .build()
+        )
+        commands.register(
+            application,
+            access=allow,
+            builtins=builtins,
+            bindings=bindings,
+            client_factory=FakeClient,
+        )
+        return application
+
+    with (
+        patch("telegram.Bot.get_me", new=get_me),
+        patch("telegram.Bot.send_message", new=send_message),
+        patch("telegram.Bot.answer_callback_query", new=answer_callback_query),
+    ):
+        application = build()
+        await application.initialize()
+        chat = Chat(id=123, type="private")
+        counter = [0]
+
+        def message(text):
+            counter[0] += 1
+            entities = []
+            if text.startswith("/"):
+                entities = [MessageEntity("bot_command", 0, len(text.split()[0]))]
+            item = Message(
+                message_id=counter[0],
+                date=datetime.now(UTC),
+                chat=chat,
+                from_user=user,
+                text=text,
+                entities=entities,
+            )
+            item.set_bot(application.bot)
+            return item
+
+        async def say(text):
+            before = len(sent)
+            await application.process_update(
+                Update(update_id=counter[0] + 1, message=message(text))
+            )
+            return sent[before:]
+
+        async def press(data):
+            before = len(answers)
+            query = CallbackQuery(
+                id=str(counter[0]),
+                from_user=user,
+                chat_instance="registry",
+                data=data,
+                message=message("buttons"),
+            )
+            query.set_bot(application.bot)
+            await application.process_update(Update(update_id=counter[0], callback_query=query))
+            return answers[before:]
+
+        listing = ", ".join(f"/{item['command']}" for item in commands.COMMANDS)
+        unknown = {
+            "ru": f"Не понимаю это сообщение. Доступные команды: {listing}",
+            "en": f"I don't understand this message. Available commands: {listing}",
+        }
+        assert await say("milk") == ["product text milk"]
+        assert await say("/no_such_command") == [unknown[locale]]
+        assert (await say("/start"))[0].startswith("Привет!")
+        data = commands.callback_data("b1", "42")
+        assert data == "p:b1:42"
+        assert await press(data) == ["product callback 42"]
+        # The module's own b1: namespace: an unknown selection gets the module's stale reply.
+        [stale] = await press("b1:AAAAAAAAAAAAAAAAAAAAAAAA:0")
+        assert "Run the command again." in stale, stale
+        assert await press("p:undeclared:1") == []
+        await application.shutdown()
+
+        # Fail closed: product declarations the registry does not hold refuse startup.
+        for name, value in (
+            ("TEXT", None),
+            ("CALLBACKS", (*product.CALLBACKS, commands.ProductCallback("extra", allow))),
+        ):
+            original = getattr(product, name)
+            setattr(product, name, value)
+            try:
+                build()
+            except commands.CommandRegistryError as error:
+                assert "make generate-from-spec" in str(error)
+            else:
+                raise AssertionError(f"an undeclared product {name} was registered")
+            finally:
+                setattr(product, name, original)
+    print(f"registry {locale}: product text, product and module callbacks passed")
+
+
 if __name__ == "__main__":
-    asyncio.run(scenario(sys.argv[1]))
+    if sys.argv[2:] == ["input"]:
+        asyncio.run(input_scenario(sys.argv[1]))
+    else:
+        asyncio.run(scenario(sys.argv[1]))

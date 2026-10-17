@@ -45,7 +45,7 @@ CHANNEL_COMMAND = (
 )
 
 
-def _product(root: Path, core: str = "2.5.0") -> Path:
+def _product(root: Path, core: str = "2.6.0") -> Path:
     for service in ("backend", "tg_bot"):
         directory = root / "services" / service
         directory.mkdir(parents=True)
@@ -95,7 +95,7 @@ def test_fresh_product_with_published_channels_is_mechanical(tmp_path: Path) -> 
     data = result.as_dict()
     assert data["result_version"] == RESULT_VERSION == 1
     assert (data["status"], data["glue"], data["incompatible"]) == ("mechanical", [], None)
-    assert data["product_core"] == "2.5.0"
+    assert data["product_core"] == "2.6.0"
     assert data["target"]["version"] == "0.1.2"
     assert data["target"]["requires_core"] == ">=2.4,<3"
     assert data["target"]["route"] == "package_source"
@@ -232,7 +232,7 @@ REQUEST_CASES = {
 
 @pytest.mark.parametrize("change", [*INCOMPATIBLE_CASES, *REQUEST_CASES])
 def test_incompatible_results_carry_a_stable_reason(tmp_path: Path, change: str) -> None:
-    product = _product(tmp_path / "product", "2.3.0" if change == "core-old" else "2.5.0")
+    product = _product(tmp_path / "product", "2.3.0" if change == "core-old" else "2.6.0")
     source = tmp_path / "source"
     shutil.copytree(CHANNELS, source, ignore=shutil.ignore_patterns("__pycache__"))
     request: dict = {"name": "tg-channels", "package_source": source}

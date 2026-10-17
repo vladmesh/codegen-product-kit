@@ -51,7 +51,8 @@ def _product(root: Path, *, backend: bool = True) -> Path:
 
 def _commands(root: Path, body: str) -> None:
     (root / "services/tg_bot/src/commands.py").write_text(
-        "from services.tg_bot.src.generated.commands import ProductCommand\n\n\n"
+        "from services.tg_bot.src.generated.commands import "
+        "ProductCallback, ProductCommand, ProductText\n\n\n"
         "async def handle(update, context):\n    pass\n\n\n" + body
     )
 
@@ -182,6 +183,84 @@ def test_product_command_refusals_name_both_sources(
         assert str(violation.location) in violation.action
     with pytest.raises(HostContractError, match=code):
         check_product(product)
+
+
+TEXT_AND_CALLBACKS = (
+    "COMMANDS = ()\n"
+    "TEXT = ProductText(handle)\n"
+    'CALLBACKS = (ProductCallback("bought", handle), ProductCallback(name="b1", handler=handle))\n'
+)
+
+
+def test_product_text_and_callbacks_are_admitted_and_rendered(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    _bind_channels(product)
+    write_registry(product, evaluate(product))
+    _commands(product, TEXT_AND_CALLBACKS)
+    with pytest.raises(HostContractError, match="registry_stale"):
+        check_product(product)
+    write_registry(product, evaluate(product))
+    contract = check_product(product)
+    assert contract.text is not None and contract.text.symbol == "handle"
+    assert [(item.name, item.symbol) for item in contract.callbacks] == [
+        ("bought", "handle"),
+        ("b1", "handle"),
+    ]
+    assert [item.command for item in contract.commands][-1] == "digest"
+    registry = render_registry(contract)
+    assert "PRODUCT_TEXT = True\n" in registry
+    assert 'PRODUCT_CALLBACKS: tuple[str, ...] = (\n    "bought",\n    "b1",\n)\n' in registry
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "COMMANDS = ()\nTEXT = handle\n",
+        "COMMANDS = ()\nTEXT = None\n",
+        "COMMANDS = ()\nTEXT = ProductText(handle, handle)\n",
+        "COMMANDS = ()\nTEXT = ProductText(handler=lambda u, c: None)\n",
+        "COMMANDS = ()\nTEXT = ProductText(handle)\nTEXT = ProductText(handle)\n",
+        "COMMANDS = ()\ndef later():\n    TEXT = ProductText(handle)\n",
+        'COMMANDS = ()\nCALLBACKS = [ProductCallback("a", handle)]\n',
+        'COMMANDS = ()\nCALLBACKS = (ProductCallback("a", handle), ProductCallback("a", handle))\n',
+        'COMMANDS = ()\nCALLBACKS = (ProductCallback("Bought", handle),)\n',
+        'COMMANDS = ()\nCALLBACKS = (ProductCallback("b" * 2, handle),)\n',
+        'COMMANDS = ()\nCALLBACKS = (ProductCommand("a", handle),)\n',
+        'COMMANDS = ()\nCALLBACKS = ()\nCALLBACKS += (ProductCallback("a", handle),)\n',
+        "TEXT = ProductText(handle)\n",
+    ],
+)
+def test_unsupported_text_and_callback_forms_fail_before_writes(tmp_path: Path, body: str) -> None:
+    product = _product(tmp_path)
+    _commands(product, body)
+    contract = evaluate(product)
+    [violation] = contract.violations
+    assert (violation.code, violation.owner) == ("unsupported_product_command", "product")
+    assert violation.location is not None
+    assert violation.location.path == "services/tg_bot/src/commands.py"
+    with pytest.raises(HostContractError, match="unsupported_product_command"):
+        write_registry(product, contract.require_valid())
+    assert not (product / host_contract.REGISTRY).exists()
+
+
+def test_bypass_repair_names_every_admitted_product_form(tmp_path: Path) -> None:
+    product = _product(tmp_path)
+    (product / "services/tg_bot/src/catch_all.py").write_text(
+        "from telegram.ext import MessageHandler, filters\n\n"
+        "def install(application):\n"
+        "    application.add_handler(MessageHandler(filters.TEXT, print))\n"
+        "    application.handlers.clear()\n"
+    )
+    violations = evaluate(product).violations
+    assert {item.code for item in violations} == {"registration_bypass"}
+    for violation in violations:
+        for form in (
+            'COMMANDS = (ProductCommand("name", handler), ...)',
+            "TEXT = ProductText(handler)",
+            'CALLBACKS = (ProductCallback("name", handler), ...)',
+            'callback_data("name", payload)',
+        ):
+            assert form in violation.action
 
 
 def test_standalone_reserves_command_and_modules_collide(tmp_path: Path) -> None:

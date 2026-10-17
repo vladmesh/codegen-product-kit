@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Façade `CORE_VERSION` 2.6.0 (package protocol stays 1): a product declares its one non-command
+  text handler as `TEXT = ProductText(handler)` and inline-button callbacks as
+  `CALLBACKS = (ProductCallback("name", handler), ...)` in `services/tg_bot/src/commands.py`,
+  with `callback_data(name, payload)` building `p:<name>:<payload>` data that never meets module
+  `b1:` callbacks. Without them the bot registers as before. The hard lint admits exactly these
+  forms and every registration-bypass repair names them. Products generated earlier take the new
+  core with `copier update --defaults --trust --vcs-ref=<kit commit> --conflict=rej`. See
+  [the command registry](docs/CONTRACTS.md#command-registry).
+
 - Core host contract, façade `CORE_VERSION` 2.5.0 (package protocol stays 1). The product
   `language` setting (`{type: string, enum: [ru, en]}`, product scope) is owned by core: every fresh
   product's settings registry carries it, bindings reference it, and `kit bind` no longer declares

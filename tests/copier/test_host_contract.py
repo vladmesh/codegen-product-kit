@@ -7,17 +7,26 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+from jinja2 import Environment
 import pytest
 import yaml
 
 from framework import cli, host_contract
 from framework.cli import bind_package
 from framework.generate import generate_all
+from framework.generators.base import GENERATED_HEADER
 from framework.host_contract import HostContractError
 from framework.package_source import build_wheel
 from framework.preflight import check_install
+from tests.copier.conftest import BASE_DATA, VENV_COPIER, _git, template_source
 from tests.copier.test_bindings import (
     test_bound_product_generation_passes_its_own_drift_and_lint as check_product_lint,
+)
+from tests.copier.test_deploy_transport import (
+    _assert_tooling_revision,
+    _commit_product,
+    _fixture_env,
+    _update_product,
 )
 
 ROOT = Path(__file__).parents[2]
@@ -132,7 +141,7 @@ def test_preflight_matrix_in_a_fresh_generated_product(fresh_bot_product):
     try:
         fresh = _preflight(product)
         assert fresh.status == "mechanical" and fresh.glue == []
-        assert fresh.target["version"] == "0.1.2" and fresh.product_core == "2.5.0"
+        assert fresh.target["version"] == "0.1.2" and fresh.product_core == "2.6.0"
         assert host_contract.check_product(product).settings == {"language": "core"}
 
         _declare_conflicts(product, command=False)
@@ -159,7 +168,7 @@ def test_preflight_matrix_in_a_fresh_generated_product(fresh_bot_product):
             "command_collision",
         }
 
-        old_core = core.read_text().replace('CORE_VERSION = "2.5.0"', 'CORE_VERSION = "2.3.0"')
+        old_core = core.read_text().replace('CORE_VERSION = "2.6.0"', 'CORE_VERSION = "2.3.0"')
         core.write_text(old_core)
         incompatible = _preflight(product)
         assert incompatible.status == "incompatible"
@@ -190,13 +199,15 @@ def _install_channels(product: Path) -> None:
     manifest.write_text(yaml.safe_dump(data, sort_keys=False))
 
 
-def _run_registry_scenarios(product: Path) -> None:
+def _run_registry_scenarios(product: Path, *mode: str) -> str:
+    output = ""
     for locale in ("ru", "en"):
         result = subprocess.run(
             [
                 str(product / "services/tg_bot/.venv/bin/python"),
                 str(ROOT / "tests/copier/command_registry_scenarios.py"),
                 locale,
+                *mode,
             ],
             cwd=product,
             env=os.environ | {"PYTHONPATH": f"{product}:{product / 'shared'}"},
@@ -204,7 +215,8 @@ def _run_registry_scenarios(product: Path) -> None:
             text=True,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert f"registry {locale}: commands, module binding and unknown fallback" in result.stdout
+        output += result.stdout
+    return output
 
 
 def test_applied_glue_makes_install_mechanical_and_product_ci_green(fresh_bot_product, tmp_path):
@@ -234,7 +246,9 @@ def test_applied_glue_makes_install_mechanical_and_product_ci_green(fresh_bot_pr
     ]
     settings = (product / "services/backend/src/generated/settings_schemas.py").read_text()
     assert "'language': 'core'" in settings or '"language": "core"' in settings
-    _run_registry_scenarios(product)
+    output = _run_registry_scenarios(product)
+    for locale in ("ru", "en"):
+        assert f"registry {locale}: commands, module binding and unknown fallback" in output
     unit = subprocess.run(
         [str(product / "services/tg_bot/.venv/bin/pytest"), "services/tg_bot/tests/unit", "-q"],
         cwd=product,
@@ -252,6 +266,149 @@ def test_applied_glue_makes_install_mechanical_and_product_ci_green(fresh_bot_pr
     check_product_lint(
         SimpleNamespace(getfixturevalue=lambda fixture: product), "channel_product", lint_root
     )
+
+
+PRODUCT_INPUT = '''"""Product-owned text and inline-button callbacks."""
+
+from __future__ import annotations
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from services.tg_bot.src.generated.commands import (
+    ProductCallback,
+    ProductCommand,
+    ProductText,
+    callback_payload,
+)
+
+
+async def add_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await update.message.reply_text(f"product text {update.message.text}")
+
+
+async def mark_bought(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.callback_query:
+        await update.callback_query.answer(f"product callback {callback_payload(update)}")
+
+
+COMMANDS: tuple[ProductCommand, ...] = ()
+TEXT = ProductText(add_item)
+CALLBACKS = (ProductCallback("b1", mark_bought),)
+'''
+
+
+def test_product_text_and_callbacks_route_beside_a_bound_module(fresh_bot_product, tmp_path):
+    product = tmp_path / "input"
+    shutil.copytree(fresh_bot_product, product, symlinks=True)
+    (product / "services/tg_bot/src/commands.py").write_text(PRODUCT_INPUT)
+    _install_channels(product)
+    generate_all(product)
+    assert bind_package("tg-channels", product) == "bound"
+    contract = host_contract.check_product(product)
+    assert contract.text is not None
+    assert [item.name for item in contract.callbacks] == ["b1"]
+    output = _run_registry_scenarios(product, "input")
+    for locale in ("ru", "en"):
+        assert f"registry {locale}: product text, product and module callbacks passed" in output
+    unit = subprocess.run(
+        [str(product / "services/tg_bot/.venv/bin/pytest"), "services/tg_bot/tests/unit", "-q"],
+        cwd=product,
+        env=os.environ
+        | {
+            "PYTHONPATH": f"{product}:{product / 'shared'}",
+            "REDIS_URL": "redis://redis.invalid:6379",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert unit.returncode == 0, unit.stdout + unit.stderr
+    lint_root = tmp_path / "lint"
+    lint_root.mkdir()
+    check_product_lint(
+        SimpleNamespace(getfixturevalue=lambda fixture: product), "input_product", lint_root
+    )
+
+
+#: The kit commit whose products cannot yet declare product text or callbacks.
+PRODUCER = "7b547c69e508d8e49d2cbab54efcab1df7fc2270"
+
+
+def _producer_registry(source: Path, commands: list[str]) -> str:
+    """The registry the producer's tooling renders for core and product ``commands``."""
+    template = _git("show", f"{PRODUCER}:framework/templates/codegen/commands.py.j2", cwd=source)
+    environment = Environment(  # noqa: S701  # The producer's render_registry settings.
+        trim_blocks=True, lstrip_blocks=True, keep_trailing_newline=True
+    )
+    claims = [
+        {
+            "command": name,
+            "owner": "core" if name in ("start", "command") else "product",
+            "source": host_contract.CORE_COMMAND_SOURCE
+            if name in ("start", "command")
+            else host_contract.PRODUCT_COMMANDS,
+        }
+        for name in commands
+    ]
+    content = environment.from_string(template.stdout).render(
+        commands=claims, language_key="language"
+    )
+    return (GENERATED_HEADER + content).rstrip() + "\n"
+
+
+def test_producer_product_takes_the_new_core_by_copier_update(tmp_path):
+    source = template_source()
+    project = tmp_path / "producer"
+    copy = subprocess.run(
+        [
+            str(VENV_COPIER),
+            "copy",
+            str(source),
+            str(project),
+            "--defaults",
+            "--trust",
+            f"--vcs-ref={PRODUCER}",
+            *(f"--data={key}={value}" for key, value in BASE_DATA.items()),
+            "--data=modules=backend,tg_bot",
+        ],
+        env=_fixture_env(source),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert copy.returncode == 0, copy.stdout + copy.stderr
+    registry = project / host_contract.REGISTRY
+    assert registry.read_text() == _producer_registry(source, ["start", "command"])
+    # The product as its developer left it: a product command and product-only files.
+    commands = project / host_contract.PRODUCT_COMMANDS
+    commands.write_text(PRODUCT_COMMANDS.replace('"channel"', '"list"'))
+    registry.write_text(_producer_registry(source, ["start", "command", "list"]))
+    (project / "services/tg_bot/src/shopping.py").write_text("ITEMS: list[str] = []\n")
+    owned = [
+        host_contract.PRODUCT_COMMANDS,
+        "services/tg_bot/src/shopping.py",
+        ".env",
+        "services/backend/src/controllers/users.py",
+    ]
+    before = {name: (project / name).read_bytes() for name in owned}
+    _commit_product(project)
+
+    result = _update_product(project)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not list(project.rglob("*.rej")), result.stdout + result.stderr
+    assert {name: (project / name).read_bytes() for name in owned} == before
+    _assert_tooling_revision(project, _git("rev-parse", "HEAD", cwd=source).stdout.strip())
+    assert 'CORE_VERSION = "2.6.0"' in (project / "codegen_kit/packages.py").read_text()
+    # The merged registry already is the new core's render of the unchanged product.
+    contract = host_contract.check_product(project)
+    assert [item.command for item in contract.commands] == ["start", "command", "list"]
+
+    commands.write_text(PRODUCT_INPUT)
+    host_contract.write_registry(project, host_contract.evaluate(project))
+    contract = host_contract.check_product(project)
+    assert contract.text is not None
+    assert [item.name for item in contract.callbacks] == ["b1"]
 
 
 TIMEZONE_AS_LANGUAGE = (
@@ -364,4 +521,4 @@ def test_glue_then_real_wheel_install_bind_and_registry(fresh_bot_product, tmp_p
     cli.add_package("tg-channels", wheel, product)
     assert bind_package("tg-channels", product) == "bound"
     assert host_contract.check_product(product).violations == []
-    _run_registry_scenarios(product)
+    assert "unknown fallback passed" in _run_registry_scenarios(product)

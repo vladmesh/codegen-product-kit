@@ -105,7 +105,8 @@ Agents should interact with the system primarily through `make`.
 (`framework/spec/core_settings.py`; never declared by a manifest, package or bind) and the
 generated tg_bot command registry (`framework/templates/codegen/commands.py.j2`). Generation,
 `kit add`/`kit bind`, the product's `make lint` and the read-only `kit check-install`
-(`framework/preflight.py`) share it. Product commands are `ProductCommand` entries in the
+(`framework/preflight.py`) share it. Product commands (`ProductCommand`), the optional text
+handler (`ProductText`) and product callbacks (`ProductCallback`) are declared in the
 product-owned `template/services/tg_bot/src/commands.py`; tg_bot code must not register handlers
 directly or reach `<application>.handlers`, also through an alias. The bot is built with
 `application_class(CoreApplication)`, whose `handlers` field the registry seals. When the generated registry changes, re-render
