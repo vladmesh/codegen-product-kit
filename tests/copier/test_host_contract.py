@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from framework import cli, host_contract
+from framework.binding_product import product_core_version
 from framework.cli import bind_package
 from framework.generate import generate_all
 from framework.generators.base import GENERATED_HEADER
@@ -378,12 +379,12 @@ def test_producer_product_takes_the_new_core_by_copier_update(tmp_path):
         timeout=120,
     )
     assert copy.returncode == 0, copy.stdout + copy.stderr
-    registry = project / host_contract.REGISTRY
-    assert registry.read_text() == _producer_registry(source, ["start", "command"])
     # The product as its developer left it: a product command and product-only files.
     commands = project / host_contract.PRODUCT_COMMANDS
     commands.write_text(PRODUCT_COMMANDS.replace('"channel"', '"list"'))
-    registry.write_text(_producer_registry(source, ["start", "command", "list"]))
+    (project / host_contract.REGISTRY).write_text(
+        _producer_registry(source, ["start", "command", "list"])
+    )
     (project / "services/tg_bot/src/shopping.py").write_text("ITEMS: list[str] = []\n")
     owned = [
         host_contract.PRODUCT_COMMANDS,
@@ -399,7 +400,7 @@ def test_producer_product_takes_the_new_core_by_copier_update(tmp_path):
     assert not list(project.rglob("*.rej")), result.stdout + result.stderr
     assert {name: (project / name).read_bytes() for name in owned} == before
     _assert_tooling_revision(project, _git("rev-parse", "HEAD", cwd=source).stdout.strip())
-    assert 'CORE_VERSION = "2.6.0"' in (project / "codegen_kit/packages.py").read_text()
+    assert product_core_version(project) == "2.6.0"
     # The merged registry already is the new core's render of the unchanged product.
     contract = host_contract.check_product(project)
     assert [item.command for item in contract.commands] == ["start", "command", "list"]

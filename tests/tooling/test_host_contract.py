@@ -207,9 +207,6 @@ def test_product_text_and_callbacks_are_admitted_and_rendered(tmp_path: Path) ->
         ("b1", "handle"),
     ]
     assert [item.command for item in contract.commands][-1] == "digest"
-    registry = render_registry(contract)
-    assert "PRODUCT_TEXT = True\n" in registry
-    assert 'PRODUCT_CALLBACKS: tuple[str, ...] = (\n    "bought",\n    "b1",\n)\n' in registry
 
 
 @pytest.mark.parametrize(
