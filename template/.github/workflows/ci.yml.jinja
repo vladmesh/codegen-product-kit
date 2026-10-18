@@ -13,7 +13,8 @@ env:
   DOCKER_BUILDKIT: "1"
 
 jobs:
-  lint-and-test:
+  # Check jobs run side by side; each prepares its own checkout, environments and generated code.
+  quality:
     runs-on: ubuntu-latest
     if: {% raw %}${{ github.event_name != 'push' }}{% endraw %}
     steps:
@@ -56,11 +57,6 @@ jobs:
           path: artifacts/env-contract-${{ '{{' }} github.sha {{ '}}' }}.json
           if-no-files-found: error
 {% if 'backend' in modules %}
-      - name: Export checkout ownership
-        run: |
-          echo "HOST_UID=$(stat -c '%u' .)" >> "$GITHUB_ENV"
-          echo "HOST_GID=$(stat -c '%g' .)" >> "$GITHUB_ENV"
-
       - name: Generate from spec
         run: make generate-from-spec
 
@@ -76,9 +72,77 @@ jobs:
       - name: Run tests
         run: make tests
 
+  dev-smoke:
+    runs-on: ubuntu-latest
+    if: {% raw %}${{ github.event_name != 'push' }}{% endraw %}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python {{ python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{{ python_version }}"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a
+        with:
+          version: "0.11.29"
+          checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"
+
+      - name: Set up project
+        run: make setup
+
+      - name: Prepare environment files
+        run: |
+          cp .env.example .env
+          if [ ! -f infra/.env.test ]; then
+            echo "infra/.env.test missing" >&2
+            exit 1
+          fi
+{% if 'backend' in modules %}
+      - name: Export checkout ownership
+        run: |
+          echo "HOST_UID=$(stat -c '%u' .)" >> "$GITHUB_ENV"
+          echo "HOST_GID=$(stat -c '%g' .)" >> "$GITHUB_ENV"
+{% endif %}
       - name: Smoke dev compose
         run: make dev-smoke
 {% if 'backend' in modules %}
+  integration:
+    runs-on: ubuntu-latest
+    if: {% raw %}${{ github.event_name != 'push' }}{% endraw %}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python {{ python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{{ python_version }}"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a
+        with:
+          version: "0.11.29"
+          checksum: "04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829"
+
+      - name: Set up project
+        run: make setup
+
+      - name: Prepare environment files
+        run: |
+          cp .env.example .env
+          if [ ! -f infra/.env.test ]; then
+            echo "infra/.env.test missing" >&2
+            exit 1
+          fi
+
+      - name: Export checkout ownership
+        run: |
+          echo "HOST_UID=$(stat -c '%u' .)" >> "$GITHUB_ENV"
+          echo "HOST_GID=$(stat -c '%g' .)" >> "$GITHUB_ENV"
+
       - name: Run integration tests
         run: make test-integration
 
@@ -87,6 +151,31 @@ jobs:
         run: |
           COMPOSE_PROJECT_NAME=tests-integration docker compose -f infra/compose.tests.integration.yml down --volumes --remove-orphans 2>/dev/null || true
 {% endif %}
+  # The required check: it runs after any outcome of its needs and passes only if all succeeded.
+  lint-and-test:
+    runs-on: ubuntu-latest
+    needs:
+      - quality
+      - dev-smoke
+{%- if 'backend' in modules %}
+      - integration
+{%- endif %}
+    if: {% raw %}${{ always() && github.event_name != 'push' }}{% endraw %}
+    steps:
+      - name: Require every check job to succeed
+        env:
+          QUALITY_RESULT: {% raw %}${{ needs.quality.result }}{% endraw %}
+          DEV_SMOKE_RESULT: {% raw %}${{ needs.dev-smoke.result }}{% endraw %}
+{%- if 'backend' in modules %}
+          INTEGRATION_RESULT: {% raw %}${{ needs.integration.result }}{% endraw %}
+{%- endif %}
+        run: |
+          status=0
+          for check in "quality=$QUALITY_RESULT" "dev-smoke=$DEV_SMOKE_RESULT"{% if 'backend' in modules %} "integration=$INTEGRATION_RESULT"{% endif %}; do
+            echo "${check%%=*}: ${check#*=}"
+            [ "${check#*=}" = success ] || status=1
+          done
+          exit "$status"
 
   build-and-push:
     runs-on: ubuntu-latest

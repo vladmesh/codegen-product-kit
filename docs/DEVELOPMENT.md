@@ -85,6 +85,11 @@ step, CI job or Dockerfile stage calls it with exactly the environments it needs
 runtime images) instead of its own `uv sync`; `tests/copier/test_prepare_env.py` enforces this for
 every product shape, and the CI [runner proof](RUNNER_PROOF.md) exercises it end to end.
 
+A generated PR check job runs on its own runner: it does its own checkout, `make setup` and
+environment-file step instead of reusing a sibling's workspace, and a new check job is added to
+the `needs` and the result list of the required `lint-and-test` job (see
+[TESTING.md](TESTING.md#generated-projects)).
+
 ## Adding a predefined module
 
 Add the service under `template/services/`, then update `copier.yml`, `services.yml.jinja`, Compose
