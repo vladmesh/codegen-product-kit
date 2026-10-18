@@ -41,6 +41,18 @@ make tests
 
 Backend projects additionally expose `make generate-from-spec` and `make test-integration`.
 
+A generated product's PR and manual CI (`template/.github/workflows/ci.yml.jinja`) runs sibling
+jobs with no ordering between them: `quality` (environment contract and its one artifact upload,
+backend generation drift, `make lint`, `make typecheck`, `make tests`), `dev-smoke`
+(`make dev-smoke`) and, for backend shapes only, `integration` (`make test-integration` and its
+`always()` clean-up). Every job prepares itself with checkout, the pinned Python and uv,
+`make setup` and the `.env`/`infra/.env.test` step; `dev-smoke` and `integration` also export
+checkout ownership in backend shapes. The required check `lint-and-test` needs every check job of
+the shape, runs after any outcome (`always()`) and exits 0 only when each result is `success`.
+Push to `main` runs only `build-and-push`. `tests/copier/test_template_generation.py` checks this
+topology per shape and executes the rendered `lint-and-test` script for every dependency result;
+the generated commands themselves run in the slow Copier lanes and the runner proof.
+
 ## CI
 
 `.github/workflows/ci.yml` runs the framework suite.

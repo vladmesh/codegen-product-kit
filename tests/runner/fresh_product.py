@@ -1132,13 +1132,22 @@ class Runner:  # noqa: PLR0904  # one proof, one ordered set of stages sharing i
         return executed
 
     def product_ci(self, head: str) -> None:
-        clone = self.clone("product-ci")
-        steps = self.run_job(clone, "lint-and-test", head)
-        contract = clone / f"artifacts/env-contract-{head}.json"
-        if not contract.is_file():
-            raise ProofError("product CI did not write its environment contract artifact")
-        shutil.copy(contract, self.output / contract.name)
-        self.evidence["product_ci"] = {"job": "lint-and-test", "head": head, "steps": steps}
+        """Run every job the required check needs, each in its own cold clone like its runner."""
+        first = self.clone("product-ci")
+        workflow = yaml.safe_load((first / ".github/workflows/ci.yml").read_text())
+        needs = workflow["jobs"]["lint-and-test"]["needs"]
+        clones = {job: self.clone(f"product-ci-{job}") for job in needs[1:]} | {needs[0]: first}
+        jobs = {job: self.run_job(clones[job], job, head) for job in needs}
+        contract = f"artifacts/env-contract-{head}.json"
+        writers = [job for job in needs if (clones[job] / contract).is_file()]
+        if writers != ["quality"]:
+            raise ProofError(f"environment contract artifact written by {writers}, not quality")
+        shutil.copy(clones["quality"] / contract, self.output / Path(contract).name)
+        self.evidence["product_ci"] = {
+            "required_check": "lint-and-test",
+            "head": head,
+            "jobs": jobs,
+        }
 
     def cold_main_regression(self) -> None:
         """Replay the old main recipe: root and backend ready, tg_bot absent, binding installed."""

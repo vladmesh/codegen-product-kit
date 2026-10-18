@@ -345,15 +345,15 @@ class TestBackendOnlyGeneration:
         from framework.toolchain import SETUP_UV_ACTION, UV_LINUX_X86_64_CHECKSUM, UV_VERSION
 
         ci_yml = yaml.safe_load((project_backend / ".github" / "workflows" / "ci.yml").read_text())
-        steps = [
-            step
-            for job in ci_yml["jobs"].values()
+        steps = {
+            name: step
+            for name, job in ci_yml["jobs"].items()
             for step in job["steps"]
             if str(step.get("uses", "")).startswith("astral-sh/setup-uv")
-        ]
+        }
 
-        assert len(steps) == 2, "expected setup-uv in both lint-and-test and build-and-push"
-        for step in steps:
+        assert set(steps) == {"quality", "dev-smoke", "integration", "build-and-push"}
+        for step in steps.values():
             assert step["uses"] == SETUP_UV_ACTION
             assert step["with"]["version"] == UV_VERSION
             assert step["with"]["checksum"] == UV_LINUX_X86_64_CHECKSUM
@@ -1788,7 +1788,7 @@ class TestCIWorkflowSimulation:
     """Simulate CI workflow on generated project to catch setup issues."""
 
     def _run_ci_env_setup(self, project_dir: Path) -> tuple[bool, str]:
-        """Execute the 'Prepare environment files' step from ci.yml."""
+        """Execute every required check job's 'Prepare environment files' step from ci.yml."""
         import yaml
 
         ci_yml = project_dir / ".github" / "workflows" / "ci.yml"
@@ -1797,21 +1797,23 @@ class TestCIWorkflowSimulation:
 
         ci_content = yaml.safe_load(ci_yml.read_text())
 
-        for job in ci_content.get("jobs", {}).values():
-            for step in job.get("steps", []):
-                if step.get("name") == "Prepare environment files":
-                    script = step.get("run", "")
-                    result = subprocess.run(  # noqa: S603, S607
-                        ["bash", "-e", "-c", script],
-                        cwd=project_dir,
-                        capture_output=True,
-                        text=True,
-                    )
-                    if result.returncode != 0:
-                        return False, f"Env setup script failed:\n{result.stderr}"
-                    return True, ""
-
-        return False, "No 'Prepare environment files' step found in ci.yml"
+        for job_name in ci_content["jobs"]["lint-and-test"]["needs"]:
+            scripts = [
+                step["run"]
+                for step in ci_content["jobs"][job_name]["steps"]
+                if step.get("name") == "Prepare environment files"
+            ]
+            if len(scripts) != 1:
+                return False, f"{job_name} has no single 'Prepare environment files' step"
+            result = subprocess.run(  # noqa: S603, S607
+                ["bash", "-e", "-c", scripts[0]],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return False, f"{job_name} env setup script failed:\n{result.stderr}"
+        return True, ""
 
     def _verify_compose_env_files(self, project_dir: Path) -> list[str]:
         """Verify all env_file paths in compose files exist after CI env setup."""
@@ -2062,6 +2064,147 @@ class TestDockerReadiness:
             f"Health endpoint returns '{actual_status}' but integration test "
             f"asserts '{expected_status}'"
         )
+
+
+CHECK_JOB_SHAPES = {
+    "project_backend": ("quality", "dev-smoke", "integration"),
+    "project_standalone": ("quality", "dev-smoke"),
+    "project_backend_tg_bot": ("quality", "dev-smoke", "integration"),
+}
+CHECK_PREAMBLE = [
+    "Checkout",
+    "Set up Python 3.12",
+    "Set up uv",
+    "Set up project",
+    "Prepare environment files",
+]
+OWNERSHIP = (
+    "Export checkout ownership",
+    'echo "HOST_UID=$(stat -c \'%u\' .)" >> "$GITHUB_ENV"\n'
+    'echo "HOST_GID=$(stat -c \'%g\' .)" >> "$GITHUB_ENV"\n',
+)
+PR_ONLY = "${{ github.event_name != 'push' }}"
+NEEDS_RESULT = re.compile(r"^\$\{\{ needs\.([\w-]+)\.result \}\}$")
+
+
+def _check_job_commands(backend: bool) -> dict[str, list[tuple[str, str | None]]]:
+    """Each check job's steps after its shared preamble, as (name, run) pairs."""
+    contract = (
+        ".venv/bin/python -m framework.contracts.env_usage \\\n"
+        "  --root . \\\n"
+        '  --artifact "artifacts/env-contract-${{ github.sha }}.json" \\\n'
+        '  --commit-sha "${{ github.sha }}"\n'
+    )
+    generation = [
+        ("Generate from spec", "make generate-from-spec"),
+        (
+            "Check generated files are up to date",
+            "git diff --exit-code -- shared/shared/generated/ services/*/src/generated/",
+        ),
+    ]
+    jobs = {
+        "quality": [
+            ("Check environment contract", contract),
+            ("Upload environment contract", None),
+            *(generation if backend else []),
+            ("Run linters", "make lint"),
+            ("Run typecheck", "make typecheck"),
+            ("Run tests", "make tests"),
+        ],
+        "dev-smoke": [*([OWNERSHIP] if backend else []), ("Smoke dev compose", "make dev-smoke")],
+    }
+    if backend:
+        jobs["integration"] = [
+            OWNERSHIP,
+            ("Run integration tests", "make test-integration"),
+            (
+                "Clean up",
+                "COMPOSE_PROJECT_NAME=tests-integration docker compose -f "
+                "infra/compose.tests.integration.yml down --volumes --remove-orphans "
+                "2>/dev/null || true\n",
+            ),
+        ]
+    return jobs
+
+
+def _run_aggregate(step: dict, results: dict[str, str]) -> int:
+    """Run the aggregate step as GitHub would, with `needs.<job>.result` set from results."""
+    env = {"PATH": os.environ["PATH"]}
+    for key, expression in step["env"].items():
+        job = NEEDS_RESULT.match(expression)
+        assert job, expression
+        if job.group(1) in results:
+            env[key] = results[job.group(1)]
+    return subprocess.run(  # noqa: S603, S607
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True
+    ).returncode
+
+
+@pytest.mark.parametrize("fixture", sorted(CHECK_JOB_SHAPES))
+def test_pr_checks_run_as_independent_self_prepared_jobs(
+    request: pytest.FixtureRequest, fixture: str
+) -> None:
+    """Every PR check command keeps its run in exactly one sibling job behind its own setup."""
+    project: Path = request.getfixturevalue(fixture)
+    check_jobs = CHECK_JOB_SHAPES[fixture]
+    workflow = yaml.safe_load((project / ".github/workflows/ci.yml").read_text())
+    jobs = workflow["jobs"]
+    expected = _check_job_commands(backend="integration" in check_jobs)
+
+    assert workflow["name"] == "CI"
+    assert set(jobs) == {*check_jobs, "lint-and-test", "build-and-push"}
+    for name in check_jobs:
+        job = jobs[name]
+        assert "needs" not in job and "strategy" not in job
+        assert job["if"] == PR_ONLY
+        steps = [(step["name"], step.get("run")) for step in job["steps"]]
+        assert [step[0] for step in steps[: len(CHECK_PREAMBLE)]] == CHECK_PREAMBLE
+        assert steps[3] == ("Set up project", "make setup")
+        assert job["steps"][2]["uses"].startswith("astral-sh/setup-uv@")
+        assert steps[len(CHECK_PREAMBLE) :] == expected[name], name
+    uploads = [
+        (name, step)
+        for name, job in jobs.items()
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert [(name, step["with"]["name"]) for name, step in uploads] == [
+        ("quality", "env-contract-${{ github.sha }}")
+    ]
+    if "integration" in check_jobs:
+        assert jobs["integration"]["steps"][-1]["if"] == "always()"
+
+    aggregate = jobs["lint-and-test"]
+    assert "strategy" not in aggregate and "name" not in aggregate
+    assert aggregate["needs"] == list(check_jobs)
+    assert aggregate["if"] == "${{ always() && github.event_name != 'push' }}"
+    assert [set(step) for step in aggregate["steps"]] == [{"name", "env", "run"}]
+
+    build = jobs["build-and-push"]
+    assert "needs" not in build
+    assert build["if"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
+
+
+@pytest.mark.parametrize("fixture", sorted(CHECK_JOB_SHAPES))
+def test_required_check_passes_only_when_every_check_job_succeeded(
+    request: pytest.FixtureRequest, fixture: str
+) -> None:
+    """Execute the rendered lint-and-test status check over each dependency outcome."""
+    project: Path = request.getfixturevalue(fixture)
+    check_jobs = CHECK_JOB_SHAPES[fixture]
+    workflow = yaml.safe_load((project / ".github/workflows/ci.yml").read_text())
+    (step,) = workflow["jobs"]["lint-and-test"]["steps"]
+
+    assert sorted(NEEDS_RESULT.match(value).group(1) for value in step["env"].values()) == sorted(
+        check_jobs
+    )
+    passing = dict.fromkeys(check_jobs, "success")
+    assert _run_aggregate(step, passing) == 0
+    for job in check_jobs:
+        for result in ("failure", "cancelled", "skipped", "", "Success", "success "):
+            assert _run_aggregate(step, {**passing, job: result}) != 0, (job, result)
+        missing = {name: value for name, value in passing.items() if name != job}
+        assert _run_aggregate(step, missing) != 0, (job, "missing")
 
 
 class TestCIWorkflowCorrectness:

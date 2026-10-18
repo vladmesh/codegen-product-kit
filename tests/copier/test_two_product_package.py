@@ -465,14 +465,14 @@ def test_two_products_install_one_unchanged_wheel_without_authored_source(
 def test_product_with_installed_reminders_passes_its_unit_leg_without_redis(
     two_products: tuple[Path, Path, Path, Path],
 ) -> None:
-    """Run product B's CI "Run tests" step with reminders installed and no Redis.
+    """Run product B's CI quality "Run tests" step with reminders installed and no Redis.
 
     Kit 0.7.0's lifespan unit tests started the real reminders consumer, which failed
     with a Redis ConnectionError on the product CI's unit leg.
     """
     _, product_b, _, _ = two_products
     workflow = yaml.safe_load((product_b / ".github/workflows/ci.yml").read_text())
-    steps = {step.get("name"): step for step in workflow["jobs"]["lint-and-test"]["steps"]}
+    steps = {step.get("name"): step for step in workflow["jobs"]["quality"]["steps"]}
     assert steps["Prepare environment files"]["run"].splitlines()[0] == "cp .env.example .env"
     assert steps["Run tests"]["run"] == "make tests"
 

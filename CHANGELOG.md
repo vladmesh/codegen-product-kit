@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published path. `candidate_release` remains, only explicitly, with `pending_fixture` for a
   future pending release. Planner, HTTP reads and probes must reach one catalog digest.
 
+### Changed
+
+- Generated product PR CI (2026-10-18) runs its checks as sibling jobs instead of one serial job:
+  `quality` (environment contract and its single artifact upload, backend generation and drift
+  check, lint, typecheck, unit tests), `dev-smoke` and, with backend, `integration` with its
+  `always()` clean-up. Each job repeats checkout, the pinned Python and uv, `make setup` and the
+  environment-file preparation, and exports checkout ownership where it runs backend compose.
+  The required check keeps the name `lint-and-test`: it needs every check job, runs after any
+  outcome and passes only when each result is `success`, so a failed, cancelled, skipped or
+  missing result fails it. Push to `main` runs only `build-and-push`, unchanged. New products
+  only; existing products take it with `copier update`. The runner proof runs each check job in
+  its own cold clone.
+
 ### Fixed
 
 - `/users/grant` and `/users/revoke` commit before they publish `user_granted` and answer. The

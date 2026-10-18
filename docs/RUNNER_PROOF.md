@@ -208,10 +208,12 @@ after moving its kit pin. The runner refuses a planner whose tooling is not the 
    packages, generated events, job timers and their owners, settings and bindings: every package
    is active, owns its timer and has its published events generated, one binding per package
    with disjoint commands, and every binding setting is declared.
-6. **Product CI.** A cold clone of the story branch executes the `run` steps of the product's own
-   `lint-and-test` job in order (setup, environment contract, generation drift, lint, typecheck,
-   tests, dev compose smoke, integration tests, `always()` clean-up). `uses` steps are provided by
-   the runner job with the same pinned Python and uv, which the runner checks.
+6. **Product CI.** For every job the product's required `lint-and-test` check needs (`quality`,
+   `dev-smoke`, `integration`), its own cold clone of the story branch executes that job's `run`
+   steps in order (setup and environment files in each; environment contract, generation drift,
+   lint, typecheck and tests in `quality`; dev compose smoke; integration tests and their
+   `always()` clean-up). Only `quality` may write the environment contract artifact. `uses` steps
+   are provided by the runner job with the same pinned Python and uv, which the runner checks.
 7. **Cold main regression.** Another cold clone replays the 0.10.1 main recipe (`uv sync --frozen`,
    `uv sync --project services/backend --frozen`, `make generate-from-spec`) and must fail with
    `BindingEnvironmentError: tg_bot environment is not installed`, with root and backend prepared,
@@ -308,7 +310,7 @@ environment contract artifact and one log per command. Every known synthetic sec
 | `install_payloads`, `installs` | per package: typed payload; executor stages with argv and exit codes, preflight and readback probe output, protected hashes, fence checkpoints, credential boundary (`install_payload`, `install`: tg-channels) |
 | `modules`, `module` | per package (and tg-channels): version, tag, tag object/tree/target and installed distribution |
 | `coexistence` | active packages, published and generated events, job timers and owners, settings and bindings, the product's core command registry and host-contract violations; the language owner must be `core` and the registry exactly core `/start`, `/command` plus the bound modules' commands |
-| `product_ci` | each `lint-and-test` step and its exit code |
+| `product_ci` | the required check name and, per job it needs, each step and its exit code |
 | `cold_main_regression` | the old recipe, prepared environments, exit code and the reproduced error |
 | `main_images` | each `build-and-push` step; per image Dockerfile, context, tag, digest and reference |
 | `integration_without_host_environments` | the cold `make test-integration` summary |
