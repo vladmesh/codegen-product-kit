@@ -101,11 +101,27 @@ copy shell with controlled SSH/SCP/sleep captures, then feed its arguments to in
 `ssh -G -F /dev/null` reads configuration without connecting, and `scp -S` invokes a capture
 transport that always fails without connecting. These tests require OpenSSH, rather than skipping
 native parsing proof. They assert the actual host and username, including the released IPv6
-misparse to `2001`. The appleboy action input is checked, but the external action is not executed.
+misparse to `2001`.
+
+The same file runs the rendered `Deploy via SSH` step of every product shape with its step
+environment. A stand-in `ssh` records its arguments (read back through `ssh -G`), then plays the
+host: it runs the received remote command on the received standard input, with `/opt/services/`
+mapped to a scratch directory and only recording `docker`, `ufw` and `sleep` stand-ins on `PATH`.
+Cases cover IPv4/IPv6 hosts, canary values with spaces, quotes, `$`/command substitution and
+newlines reaching `.env`, `ufw` and `docker login` literally and absent from SSH arguments and
+output, every required value refused before SSH, an SSH failure, the exact
+`up --wait --wait-timeout 120 --remove-orphans` call with no readiness sleep, first deploy versus
+redeploy, readiness failure, empty/malformed/non-running status, a failing status pipeline, a
+positive `RestartCount`, empty and corrupt `DOTENV`, and bounded login/pull retries. These are
+controlled Docker results, not a host deployment. The slow
+`test_real_compose_wait_bounds_readiness` (CI `test-pytest` slow leg) runs real Compose
+`up --wait` on throwaway `redis:7-alpine` projects: healthy returns early, unhealthy fails and a
+never-healthy service fails at its `--wait-timeout`; each project is removed with its volumes.
 
 Real Copier update cases run `uv lock`, commit synthetic owned environment/application data,
-read back retained bytes and the updated workflow, preserve a nonconflicting workflow name, and
-report an overlapping runner change as a `.rej`. Only isolated fixture Git downloads are mapped
+read back retained bytes and the updated workflow (checkout and key steps unchanged, copy and
+deploy steps equal to a fresh render, the updated copy and deploy executed for IPv6), preserve a
+nonconflicting workflow name, and report an overlapping runner change as a `.rej`. Only isolated fixture Git downloads are mapped
 to the local committed source. See [the upgrade review boundary](releases/0.6.4.md).
 Existing slow generation, service typechecks, logging and PostgreSQL migration proofs keep their
 CI routes; a local fast broad receipt does not replace the required release matrix.

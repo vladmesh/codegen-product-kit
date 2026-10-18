@@ -119,9 +119,24 @@ through `make test-integration`.
 The generated `.github/workflows/deploy.yml` runs on `ubuntu-24.04`. Configure its
 `DEPLOY_HOST` secret as the raw allocated IPv4/IPv6 address, without brackets.
 `DEPLOY_USER` and `PROJECT_NAME` are also required for the compose-copy step.
-SSH and ssh-action receive the raw host; native SCP brackets IPv6 only in its
+Both steps use the runner's OpenSSH with the `DEPLOY_SSH_KEY` written to
+`~/.ssh/deploy_key`. SSH receives the raw host; SCP brackets IPv6 only in its
 remote destination. Both compose files are copied to
 `/opt/services/PROJECT_NAME/infra/`, with three attempts and 15/30 second waits.
+
+The deploy step refuses an empty `DEPLOY_USER`, `DEPLOY_HOST`, `PROJECT_NAME`,
+`DEPLOY_PORT`, `DOTENV`, `REGISTRY_URL`, `REGISTRY_USER` or `REGISTRY_PASSWORD` before
+connecting. It sends these values on SSH standard input as quoted assignments ahead of
+a fixed remote Bash script, so they never appear in SSH arguments or are expanded as
+shell code. The remote script decodes `.env` (keeping the previous one as `.env.bak`
+and refusing an empty result), retries registry login and pull three times, removes
+volumes only on a first deploy, then runs
+`docker compose ... up --wait --wait-timeout 120 --remove-orphans`. Compose returns as
+soon as every service is running, and healthy where it declares a healthcheck (backend,
+db, Redis); `tg_bot` has none, so readiness means its process is running, not that it
+answers Telegram. A failed or timed-out readiness wait, a missing, malformed or
+non-running container status, or any container with a positive `RestartCount` fails the
+workflow, as does an SSH failure.
 
 A scaffolding pin update does not change existing repositories. After kit 0.6.4
 is published, update a clean committed product on a review branch:
@@ -136,9 +151,12 @@ Keep the selected modules. Back up ignored environment data through the product'
 normal restricted procedure and read back retained owned files without logging secrets.
 Copier can exit successfully with rejected local customizations in `.rej` files;
 the candidate file is installed and the rejected local hunks require review.
-Reconcile all conflicts before deployment, then verify the runner, raw SSH/action
-host, SCP brackets, compose sources, target directory and retries. Run the
-product's normal setup/lint/typecheck/tests and commit the reviewed update.
+Reconcile all conflicts before deployment, then review every changed hunk of the
+deploy workflow: the runner, raw SSH host, SCP brackets, compose sources, target
+directory and copy retries, and the deploy step's required values, SSH invocation and
+readiness wait. A local change overlapping a changed hunk is left in a `.rej` and must
+be merged by hand. Run the product's normal setup/lint/typecheck/tests and commit the
+reviewed update.
 
 ## Parallel run isolation
 
