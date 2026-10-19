@@ -41,6 +41,8 @@ read-only `kit check-install` preflight. Façade 2.6.0 adds the product text han
 product inline-button callbacks to that registry. The façade semver is versioned independently
 of the kit's Git release tags; package protocol stays 1 because its serialized manifest surface
 is unchanged.
+The prepared kit core tag `0.11.0` carries façade 2.6.0; see
+[0.11.0 preparation](releases/0.11.0.md).
 
 Tooling is a development boundary, not an application runtime dependency. The backend Dockerfile's
 `dev` target installs the root tooling lock for integration generation; its final `runtime` target

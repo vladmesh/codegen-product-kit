@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-19 (prepared, not published)
+
+Façade `CORE_VERSION` 2.6.0, package protocol 1, tooling/application distribution 0.1.0;
+package releases are tagged separately. See [0.11.0 preparation](docs/releases/0.11.0.md).
+
 ### Added
 
 - Façade `CORE_VERSION` 2.6.0 (package protocol stays 1): a product declares its one non-command
@@ -95,12 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing `~/.ssh/deploy_key` and options instead of `appleboy/ssh-action`. It refuses empty
   required secrets before connecting and passes `PROJECT_NAME`, `DEPLOY_PORT`, `DOTENV` and the
   registry credentials as quoted assignments on standard input, never as arguments or shell
-  code. The fixed 15-second sleep is gone: the remote script runs
-  `up --wait --wait-timeout 120 --remove-orphans` and fails when readiness fails or times out,
-  before the unchanged container status and `RestartCount` checks. Secret names, the compose
-  copy and its retries, registry retries and first-deploy-only volume removal are unchanged.
-  New products only; existing products take it with `copier update` and review the changed
-  deploy step hunks.
+  code; `DEPLOY_USER` and `DEPLOY_HOST` form the SSH destination. The fixed 15-second sleep is
+  gone: the remote script runs `up --wait --wait-timeout 120 --remove-orphans` and fails when
+  readiness fails or times out, before the unchanged container status and `RestartCount`
+  checks. Secret names, the compose copy and its retries, registry retries and
+  first-deploy-only volume removal are unchanged. New products only; existing products take it
+  with `copier update` and review the changed deploy step hunks.
 
 ### Fixed
 
