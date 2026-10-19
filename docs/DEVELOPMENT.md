@@ -116,6 +116,9 @@ See [0.10.0 release and upgrade notes](releases/0.10.0.md) for finite RU/EN bind
 product language and façade 2.4.0 with pinned v1 compatibility.
 See [0.10.1 release and upgrade notes](releases/0.10.1.md) for bound-product integration
 generation using container-native product environments and published-package coverage.
+See [0.11.0 release and upgrade notes](releases/0.11.0.md) for the prepared core minor carrying
+façade 2.6.0, the generated sibling CI checks and native SSH deploy, the reviewed existing-product
+update and the tag publication procedure.
 See [0.9.0 release and upgrade notes](releases/0.9.0.md) for generic platform environment sources,
 façade 2.3.0 and the included untagged 0.8.2 xenon fix.
 See [reminders 0.5.0 preparation](releases/reminders-0.5.0.md) for core 2.2 action admission,

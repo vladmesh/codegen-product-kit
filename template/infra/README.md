@@ -126,9 +126,13 @@ remote destination. Both compose files are copied to
 
 The deploy step refuses an empty `DEPLOY_USER`, `DEPLOY_HOST`, `PROJECT_NAME`,
 `DEPLOY_PORT`, `DOTENV`, `REGISTRY_URL`, `REGISTRY_USER` or `REGISTRY_PASSWORD` before
-connecting. It sends these values on SSH standard input as quoted assignments ahead of
-a fixed remote Bash script, so they never appear in SSH arguments or are expanded as
-shell code. The remote script decodes `.env` (keeping the previous one as `.env.bak`
+connecting. `DEPLOY_USER` and `DEPLOY_HOST` form the SSH destination. `PROJECT_NAME`,
+`DEPLOY_PORT`, `DOTENV` and the three registry values travel on SSH standard input as
+quoted assignments ahead of a fixed remote Bash script, so they never appear in SSH
+arguments or are expanded as shell code. This quoting belongs to the deploy step only:
+the compose-copy step embeds `DEPLOY_USER`, `DEPLOY_HOST` and `PROJECT_NAME` in its own
+script and remote `mkdir` command, so keep them plain user, host and directory names.
+The remote script decodes `.env` (keeping the previous one as `.env.bak`
 and refusing an empty result), retries registry login and pull three times, removes
 volumes only on a first deploy, then runs
 `docker compose ... up --wait --wait-timeout 120 --remove-orphans`. Compose returns as
@@ -138,25 +142,27 @@ answers Telegram. A failed or timed-out readiness wait, a missing, malformed or
 non-running container status, or any container with a positive `RestartCount` fails the
 workflow, as does an SSH failure.
 
-A scaffolding pin update does not change existing repositories. After kit 0.6.4
-is published, update a clean committed product on a review branch:
+A scaffolding pin update does not change existing repositories. Kit 0.11.0 carries
+the current CI and deploy workflows; after it is published, update a clean committed
+product on a review branch:
 
 ```bash
-uvx copier update --defaults --trust --vcs-ref=0.6.4 --conflict=rej
+uvx copier update --defaults --trust --vcs-ref=0.11.0 --conflict=rej
 git status --short
-git diff -- .github/workflows/deploy.yml .copier-answers.yml pyproject.toml uv.lock
+git diff -- .github/workflows/ .copier-answers.yml pyproject.toml uv.lock
 ```
 
-Keep the selected modules. Back up ignored environment data through the product's
-normal restricted procedure and read back retained owned files without logging secrets.
-Copier can exit successfully with rejected local customizations in `.rej` files;
-the candidate file is installed and the rejected local hunks require review.
-Reconcile all conflicts before deployment, then review every changed hunk of the
-deploy workflow: the runner, raw SSH host, SCP brackets, compose sources, target
-directory and copy retries, and the deploy step's required values, SSH invocation and
-readiness wait. A local change overlapping a changed hunk is left in a `.rej` and must
-be merged by hand. Run the product's normal setup/lint/typecheck/tests and commit the
-reviewed update.
+Keep the selected modules. Before the update, back up ignored environment data through
+the product's normal restricted procedure; afterwards read back retained owned files
+without logging secrets. Copier can exit successfully with rejected local customizations
+in `.rej` files; the candidate file is installed and the rejected local hunks require
+review. Reconcile all conflicts before deployment, then review every changed workflow
+hunk: the CI check jobs and the required `lint-and-test` aggregate, and in the deploy
+workflow the runner, raw SSH host, SCP brackets, compose sources, target directory and
+copy retries, and the deploy step's required values, SSH invocation and readiness wait.
+A local change overlapping a changed hunk is left in a `.rej` and must be merged by hand.
+Run `make setup`, `make generate-from-spec` and the product's normal lint, typecheck,
+unit and integration checks in its CI, and commit the reviewed update.
 
 ## Parallel run isolation
 
