@@ -1735,7 +1735,7 @@ class TestWorkflowGeneration:
         assert "secrets.PROJECT_NAME" in deploy_yml
 
     def test_deploy_verifies_container_health(self, project_backend: Path):
-        """deploy.yml must check container health after 'docker compose up -d'.
+        """deploy.yml must check container status after compose reports readiness.
 
         Without this check, a crashing container (e.g. ModuleNotFoundError) still
         results in a green workflow — the orchestrator records deployed_url and

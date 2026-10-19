@@ -91,6 +91,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only; existing products take it with `copier update`. The runner proof runs each check job in
   its own cold clone.
 
+- Generated deploy workflow (2026-10-18): `Deploy via SSH` runs the runner's own `ssh` with the
+  existing `~/.ssh/deploy_key` and options instead of `appleboy/ssh-action`. It refuses empty
+  required secrets before connecting and passes `PROJECT_NAME`, `DEPLOY_PORT`, `DOTENV` and the
+  registry credentials as quoted assignments on standard input, never as arguments or shell
+  code. The fixed 15-second sleep is gone: the remote script runs
+  `up --wait --wait-timeout 120 --remove-orphans` and fails when readiness fails or times out,
+  before the unchanged container status and `RestartCount` checks. Secret names, the compose
+  copy and its retries, registry retries and first-deploy-only volume removal are unchanged.
+  New products only; existing products take it with `copier update` and review the changed
+  deploy step hunks.
+
 ### Fixed
 
 - `/users/grant` and `/users/revoke` commit before they publish `user_granted` and answer. The
