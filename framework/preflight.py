@@ -279,7 +279,9 @@ def metadata_from_catalog(
     return metadata
 
 
-def _core_compatibility(core_version: str, metadata: PackageMetadata) -> None:
+def require_core(core_version: str, metadata: PackageMetadata) -> None:
+    """Refuse a package whose ``requires_core`` or default binding the product core cannot run."""
+
     manifest = metadata.manifest
     try:
         admitted = Version(core_version) in SpecifierSet(manifest.requires_core)
@@ -420,7 +422,7 @@ def evaluate_install(
         result.product_core = product_core_version(root)
     except BindingError as error:
         raise PreflightIncompatibleError("core_unsupported", str(error)) from error
-    _core_compatibility(result.product_core, metadata)
+    require_core(result.product_core, metadata)
     try:
         binding, retained = effective_binding(root, metadata)
         contract = _evaluate(root, metadata)

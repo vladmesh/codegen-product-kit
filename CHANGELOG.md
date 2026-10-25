@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `kit add <name> --package-source <dir>` (and `framework.cli.add_source_package`) installs a
+  protocol-v1 runtime package that is in no catalog from its source directory inside the product.
+  The static `pyproject.toml` identity, `package.yaml`, default binding, core range and host
+  contract are checked before `uv build`, and the built wheel's distribution, version, entry point
+  and manifest before the ordinary wheel, lock, allowlist and generation recipe runs. Sources
+  outside the product or in a nested product, and mixing with `--wheel` or catalog options, are
+  refused before any write. See [package installation](docs/CONTRACTS.md#installation-discovery-and-activation).
+
 ## [0.11.0] - 2026-10-19 (prepared, not published)
 
 Façade `CORE_VERSION` 2.6.0, package protocol 1, tooling/application distribution 0.1.0;

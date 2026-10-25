@@ -240,6 +240,17 @@ Fast Copier activation tests admit the metadata under core 2.3, reject its minim
 and run complete generation twice before merging all product env fragments with exact declared
 data. A unit test prevents concrete platform service names from entering `framework/` or `template/`.
 
+`tests/tooling/test_source_install.py` covers `kit add --package-source` with the non-catalog
+synthetic package copied into a file-fixture product, a metadata-only build double and recorded
+uv/generation calls that refuse any catalog read: the complete recipe and a clean repeat, and
+byte-identical product files with no build or install for sources outside the product, in a nested
+product or behind an outside symlink, for each static identity, manifest and core refusal, for each
+built-wheel mismatch, for a host-contract refusal and for mixed CLI input. The slow
+`tests/copier/test_source_package_install.py` (CI only) copies that package and the tg-channels
+source into a generated backend,tg_bot product, installs both through the product's own `kit`,
+repeats one install, binds the default, then restores the backend from the committed wheels and
+lock alone and checks that regeneration leaves the generated contracts unchanged.
+
 `tests/tooling/test_bindings_v2.py` admits the synthetic bilingual grammar and rejects invalid
 locales, keys, sources, contracts and duplicates. Its pinned pre-v2 output fixture verifies v1
 bindings and relay bytes. `tests/copier/test_bindings_v2.py` binds the inert binding-notes fixture
