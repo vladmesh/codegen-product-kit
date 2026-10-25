@@ -78,6 +78,9 @@ falls back to Docker Hub for an image the mirror lacks. `test-pytest` therefore 
 Redis (`redis:7-alpine` on port 6379, database 14) itself after the mirror and removes only that
 container, instead of an Actions service pulled before the first step.
 `tests/tooling/test_ci_image_transport.py` checks that order.
+Both `test-pytest` Copier steps set `TMPDIR` to the runner's temporary directory on its work disk,
+because the generated products, environments and wheels of one job exceed the user quota of the
+runner image's `/tmp`.
 Keep required job names stable unless branch protection is updated at the same time.
 
 `tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording
