@@ -7,17 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-25 (prepared, not published)
+
+Kit minor only: façade `CORE_VERSION` 2.6.0, package protocol 1, tooling/application distribution
+0.1.0 and minimum Copier 9.0.0 are unchanged, and no package release or catalog entry changes.
+No tag exists yet and no product is upgraded. See [0.12.0 preparation](docs/releases/0.12.0.md).
+
 ### Added
 
-- `kit add <name> --package-source <dir>` (and `framework.cli.add_source_package`) installs a
-  protocol-v1 runtime package that is in no catalog from its source directory inside the product.
+- `kit add <name> --package-source <dir> --product-root <root>` (and
+  `framework.cli.add_source_package`) installs a protocol-v1 runtime package that is in no
+  catalog from its source directory inside the product.
   The static `pyproject.toml` identity, `package.yaml`, default binding, core range and host
   contract are checked before `uv build`, and the built wheel's distribution, version, entry point
   and manifest before the ordinary wheel, lock, allowlist and generation recipe runs. Sources
   outside the product or in a nested product, and mixing with `--wheel` or catalog options, are
   refused before any write. See [package installation](docs/CONTRACTS.md#installation-discovery-and-activation).
+  The slow Copier lane proves it in one generated backend,tg_bot product: install, repeat,
+  bind, restore from the committed wheels and lock, and unchanged regeneration.
 
-## [0.11.0] - 2026-10-19 (prepared, not published)
+### Fixed
+
+- Kit CI: both `test-pytest` Copier steps set `TMPDIR` to `runner.temp`, so the job's temporary
+  products, environments and wheels stay off the runner image's quota-limited `/tmp`. Generated
+  products are unchanged.
+
+## [0.11.0] - 2026-10-19
 
 Façade `CORE_VERSION` 2.6.0, package protocol 1, tooling/application distribution 0.1.0;
 package releases are tagged separately. See [0.11.0 preparation](docs/releases/0.11.0.md).
