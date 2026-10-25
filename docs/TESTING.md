@@ -78,6 +78,9 @@ falls back to Docker Hub for an image the mirror lacks. `test-pytest` therefore 
 Redis (`redis:7-alpine` on port 6379, database 14) itself after the mirror and removes only that
 container, instead of an Actions service pulled before the first step.
 `tests/tooling/test_ci_image_transport.py` checks that order.
+Both `test-pytest` Copier steps set `TMPDIR` to the runner's temporary directory on its work disk,
+because the generated products, environments and wheels of one job exceed the user quota of the
+runner image's `/tmp`.
 Keep required job names stable unless branch protection is updated at the same time.
 
 `tests/copier/test_prepare_env.py` covers the generated `scripts/prepare-env.sh` with a recording
@@ -239,6 +242,17 @@ YAML and runs catalog-resolved `kit add` through installation/discovery and frag
 Fast Copier activation tests admit the metadata under core 2.3, reject its minimum on core 2.2,
 and run complete generation twice before merging all product env fragments with exact declared
 data. A unit test prevents concrete platform service names from entering `framework/` or `template/`.
+
+`tests/tooling/test_source_install.py` covers `kit add --package-source` with the non-catalog
+synthetic package copied into a file-fixture product, a metadata-only build double and recorded
+uv/generation calls that refuse any catalog read: the complete recipe and a clean repeat, and
+byte-identical product files with no build or install for sources outside the product, in a nested
+product or behind an outside symlink, for each static identity, manifest and core refusal, for each
+built-wheel mismatch, for a host-contract refusal and for mixed CLI input. The slow
+`tests/copier/test_source_package_install.py` (CI only) copies that package and the tg-channels
+source into a generated backend,tg_bot product, installs both through the product's own `kit`,
+repeats one install, binds the default, then restores the backend from the committed wheels and
+lock alone and checks that regeneration leaves the generated contracts unchanged.
 
 `tests/tooling/test_bindings_v2.py` admits the synthetic bilingual grammar and rejects invalid
 locales, keys, sources, contracts and duplicates. Its pinned pre-v2 output fixture verifies v1

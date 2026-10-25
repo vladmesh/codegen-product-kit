@@ -171,6 +171,34 @@ file must be that package's distribution. Its version is the caller's choice:
 kit add reminders --wheel /path/to/codegen_kit_reminders-0.4.0-py3-none-any.whl
 ```
 
+A runtime package that is not in a catalog is built from its source directory inside the product,
+for example one the product keeps under `packages/`, together with its own tests:
+
+```bash
+kit add <name> --package-source packages/<name> --product-root /path/to/product
+```
+
+The Python API is `framework.cli.add_source_package(name, source, repo_root)`. No catalog or tag
+is read and nothing is published or recorded outside the product; `KIT_CATALOG_SOURCE` and
+`KIT_CATALOG_REF` are not consulted, and combining `--package-source` with `--wheel`,
+`--catalog-source` or `--catalog-ref` is a usage error (exit 2). The directory, after resolving
+symlinks, must lie inside the product root and not inside a nested product (a directory holding
+`.copier-answers.yml` or `services/backend/manifest.yaml`). Before anything is built, the source's
+`pyproject.toml` must declare a static `[project]` `name` (the distribution) and PEP 440 `version`
+and exactly one `codegen_kit.packages` entry point, named `<name>`; its one `<module>/package.yaml`
+and default binding are read as data the way `kit check-install --package-source` reads them, and
+the manifest name and version must equal that entry point and project version. The manifest's
+`requires_core` must admit the product façade core, and the host-contract admission of the other
+routes runs. The wheel is then built with `uv build` and refused unless its METADATA distribution
+and version, its only `codegen_kit.packages` entry point and the `package.yaml` inside the
+entry-point module, together with the default binding, are the source's. Refusals raise
+`PackageSourceError`, `PreflightIncompatibleError`, `HostContractError`, `PackageBuildError` or
+`PackageWheelMismatchError` and leave the product's installation files untouched. The verified wheel
+follows the recipe above: copy under `services/backend/packages/`, backend dependency and lock,
+deptry entry-point exemption, manifest allowlist, frozen backend sync and contract generation.
+Repeating the install adds no second allowlist or exemption entry. Activation, `kit bind` and
+generated CI treat the package exactly like a released one.
+
 On a main push, generated image CI repeats the committed installation boundary before generation:
 it performs a frozen root tooling sync followed by a frozen `services/backend` sync, then runs
 `make generate-from-spec`. The backend sync consumes only its committed project, lockfile, and
@@ -1069,7 +1097,7 @@ satisfies the contract as is. Exit status is 0 for `mechanical`, 3 for `glue`, 4
  "path": "services/tg_bot/src/commands.py", "symbol": "handle_channel"}
 ```
 
-`kit add` (wheel or catalog tag) and `kit bind` run the same contract evaluation before any
+`kit add` (wheel, catalog tag or package source) and `kit bind` run the same contract evaluation before any
 product write and refuse with `HostContractError`, leaving owned files and locks unchanged for
 these conflicts. This is not a general install recovery mechanism.
 

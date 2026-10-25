@@ -1,16 +1,20 @@
-"""Read the live package catalog and build a released package wheel from its tag."""
+"""Read the live package catalog, build package wheels and verify their identity."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import configparser
+from dataclasses import dataclass
 from email.message import Message
 from email.parser import Parser
+from functools import partial
 import io
 import os
 from pathlib import Path
 import subprocess
 import tarfile
 from tempfile import TemporaryDirectory
+import tomllib
 import zipfile
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -56,7 +60,21 @@ class PackageBuildError(CatalogError):
 
 
 class PackageWheelMismatchError(CatalogError):
-    """The built wheel is not the distribution and version the catalog names."""
+    """The built wheel is not the distribution and version the catalog or source names."""
+
+
+class PackageSourceError(CatalogError):
+    """A local package source does not declare one static, consistent package identity."""
+
+
+@dataclass(frozen=True)
+class SourcePackage:
+    """A runtime package identity declared statically by a source's ``pyproject.toml``."""
+
+    name: str
+    distribution: str
+    version: str
+    entry_point: str
 
 
 def _git(
@@ -176,14 +194,10 @@ def _dist_info_file(archive: zipfile.ZipFile, name: str) -> str | None:
     return found[0] if found else None
 
 
-def verify_wheel(
+def _wheel_metadata(
     wheel: Path,
-    package: CatalogPackage | CatalogLibrary,
-    version: CatalogVersion | CatalogLibraryVersion,
-    python_version: str | None = None,
-) -> None:
-    """Refuse a wheel unless it is the catalog's distribution, version and entry point."""
-
+    inspect: Callable[[zipfile.ZipFile, Message, configparser.ConfigParser], None] | None = None,
+) -> tuple[Message, configparser.ConfigParser]:
     try:
         with zipfile.ZipFile(wheel) as archive:
             metadata_file = _dist_info_file(archive, "/METADATA")
@@ -195,30 +209,49 @@ def verify_wheel(
             entry_points.optionxform = str  # type: ignore[assignment,method-assign]
             if entry_points_file is not None:
                 entry_points.read_string(archive.read(entry_points_file).decode())
-            if isinstance(package, CatalogLibrary):
-                _verify_library_headers(metadata)
-                _verify_library_layout(archive, package, entry_points)
+            if inspect is not None:
+                inspect(archive, metadata, entry_points)
     except (zipfile.BadZipFile, OSError, UnicodeError, configparser.Error) as error:
         raise PackageWheelMismatchError(
             f"{wheel.name} is not a valid wheel archive: {error}"
         ) from error
+    return metadata, entry_points
 
-    distribution = metadata.get("Name", "")
-    if canonicalize_name(distribution) != canonicalize_name(package.distribution):
+
+def _verify_identity(
+    metadata: Message, distribution: str, version: str, origin: str, name: str
+) -> None:
+    built_distribution = metadata.get("Name", "")
+    if canonicalize_name(built_distribution) != canonicalize_name(distribution):
         raise PackageWheelMismatchError(
-            f"built wheel distribution {distribution!r} is not catalog distribution "
-            f"{package.distribution!r}"
+            f"built wheel distribution {built_distribution!r} is not {origin} distribution "
+            f"{distribution!r}"
         )
     built_version = metadata.get("Version", "")
     try:
-        matches = Version(built_version) == Version(version.version)
+        matches = Version(built_version) == Version(version)
     except InvalidVersion:
         matches = False
     if not matches:
         raise PackageWheelMismatchError(
-            f"built wheel version {built_version!r} is not catalog version {version.version!r} "
-            f"of package {package.name!r}"
+            f"built wheel version {built_version!r} is not {origin} version {version!r} "
+            f"of package {name!r}"
         )
+
+
+def verify_wheel(
+    wheel: Path,
+    package: CatalogPackage | CatalogLibrary,
+    version: CatalogVersion | CatalogLibraryVersion,
+    python_version: str | None = None,
+) -> None:
+    """Refuse a wheel unless it is the catalog's distribution, version and entry point."""
+
+    inspect = (
+        partial(_verify_library_archive, package) if isinstance(package, CatalogLibrary) else None
+    )
+    metadata, entry_points = _wheel_metadata(wheel, inspect)
+    _verify_identity(metadata, package.distribution, version.version, "catalog", package.name)
     if isinstance(package, CatalogLibrary):
         _verify_library_python(
             wheel, metadata.get("Requires-Python"), python_version, version, package.distribution
@@ -227,6 +260,81 @@ def verify_wheel(
         raise PackageWheelMismatchError(
             f"built wheel declares no {ENTRY_POINT_GROUP} entry point {package.name!r}"
         )
+
+
+def read_source_package(project: Path) -> SourcePackage:
+    """Read a runtime package's static identity from its ``pyproject.toml``, never building it."""
+
+    path = project / "pyproject.toml"
+    try:
+        document = tomllib.loads(path.read_text())
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise PackageSourceError(f"{path} is unreadable: {error}") from error
+    table = document.get("project")
+    if not isinstance(table, dict):
+        raise PackageSourceError(f"{path} has no [project] table")
+    dynamic = table.get("dynamic", [])
+    for key in ("name", "version", "entry-points"):
+        if key in dynamic:
+            raise PackageSourceError(f"{path} must declare project {key} statically")
+    for key in ("name", "version"):
+        if not isinstance(table.get(key), str) or not table[key].strip():
+            raise PackageSourceError(f"{path} needs a non-empty project {key}")
+    try:
+        Version(table["version"])
+    except InvalidVersion as error:
+        raise PackageSourceError(
+            f"{path} version {table['version']!r} is not a PEP 440 version"
+        ) from error
+    groups = table.get("entry-points")
+    declared = groups.get(ENTRY_POINT_GROUP) if isinstance(groups, dict) else None
+    if not isinstance(declared, dict) or len(declared) != 1:
+        raise PackageSourceError(f"{path} must declare exactly one {ENTRY_POINT_GROUP} entry point")
+    [(name, entry_point)] = declared.items()
+    if not isinstance(entry_point, str) or ":" not in entry_point:
+        raise PackageSourceError(f"{path} entry point {name!r} must be 'module:attribute'")
+    return SourcePackage(name, table["name"], table["version"], entry_point)
+
+
+def verify_source_wheel(wheel: Path, package: SourcePackage) -> None:
+    """Refuse a wheel unless it carries the source's distribution, version and one entry point.
+
+    The entry point module must also hold the wheel's ``package.yaml``, as activation requires.
+    """
+
+    module = package.entry_point.partition(":")[0].strip()
+    manifest = f"{module.replace('.', '/')}/package.yaml"
+
+    def inspect(
+        archive: zipfile.ZipFile, _metadata: Message, _entry_points: configparser.ConfigParser
+    ) -> None:
+        if manifest not in archive.namelist():
+            raise PackageWheelMismatchError(
+                f"built wheel has no {manifest} in entry point module {module!r}"
+            )
+
+    metadata, entry_points = _wheel_metadata(wheel, inspect)
+    _verify_identity(metadata, package.distribution, package.version, "source", package.name)
+    built = (
+        dict(entry_points.items(ENTRY_POINT_GROUP))
+        if entry_points.has_section(ENTRY_POINT_GROUP)
+        else {}
+    )
+    if built != {package.name: package.entry_point}:
+        raise PackageWheelMismatchError(
+            f"built wheel declares {ENTRY_POINT_GROUP} entry points {built}, the source "
+            f"declares {{{package.name!r}: {package.entry_point!r}}}"
+        )
+
+
+def _verify_library_archive(
+    library: CatalogLibrary,
+    archive: zipfile.ZipFile,
+    metadata: Message,
+    entry_points: configparser.ConfigParser,
+) -> None:
+    _verify_library_headers(metadata)
+    _verify_library_layout(archive, library, entry_points)
 
 
 def _verify_library_headers(metadata: Message) -> None:

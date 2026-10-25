@@ -22,6 +22,7 @@ from framework.binding_product import (
     binding_settings,
     binding_sources,
     default_binding_resource,
+    product_core_version,
     require_binding_product,
     validate_product_bindings,
 )
@@ -42,18 +43,24 @@ from framework.package_source import (
     CATALOG_SOURCE_ENV,
     DEFAULT_CATALOG_REF,
     DEFAULT_CATALOG_SOURCE,
+    PackageSourceError,
     PackageWheelMismatchError,
+    SourcePackage,
     build_wheel,
     fetch_package_source,
     read_catalog,
+    read_source_package,
+    verify_source_wheel,
     verify_wheel,
 )
 from framework.preflight import (
+    PackageMetadata,
     PreflightIncompatibleError,
     admit,
     check_install,
     metadata_from_source,
     metadata_from_wheel,
+    require_core,
 )
 from framework.spec.core_settings import CORE_SETTINGS
 from framework.spec.loader import SpecValidationError, load_manifest, load_specs
@@ -116,7 +123,9 @@ def _library_python_version(repo_root: Path) -> str:
     return result.stdout.strip()
 
 
-def _install_wheel(package: CatalogPackage | CatalogLibrary, wheel: Path, repo_root: Path) -> None:
+def _install_wheel(
+    package: CatalogPackage | CatalogLibrary | SourcePackage, wheel: Path, repo_root: Path
+) -> None:
     """Copy and lock the dependency; activate/regenerate only runtime packages."""
 
     manifest_path = repo_root / "services/backend/manifest.yaml"
@@ -273,6 +282,64 @@ def add_released_package(
     return version
 
 
+#: Files that mark a generated product root.
+_PRODUCT_MARKERS = (".copier-answers.yml", "services/backend/manifest.yaml")
+
+
+def _product_source(source: Path, repo_root: Path) -> Path:
+    """Resolve a package source directory owned by this product and by no nested product."""
+
+    root = repo_root.resolve()
+    project = source.expanduser().resolve()
+    if project == root or not project.is_relative_to(root):
+        raise PackageSourceError(f"package source {source} is not inside product {root}")
+    for directory in (project, *project.parents):
+        if directory == root:
+            break
+        if any((directory / marker).is_file() for marker in _PRODUCT_MARKERS):
+            raise PackageSourceError(
+                f"package source {source} belongs to another product at {directory}"
+            )
+    if not project.is_dir():
+        raise PackageSourceError(f"package source {source} is not a directory")
+    return project
+
+
+def add_source_package(name: str, source: Path, repo_root: Path) -> PackageMetadata:
+    """Build a runtime package from a source directory inside the product and install it.
+
+    No catalog or tag is read and nothing is published. Every refusal precedes product writes.
+    """
+
+    _require_backend_product(repo_root)
+    project = _product_source(source, repo_root)
+    package = read_source_package(project)
+    if package.name != name:
+        raise PackageSourceError(f"{project} declares entry point {package.name!r}, not {name!r}")
+    metadata = metadata_from_source(
+        name,
+        project,
+        {"route": "package_source", "path": str(project.relative_to(repo_root.resolve()))},
+    )
+    if metadata.manifest.version != package.version:
+        raise PackageSourceError(
+            f"{project} package.yaml version {metadata.manifest.version!r} differs from "
+            f"pyproject.toml version {package.version!r}"
+        )
+    require_core(product_core_version(repo_root), metadata)
+    _admit(repo_root, name, lambda: metadata)
+    with TemporaryDirectory(prefix="kit-add-") as scratch:
+        wheel = build_wheel(project, Path(scratch) / "dist")
+        verify_source_wheel(wheel, package)
+        built = metadata_from_wheel(name, wheel).provenance["metadata_sha256"]
+        if built != metadata.provenance["metadata_sha256"]:
+            raise PackageWheelMismatchError(
+                f"built wheel package.yaml or default binding differs from the source {project}"
+            )
+        _install_wheel(package, wheel, repo_root)
+    return metadata
+
+
 def bind_package(name: str, repo_root: Path, *, binding_file: Path | None = None) -> str:
     """Validate a prospective whole product before writing its owned binding/manifest."""
     require_binding_product(repo_root)
@@ -345,13 +412,16 @@ def _parser() -> argparse.ArgumentParser:
         help="install this built artifact instead of resolving the live catalog",
     )
     add.add_argument(
+        "--package-source",
+        type=Path,
+        help="build and install a runtime package from this source directory inside the product",
+    )
+    add.add_argument(
         "--catalog-source",
-        default=os.environ.get(CATALOG_SOURCE_ENV) or DEFAULT_CATALOG_SOURCE,
         help=f"git repository holding the catalog and package tags (env {CATALOG_SOURCE_ENV})",
     )
     add.add_argument(
         "--catalog-ref",
-        default=os.environ.get(CATALOG_REF_ENV) or DEFAULT_CATALOG_REF,
         help=f"ref of the catalog source to read the catalog from (env {CATALOG_REF_ENV})",
     )
     add.add_argument("--product-root", type=Path, default=Path.cwd())
@@ -401,7 +471,20 @@ def _check_install(arguments: argparse.Namespace) -> int:
 def main() -> None:
     """Run the product-kit command line."""
 
-    arguments = _parser().parse_args()
+    parser = _parser()
+    arguments = parser.parse_args()
+    if arguments.command == "add" and arguments.package_source is not None:
+        mixed = [
+            option
+            for option, value in (
+                ("--wheel", arguments.wheel),
+                ("--catalog-source", arguments.catalog_source),
+                ("--catalog-ref", arguments.catalog_ref),
+            )
+            if value is not None
+        ]
+        if mixed:
+            parser.error(f"--package-source cannot be combined with {', '.join(mixed)}")
     if arguments.command == "check-install":
         raise SystemExit(_check_install(arguments))
     try:
@@ -412,14 +495,24 @@ def main() -> None:
             print(f"kit: {result} {arguments.name}")
         if arguments.command == "add":
             product_root = arguments.product_root.resolve()
-            if arguments.wheel is not None:
+            if arguments.package_source is not None:
+                metadata = add_source_package(
+                    arguments.name, arguments.package_source, product_root
+                )
+                print(
+                    f"kit: installed {arguments.name} {metadata.manifest.version} "
+                    f"(package source {metadata.provenance['path']})"
+                )
+            elif arguments.wheel is not None:
                 add_package(arguments.name, arguments.wheel, product_root)
             else:
                 version = add_released_package(
                     arguments.name,
                     product_root,
-                    arguments.catalog_source,
-                    arguments.catalog_ref,
+                    arguments.catalog_source
+                    or os.environ.get(CATALOG_SOURCE_ENV)
+                    or DEFAULT_CATALOG_SOURCE,
+                    arguments.catalog_ref or os.environ.get(CATALOG_REF_ENV) or DEFAULT_CATALOG_REF,
                 )
                 print(f"kit: installed {arguments.name} {version.version} ({version.tag})")
     except (ValueError, SpecValidationError, subprocess.CalledProcessError) as error:
