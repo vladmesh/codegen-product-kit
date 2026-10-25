@@ -16,6 +16,7 @@ from framework.bindings import BindingError
 from framework.package_source import PackageSourceError, PackageWheelMismatchError
 from framework.preflight import PreflightIncompatibleError
 from framework.spec.package_resolution import ENTRY_POINT_GROUP
+from tests.tooling.test_package_catalog import _snapshot
 
 ROOT = Path(__file__).parents[2]
 FIXTURE = ROOT / "tests/fixtures/synthetic_package"
@@ -41,14 +42,6 @@ def _product(root: Path) -> Path:
     (root / ".copier-answers.yml").write_text("_commit: v0.11.0\n")
     shutil.copytree(FIXTURE, root / SOURCE, ignore=shutil.ignore_patterns("__pycache__"))
     return root
-
-
-def _state(root: Path) -> dict[str, bytes]:
-    return {
-        str(path.relative_to(root)): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
 
 
 def _build_from(project: Path, output: Path, edit=None) -> Path:
@@ -188,11 +181,11 @@ def test_source_outside_the_product_is_refused_before_build(
 ) -> None:
     product = _product(tmp_path / "product")
     source = select(product, tmp_path)
-    before = _state(product)
+    before = _snapshot(product)
     with pytest.raises(PackageSourceError, match=message):
         cli.add_source_package("synthetic", source, product)
     assert recipe["build"] == [] and _no_install(recipe)
-    assert _state(product) == before
+    assert _snapshot(product) == before
 
 
 def test_source_symlink_inside_the_product_is_its_target(
@@ -269,11 +262,11 @@ def test_source_identity_and_core_refusals_precede_build_and_writes(
     edit, error, message = SOURCE_CASES[case]
     product = _product(tmp_path / "product")
     edit(product / SOURCE)
-    before = _state(product)
+    before = _snapshot(product)
     with pytest.raises(error, match=message):
         cli.add_source_package("synthetic", product / SOURCE, product)
     assert recipe["build"] == [] and _no_install(recipe)
-    assert _state(product) == before
+    assert _snapshot(product) == before
 
 
 def _wheel_entry(files: dict[str, str]) -> None:
@@ -317,11 +310,11 @@ def test_built_wheel_identity_mismatch_is_not_installed(
     edit, message = WHEEL_CASES[case]
     recipe["edit_wheel"] = edit
     product = _product(tmp_path / "product")
-    before = _state(product)
+    before = _snapshot(product)
     with pytest.raises(PackageWheelMismatchError, match=message):
         cli.add_source_package("synthetic", product / SOURCE, product)
     assert len(recipe["build"]) == 1 and _no_install(recipe)
-    assert _state(product) == before
+    assert _snapshot(product) == before
 
 
 def test_host_contract_refusal_precedes_build_and_writes(
@@ -329,11 +322,11 @@ def test_host_contract_refusal_precedes_build_and_writes(
 ) -> None:
     product = _product(tmp_path / "product")
     (product / "services/backend/manifest.yaml").write_text("- language\n")
-    before = _state(product)
+    before = _snapshot(product)
     with pytest.raises(BindingError):
         cli.add_source_package("synthetic", product / SOURCE, product)
     assert recipe["build"] == [] and _no_install(recipe)
-    assert _state(product) == before
+    assert _snapshot(product) == before
 
 
 @pytest.mark.parametrize(
@@ -353,7 +346,7 @@ def test_cli_refuses_mixed_source_and_artifact_or_catalog_input(
     extra: list[str],
 ) -> None:
     product = _product(tmp_path / "product")
-    before = _state(product)
+    before = _snapshot(product)
     monkeypatch.setattr(
         "sys.argv",
         ["kit", "add", "synthetic", "--package-source", SOURCE, "--product-root", str(product)]
@@ -364,4 +357,4 @@ def test_cli_refuses_mixed_source_and_artifact_or_catalog_input(
     assert exited.value.code == 2
     assert f"--package-source cannot be combined with {extra[0]}" in capsys.readouterr().err
     assert recipe["build"] == [] and _no_install(recipe)
-    assert _state(product) == before
+    assert _snapshot(product) == before

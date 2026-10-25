@@ -83,8 +83,11 @@ def test_product_source_packages_install_bind_and_restore_from_committed_wheels(
     settings = runpy.run_path(str(product / "services/backend/src/generated/settings_schemas.py"))
     assert settings["SETTINGS_SCHEMAS"]["synthetic.enabled"] == {"type": "boolean"}
     assert (product / "services/tg_bot/bindings/tg-channels.yaml").is_file()
-    active = (product / "codegen_kit/_active_packages.py").read_text()
-    assert '"name": "synthetic"' in active and '"name": "tg-channels"' in active
+    active = runpy.run_path(str(product / "codegen_kit/_active_packages.py"))
+    assert [(item["name"], item["version"]) for item in active["ACTIVE_PACKAGES"]] == [
+        ("synthetic", "2.0.0"),
+        ("tg-channels", "0.1.2"),
+    ]
     expected = [
         "synthetic=synthetic_package:package",
         "tg-channels=codegen_kit_tg_channels:package",
