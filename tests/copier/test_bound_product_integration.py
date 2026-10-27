@@ -132,7 +132,15 @@ def _connected_top_proof(
         + f"\nPLATFORM_BASE_URL=http://127.0.0.1:{CONNECTED_READER_PORT}/tg-reader\n"
         + f"PLATFORM_KEY={CONNECTED_READER_KEY}\n"
     )
-    compose = ["docker", "compose", "-f", "infra/compose.tests.integration.yml"]
+    # The product Makefile exports .env before Compose; its database names interpolate from it.
+    compose = [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env",
+        "-f",
+        "infra/compose.tests.integration.yml",
+    ]
     stack = environment | {
         "COMPOSE_PROJECT_NAME": "tests-connected-top",
         "HOST_UID": str(product.stat().st_uid),
