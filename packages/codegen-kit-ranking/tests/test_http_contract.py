@@ -146,13 +146,16 @@ def test_input_outside_the_declared_bounds_is_refused(
     assert response.status_code == UNPROCESSABLE
 
 
-@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
-@pytest.mark.parametrize("field", ["half_life", "weight"])
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+@pytest.mark.parametrize("field", ["half_life", "weight", "metric"])
 def test_a_non_finite_float_is_refused(client: TestClient, literal: str, field: str) -> None:
+    """Tokens and overflowing exponents alike answer 422, never a server error."""
     weights = dict(CONFIRMED_WEIGHTS, views="__NUMBER__" if field == "weight" else 35)
     payload = body(settings={"weights": weights, "keywords": []})
     if field == "half_life":
         payload["freshness_half_life_hours"] = "__NUMBER__"
+    if field == "metric":
+        payload["publications"] = [post("post", views="__NUMBER__")]
     content = json.dumps(payload).replace('"__NUMBER__"', literal)
     response = client.post(
         f"{PREFIX}/rank", content=content, headers={"Content-Type": "application/json"}

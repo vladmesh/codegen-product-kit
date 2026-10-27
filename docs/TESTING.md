@@ -292,7 +292,15 @@ version, creates synthetic release tags only in that scratch source and installs
 `--catalog-source`. Those scratch tags are test artifacts, distinct from the real published tags
 the mandatory runner proof requires. Channels verifies its platform environment
 declarations and, as in a real product CI, the product `.env` has no `PLATFORM_KEY` or
-`PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. The fast
+`PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. After that
+run the ranking leg proves the bound `/top` end to end on the product's unchanged integration
+Compose file (project `tests-connected-top`): the backend with both packages on real PostgreSQL
+and Redis reads a tg-reader double (`packages/codegen-kit-ranking/tests/connected_reader.py`)
+inside its own container, and `connected_top.py` runs the generated bot bindings in the
+integration-tests image against it. It grants the core caller, writes the ranking seeds, sends
+`/channel @cyproplan` and `/top` as Telegram update doubles in RU and EN, and asserts the ranked
+replies in order and the authorized reader read; `ranking-connected-top.log` and `.json` join the
+artifact. The fast
 `test_candidate_source_releases_exactly_the_candidate_commit` checks that scratch release of
 tg-channels and ranking against the real catalog reader and package-source export.
 The test checks Makefile, integration Compose and test bytes before and after execution;

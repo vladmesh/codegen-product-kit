@@ -48,6 +48,7 @@ Keywords = Annotated[tuple[Keyword, ...], Field(max_length=MAX_KEYWORDS)]
 Percent = Annotated[float, Field(strict=True, ge=0, le=MAX_WEIGHT_PERCENT, allow_inf_nan=False)]
 TopCount = Annotated[int, Field(strict=True, ge=1, le=MAX_TOP_COUNT)]
 HalfLife = Annotated[float, Field(strict=True, gt=0, le=MAX_HALF_LIFE_HOURS, allow_inf_nan=False)]
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 
 
 class Publication(BaseModel):
@@ -107,8 +108,8 @@ class RankedPublication(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     publication: Publication
-    score: float
-    contributions: dict[str, float]
+    score: Finite
+    contributions: dict[str, Finite]
 
 
 class RankingRequest(BaseModel):
@@ -139,4 +140,4 @@ class TopPost(BaseModel):
     text: str
     url: str
     views: str
-    score: float
+    score: Finite

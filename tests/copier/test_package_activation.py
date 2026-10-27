@@ -515,6 +515,7 @@ RANKING_PRODUCT_TEST = textwrap.dedent(
     from collections.abc import AsyncIterator, Iterator
     from contextlib import asynccontextmanager
     from datetime import UTC, datetime, timedelta
+    import json
 
     from fastapi import FastAPI, status
     import httpx
@@ -658,6 +659,36 @@ RANKING_PRODUCT_TEST = textwrap.dedent(
 
 
     @pytest.mark.asyncio
+    async def test_rank_answers_out_of_bound_and_overflowing_numbers_with_422(
+        composed_app: FastAPI, client: AsyncClient
+    ) -> None:
+        publication = RANK_BODY["publications"][0]
+        refused = [
+            {**RANK_BODY, "freshness_half_life_hours": 8761},
+            {**RANK_BODY, "freshness_half_life_hours": 0},
+            {**RANK_BODY, "publications": [{**publication, "views": 10**12 + 1}]},
+            {**RANK_BODY, "publications": [{**publication, "views": -1}]},
+        ]
+        for body in refused:
+            response = await client.post("/ranking/rank", headers=_as("101"), json=body)
+            assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, body
+        for literal in ("1e309", "-1e309"):
+            for field in ("freshness_half_life_hours", "views"):
+                content = json.dumps(
+                    {**RANK_BODY, "freshness_half_life_hours": "N"}
+                    if field == "freshness_half_life_hours"
+                    else {**RANK_BODY, "publications": [{**publication, "views": "N"}]}
+                ).replace('"N"', literal)
+                response = await client.post(
+                    "/ranking/rank",
+                    headers=_as("101") | {"Content-Type": "application/json"},
+                    content=content,
+                )
+                assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, content
+                assert response.json()["detail"]["code"] == "non_finite_number"
+
+
+    @pytest.mark.asyncio
     async def test_top_ranks_the_verified_callers_channel_posts_under_seeded_settings(
         composed_app: FastAPI, client: AsyncClient
     ) -> None:
@@ -775,7 +806,7 @@ def test_generated_ranking_top_composes_with_tg_channels_for_the_verified_caller
         finally:
             product_test.unlink(missing_ok=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "2 passed" in result.stdout
+    assert "3 passed" in result.stdout
 
 
 def test_generated_backend_unit_tests_pass_with_reminders_and_no_redis(

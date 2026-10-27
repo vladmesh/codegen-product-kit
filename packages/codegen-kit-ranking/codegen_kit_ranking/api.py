@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import math
 from typing import Annotated
 
 from codegen_kit import caller_identity
@@ -35,15 +36,22 @@ def _refuse_constant(literal: str) -> float:
     raise _NonFiniteNumberError(literal)
 
 
+def _finite_float(literal: str) -> float:
+    value = float(literal)
+    if not math.isfinite(value):
+        raise _NonFiniteNumberError(literal)
+    return value
+
+
 async def finite_json(request: Request) -> None:
-    """Answer NaN and Infinity literals with 422 before validation.
+    """Answer NaN, Infinity and overflowing numbers such as 1e309 with 422 before validation.
 
     The framework's validation error echoes the input, and a non-finite float cannot be
     serialised into that answer.
     """
 
     try:
-        json.loads(await request.body(), parse_constant=_refuse_constant)
+        json.loads(await request.body(), parse_constant=_refuse_constant, parse_float=_finite_float)
     except _NonFiniteNumberError as error:
         raise HTTPException(
             status_code=UNPROCESSABLE,

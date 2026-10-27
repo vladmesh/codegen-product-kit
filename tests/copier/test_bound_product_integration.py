@@ -22,6 +22,8 @@ from tests.tooling.test_package_catalog import _commit, _git, _tag
 ROOT = Path(__file__).parents[2]
 CHANNELS_PATH = "packages/codegen-kit-tg-channels"
 RANKING_PATH = "packages/codegen-kit-ranking"
+CONNECTED_READER_PORT = 18080
+CONNECTED_READER_KEY = "connected-top-proof-key"
 UNCONFIGURED_WARNING = "tg-channels platform access is not configured"
 #: Packages the slow leg installs from the exact candidate commit, in install order.
 CANDIDATE_LEGS = {"tg-channels": ["tg-channels"], "ranking": ["tg-channels", "ranking"]}
@@ -109,6 +111,103 @@ def _assert_unconfigured_platform_environment(product: Path, env_file: str) -> N
     # Like a real product CI, the integration environment has no platform values: the
     # package starts not configured and its timer makes no platform request.
     assert not re.search(r"^\s*PLATFORM_", env_file, re.M)
+
+
+def _connected_top_proof(
+    product: Path, environment: dict[str, str], env_file: str, logs: Path, candidate: str
+) -> None:
+    """Drive the bound /top through the product's own integration stack, end to end.
+
+    The product's unchanged integration Compose file runs the backend with both packages on real
+    PostgreSQL and Redis. Its tg-channels client reads the reader double inside the backend
+    container, the only test double besides the Telegram update. The generated bot bindings run
+    in the integration-tests image against the live backend.
+    """
+    proof = product / ".connected-top"
+    proof.mkdir()
+    for name in ("connected_reader.py", "connected_top.py"):
+        shutil.copy2(ROOT / RANKING_PATH / "tests" / name, proof / name)
+    (product / ".env").write_text(
+        env_file.rstrip("\n")
+        + f"\nPLATFORM_BASE_URL=http://127.0.0.1:{CONNECTED_READER_PORT}/tg-reader\n"
+        + f"PLATFORM_KEY={CONNECTED_READER_KEY}\n"
+    )
+    compose = ["docker", "compose", "-f", "infra/compose.tests.integration.yml"]
+    stack = environment | {
+        "COMPOSE_PROJECT_NAME": "tests-connected-top",
+        "HOST_UID": str(product.stat().st_uid),
+        "HOST_GID": str(product.stat().st_gid),
+    }
+    workspace = f"/workspace/{proof.name}"
+    steps = [
+        [*compose, "up", "--build", "--detach", "--wait", "backend"],
+        [
+            *compose,
+            "exec",
+            "--detach",
+            "-T",
+            "backend",
+            "python",
+            f"{workspace}/connected_reader.py",
+            workspace,
+            str(CONNECTED_READER_PORT),
+            CONNECTED_READER_KEY,
+        ],
+        [
+            *compose,
+            "run",
+            "--rm",
+            "-T",
+            "-e",
+            "BACKEND_API_URL=http://backend:8000",
+            "-e",
+            "PYTHONPATH=/workspace:/workspace/shared",
+            "integration-tests",
+            "/workspace/services/tg_bot/.venv/bin/python",
+            f"{workspace}/connected_top.py",
+            workspace,
+        ],
+    ]
+    transcript = []
+    status = 0
+    try:
+        for step in steps:
+            result = subprocess.run(
+                step, cwd=product, env=stack, capture_output=True, text=True, check=False
+            )
+            transcript.append(f"$ {' '.join(step)}\n{result.stdout}{result.stderr}")
+            status = result.returncode
+            if status != 0:
+                break
+    finally:
+        backend = subprocess.run(
+            [*compose, "logs", "backend"], cwd=product, env=stack, capture_output=True, text=True
+        )
+        subprocess.run(
+            [*compose, "down", "--volumes", "--remove-orphans"],
+            cwd=product,
+            env=stack,
+            capture_output=True,
+        )
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs / "ranking-connected-top.log").write_text(
+            "\n".join(transcript) + "\n--- backend ---\n" + backend.stdout + backend.stderr
+        )
+        (logs / "ranking-connected-top.json").write_text(
+            json.dumps(
+                {
+                    "candidate": candidate,
+                    "steps": steps,
+                    "exit_code": status,
+                    "doubles": ["tg-reader HTTP boundary", "Telegram update"],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    assert status == 0, "\n".join(transcript)
+    assert "connected /top: bound command reached ranking.top" in transcript[-1]
+    print("ranking: connected /top through the generated bindings passed")
 
 
 @pytest.mark.slow
@@ -254,3 +353,6 @@ def test_published_bound_product_passes_own_integration(
     assert summary is not None, output
     assert {path: path.read_bytes() for path in contract} == contract
     print(f"{package}: own make test-integration: {summary.group(0)}")
+    if package == "ranking":
+        logs = Path(os.environ.get("CODEGEN_BOUND_INTEGRATION_LOG_DIR", str(tmp_path / "logs")))
+        _connected_top_proof(product, environment, env_file, logs, candidate)
