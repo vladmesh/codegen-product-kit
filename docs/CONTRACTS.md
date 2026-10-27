@@ -414,9 +414,10 @@ packages:
       - {version: 0.5.0, tag: packages/reminders/v0.5.0, requires_core: ">=2.2,<3"}
 ```
 
-Reminders 0.5.0 and textparse 0.1.0 are independently published immutable package tags.
-Their source trees and refs are preserved by the bindings increment; a later core release
-does not republish either component.
+The catalog lists the packages reminders (0.3.0 to 0.5.0), tg-channels (0.1.0 to 0.2.0) and
+ranking (0.1.0), and the library textparse (0.1.0); each version is an independently published
+immutable package tag, and a later core release does not republish any of them. ranking requires
+`tg-channels.posts.v1`, which only tg-channels 0.2.0 provides.
 
 The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
 (`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
@@ -429,7 +430,8 @@ within their owner. All version ranges use `packaging.specifiers.SpecifierSet`; 
 Python or parent ranges raise `InvalidCatalogEntryError`. Kit tests tie the newest catalog
 version of every package to its `pyproject.toml` and `package.yaml` on its annotated release tag
 (distribution, name, version, `requires_core`), and the package source at HEAD to that release
-or to its pending release (version, tag, `requires_core`, settings names and environment names).
+or to its pending release (version, tag, `requires_core`, settings names, environment names,
+default binding, and the actions unless a pending update of a listed package changes them).
 
 #### Pending releases
 
@@ -444,10 +446,10 @@ releases:
   - package: tg-channels
     distribution: codegen-kit-tg-channels
     path: packages/codegen-kit-tg-channels
-    version: 0.1.3                        # example
-    supersedes: 0.1.2                     # the catalog's newest version
-    notes: docs/releases/tg-channels-0.1.3.md
-    catalog_entry: {version: 0.1.3, tag: packages/tg-channels/v0.1.3, requires_core: '>=2.4,<3'}
+    version: 0.2.1                        # example
+    supersedes: 0.2.0                     # the catalog's newest version
+    notes: docs/releases/tg-channels-0.2.1.md
+    catalog_entry: {version: 0.2.1, tag: packages/tg-channels/v0.2.1, requires_core: '>=2.4,<3'}
 ```
 
 A package's first release cannot be listed under `packages` yet: every released catalog reader
@@ -473,11 +475,10 @@ the catalog at the real default branch's `HEAD`, which lists the new entry only 
 its pull request runs `published_release` against the candidate's own committed catalog served
 as an isolated `HEAD` (`catalog_mode=candidate_snapshot`, evidence labelled prospective), and the
 push of the merge commit to `main` runs it against the real `HEAD` with no fixture
-(`catalog_mode=remote_head`). Only the latter shows the activated path. tg-channels 0.1.2 was the
-first release activated this way: its tag `packages/tg-channels/v0.1.2` (object
-`4f5918dba1a3afc7ad9012715cb8f83c33a8e1bc` at `29f481f213544b0b7a5055451d5b4e55a6249b35`,
-package tree `676ee7061c6b08d17923f7c1fad3742798c9870f`) was published on 2026-10-09 before its
-catalog entry.
+(`catalog_mode=remote_head`). Only the latter shows the activated path. The runner pins every
+release activated this way: tg-channels 0.1.2 and 0.2.0 and ranking 0.1.0. The runner proof
+installs tg-channels only; the published ranking is proven by the bound-product integration leg
+([TESTING.md](TESTING.md)).
 
 #### Additive component metadata in v1
 

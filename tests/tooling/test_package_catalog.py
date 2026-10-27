@@ -36,7 +36,11 @@ from framework.generators.package_environment import PackageEnvironmentGenerator
 from framework.spec.events import EventsSpec
 from framework.spec.loader import AllSpecs, load_manifest
 from framework.spec.models import ModelsSpec
-from framework.spec.package_resolution import ENTRY_POINT_GROUP, resolve_active_packages
+from framework.spec.package_resolution import (
+    CORE_VERSION,
+    ENTRY_POINT_GROUP,
+    resolve_active_packages,
+)
 from framework.spec.packages import PackageManifest, parse_package_manifest
 from tests.runner import support
 
@@ -208,6 +212,25 @@ def test_catalog_newest_release_matches_its_immutable_tag(package: CatalogPackag
     assert newest.requires_core == manifest.requires_core
 
 
+def test_catalog_selects_ranking_with_the_channels_release_that_provides_its_posts() -> None:
+    catalog = load_catalog(CATALOG)
+    ranking, channels = catalog.get("ranking"), catalog.get("tg-channels")
+
+    with pytest.raises(IncompatibleCatalogVersionError):
+        ranking.select("2.3.0")
+    for core in ("2.4.0", CORE_VERSION):
+        selected = ranking.select(core)
+        provider = channels.select(core)
+        *_, consumer = _source_metadata(_at_tag(selected.tag, ranking), ranking)
+        *_, producer = _source_metadata(_at_tag(provider.tag, channels), channels)
+        assert (selected.version, provider.version) == ("0.1.0", "0.2.0")
+        assert consumer.requires == ["tg-channels.posts.v1"]
+        assert set(consumer.requires) <= set(producer.provides)
+    for older in channels.versions[:-1]:
+        *_, manifest = _source_metadata(_at_tag(older.tag, channels), channels)
+        assert "tg-channels.posts.v1" not in manifest.provides
+
+
 @pytest.mark.parametrize(
     ("package", "version"), sorted(support.PUBLISHED_RELEASES), ids=lambda item: str(item)
 )
@@ -317,6 +340,15 @@ def test_package_source_at_head_is_its_newest_or_pending_release(package: Catalo
         (item.name, item.required) for item in manifest.environment
     ]
     assert package.default_binding == manifest.default_binding
+    # While an update is pending, the catalog's actions still describe the published release.
+    if not pending or "catalog_package" in pending[0]:
+        assert [
+            (item.name, item.summary, item.operation, item.input, item.output)
+            for item in package.actions
+        ] == [
+            (item.name, item.summary, item.operation, item.input, item.output)
+            for item in manifest.actions
+        ]
 
 
 # --- `kit add <name>` against a local catalog source ---------------------------------------

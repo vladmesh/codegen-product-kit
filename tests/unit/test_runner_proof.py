@@ -265,7 +265,7 @@ SAMPLE_PENDING = {
         "requires_core": ">=2.4,<3",
     },
 }
-PIN = support.PUBLISHED_RELEASES[("tg-channels", "0.1.2")]
+PIN = support.PUBLISHED_RELEASES[("tg-channels", "0.2.0")]
 
 
 def test_runner_default_is_the_pinned_newest_published_release() -> None:
@@ -277,8 +277,10 @@ def test_runner_default_is_the_pinned_newest_published_release() -> None:
 
     assert default is not None and newest["version"] == default.group(1)
     assert support.published_release("tg-channels", default.group(1)) == PIN
-    assert newest == {"version": "0.1.2", "tag": PIN.tag, "requires_core": ">=2.4,<3"}
-    assert support.pending_release(pending, "tg-channels")["supersedes"] == default.group(1)
+    assert newest == {"version": "0.2.0", "tag": PIN.tag, "requires_core": ">=2.4,<3"}
+    assert pending == {"format_version": 1, "releases": []}
+    with pytest.raises(ValueError, match="pending releases: expected one tg-channels entry"):
+        support.pending_release(pending, "tg-channels")
     with pytest.raises(ValueError, match="not a pinned published release"):
         support.published_release("tg-channels", "0.1.1")
 

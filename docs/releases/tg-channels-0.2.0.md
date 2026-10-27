@@ -1,11 +1,12 @@
 # tg-channels 0.2.0
 
-A package-only minor release, prepared and pending publication. No kit core, tooling, template,
-orchestrator or `CORE_VERSION` change; `requires_core` stays `>=2.4,<3` and package protocol stays 1.
+A package-only minor release. No kit core, tooling, template, orchestrator or `CORE_VERSION`
+change; `requires_core` stays `>=2.4,<3` and package protocol stays 1.
 
-Release identity: distribution `codegen-kit-tg-channels` 0.2.0, entry point `tg-channels`, intended
-annotated tag `packages/tg-channels/v0.2.0`, superseding 0.1.2. It is pinned in
-`packages/pending-releases.yaml`; the catalog keeps selecting 0.1.2 until the publication below.
+Release identity: distribution `codegen-kit-tg-channels` 0.2.0, entry point `tg-channels`,
+superseding 0.1.2. Published as the annotated tag `packages/tg-channels/v0.2.0`, object
+`416f512f28b1a67fd3ccbc1c0f2e41d65cb30a25`, at commit `00a8313d5b65af299b91a628c7388168d15b94e5`,
+package tree `910b218b1475ee8607416703268383620d0dcb08`. The 0.1.x tags are unchanged.
 
 ## Change
 
@@ -30,8 +31,10 @@ capability. Nothing requires the capability unless a package that declares it is
 
 ## Publication
 
-A separate PO operation creates the annotated tag `packages/tg-channels/v0.2.0` at the reviewed
-merge commit. A following change appends the pending `catalog_entry` to the tg-channels `versions`
-in `packages/catalog.yaml`, adds `views` to the catalog's `digest` action output, removes the
-pending entry, pins the tag in the runner's `support.PUBLISHED_RELEASES` and proves the published
-release (docs/CONTRACTS.md, "Pending releases").
+`packages/catalog.yaml` lists 0.2.0 as the newest tg-channels version, so `kit add tg-channels`
+selects it for a product core in `>=2.4,<3`; the catalog's `digest` action output carries `views`.
+Nothing is pending for tg-channels. The runner's `support.PUBLISHED_RELEASES` pins the tag object,
+commit and tree above, and the Runner Proof defaults to `proof_mode=published_release` with
+`package_version=0.2.0`: a pull request against its own catalog (`catalog_mode=candidate_snapshot`),
+a push to `main` against the real default branch's catalog (`catalog_mode=remote_head`); see
+[RUNNER_PROOF.md](../RUNNER_PROOF.md).

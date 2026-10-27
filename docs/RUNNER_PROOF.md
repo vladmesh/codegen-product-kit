@@ -31,17 +31,23 @@ failing remote never switches either of them; there is no fallback.
   from the real remote: `git ls-remote --tags` and a fetch of every `refs/tags/packages/*` into
   a bare repository under its work directory. Every copied tag must be the object id the remote
   lists, and the target tag must be the pinned release of `support.PUBLISHED_RELEASES`; for
-  tg-channels 0.1.2 that is the annotated tag object `4f5918dba1a3afc7ad9012715cb8f83c33a8e1bc`,
-  peeled commit `29f481f213544b0b7a5055451d5b4e55a6249b35` and package tree
-  `676ee7061c6b08d17923f7c1fad3742798c9870f`. An unpinned version is refused. After the install
+  tg-channels 0.2.0 that is the annotated tag object `416f512f28b1a67fd3ccbc1c0f2e41d65cb30a25`,
+  peeled commit `00a8313d5b65af299b91a628c7388168d15b94e5` and package tree
+  `910b218b1475ee8607416703268383620d0dcb08`. An unpinned version is refused. After the install
   the probe's own source for tg-channels must be that tag object, commit and tree, and every
   other installed component (reminders, textparse) the real remote's tag object; the backend's
   installed distribution and the committed wheel must carry the version. No tag is created.
 - `candidate_release` proves a package release prepared in a candidate but not yet published:
   the pending entry of `packages/pending-releases.yaml`, through the pending fixture below. A
   green candidate run proves the prepared package source, not a published release. The mode is
-  only ever invoked explicitly and cannot satisfy this repository's own runs, which keep proving
-  the pinned published tg-channels while tg-channels 0.2.0 and ranking 0.1.0 are pending.
+  only ever invoked explicitly and cannot satisfy this repository's own runs, which prove the
+  pinned published tg-channels.
+
+The proof installs tg-channels, alone or after the published reminders, and drives its delivery;
+`--packages` admits only companions installed before tg-channels. ranking 0.1.0 needs
+tg-channels installed first and a `/top` scenario, so the published ranking is proven by the
+bound-product integration leg ([TESTING.md](TESTING.md)), not here; its tag is pinned in
+`support.PUBLISHED_RELEASES` and checked by the kit tests.
 
 ## Catalog modes
 
@@ -126,7 +132,7 @@ product sources. The template source and `_commit` come from GitHub as in produc
 | platform | `070dfb359f9a121546d1362ae84c9d0856cabf64` | `vladmesh/codegen-platform-services` (private) |
 | proof mode | `published_release` | this repository's runs; a caller must choose |
 | catalog mode | `candidate_snapshot` on a pull request, `remote_head` on a main push | a caller must choose |
-| tg-channels version | `0.1.2` | a pinned published release, or the pending entry in `candidate_release` |
+| tg-channels version | `0.2.0` | a pinned published release, or the pending entry in `candidate_release` |
 
 The platform is checked out with the read-only deploy key `PLATFORM_SERVICES_DEPLOY_KEY` over SSH,
 `persist-credentials: false`, into `platform/` outside the uploaded artifact path. The workflow
@@ -153,7 +159,7 @@ jobs:
       platform_sha: <platform sha>          # empty: the kit's pin above
       proof_mode: published_release         # or candidate_release; required, no fallback
       catalog_mode: remote_head             # candidate_snapshot | pending_fixture; required
-      package_version: 0.1.2                # the tg-channels version the planner must select
+      package_version: 0.2.0                # the tg-channels version the planner must select
     secrets:
       PLATFORM_SERVICES_DEPLOY_KEY: ${{ secrets.PLATFORM_SERVICES_DEPLOY_KEY }}
 ```
@@ -168,7 +174,7 @@ executed (it needs Docker and network); in CI it is:
 orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py --kit-dir kit --kit-sha SHA \
     --orchestrator-dir orchestrator --orchestrator-sha SHA \
     --platform-dir platform --platform-sha SHA \
-    --proof-mode published_release --catalog-mode remote_head --package-version 0.1.2 \
+    --proof-mode published_release --catalog-mode remote_head --package-version 0.2.0 \
     --packages reminders,tg-channels \
     --output-dir "$RUNNER_TEMP/runner-proof"
 ```

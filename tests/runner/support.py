@@ -60,6 +60,18 @@ PUBLISHED_RELEASES = {
         target="29f481f213544b0b7a5055451d5b4e55a6249b35",
         tree="676ee7061c6b08d17923f7c1fad3742798c9870f",
     ),
+    ("tg-channels", "0.2.0"): PublishedRelease(
+        tag="packages/tg-channels/v0.2.0",
+        tag_object="416f512f28b1a67fd3ccbc1c0f2e41d65cb30a25",
+        target="00a8313d5b65af299b91a628c7388168d15b94e5",
+        tree="910b218b1475ee8607416703268383620d0dcb08",
+    ),
+    ("ranking", "0.1.0"): PublishedRelease(
+        tag="packages/ranking/v0.1.0",
+        tag_object="4f7d3f821209de0352b3d5f709d786df55710f07",
+        target="00a8313d5b65af299b91a628c7388168d15b94e5",
+        tree="ce8141403e943e552a2a7a4d47faf3304d14b209",
+    ),
 }
 
 

@@ -1,18 +1,18 @@
 # ranking 0.1.0
 
-The first release of the ranking package, prepared and pending publication. No kit core, tooling,
-template, orchestrator or `CORE_VERSION` change; package protocol stays 1.
+The first release of the ranking package. No kit core, tooling, template, orchestrator or
+`CORE_VERSION` change; package protocol stays 1.
 
 Release identity: distribution `codegen-kit-ranking` 0.1.0, module `codegen_kit_ranking`, entry
 point `ranking`, source `packages/codegen-kit-ranking`, `requires_core: ">=2.4,<3"`, MIT license
-(the kit's), intended annotated tag `packages/ranking/v0.1.0`. The distribution follows the kit's
-`codegen-kit-<name>` convention; the owner allowed keeping the candidate's `digest-ranking`, and
-the kit name was chosen so that distribution, module and source path match the other kit packages.
+(the kit's). The distribution follows the kit's `codegen-kit-<name>` convention; the owner allowed
+keeping the candidate's `digest-ranking`, and the kit name was chosen so that distribution, module
+and source path match the other kit packages.
 
-It is pinned in `packages/pending-releases.yaml` as a first release (`supersedes: null`), whose
-`catalog_package` holds its catalog metadata: summary, capabilities, the settings `weights`,
-`keywords` and `top_count`, no environment, the `rank` and `top` actions and the default binding.
-The catalog lists no ranking entry until its tag exists.
+Published as the annotated tag `packages/ranking/v0.1.0`, object
+`4f7d3f821209de0352b3d5f709d786df55710f07`, at commit `00a8313d5b65af299b91a628c7388168d15b94e5`,
+package tree `ce8141403e943e552a2a7a4d47faf3304d14b209`, the same commit as
+[tg-channels 0.2.0](tg-channels-0.2.0.md).
 
 ## Contents
 
@@ -63,10 +63,15 @@ kit bind tg-channels --default && kit bind ranking --default
 
 ## Publication
 
-A separate PO operation creates the annotated tag `packages/ranking/v0.1.0` at the reviewed merge
-commit, after or together with `packages/tg-channels/v0.2.0`. A following change adds the ranking
-entry under `packages` in `packages/catalog.yaml` from `catalog_package` with `catalog_entry` as its
-first version, removes the pending entry, pins the tag in the runner's
-`support.PUBLISHED_RELEASES` and proves the published release (docs/CONTRACTS.md, "Pending
-releases"). ranking needs tg-channels 0.2.0 in the catalog first: 0.1.2 does not provide
-`tg-channels.posts.v1`.
+`packages/catalog.yaml` lists ranking with 0.1.0 as its only version, together with its catalog
+metadata: summary, capabilities, the settings `weights`, `keywords` and `top_count`, no
+environment, the `rank` and `top` actions and the default binding. `kit add ranking` selects 0.1.0
+for a product core in `>=2.4,<3`, where the catalog also selects tg-channels 0.2.0, the provider of
+`tg-channels.posts.v1`; no older tg-channels release provides it. Nothing is pending for ranking.
+
+The runner's `support.PUBLISHED_RELEASES` pins the tag object, commit and tree above, and the kit
+tests bind them to the local tags fetched from the real remote. The Runner Proof installs
+tg-channels alone or after reminders and drives tg-channels delivery, so it does not install
+ranking. The published ranking with `/top` is proven by the bound-product integration leg
+(`tests/copier/test_bound_product_integration.py`), which installs tg-channels and ranking from the
+candidate commit's catalog entries and runs the connected `/top` proof.

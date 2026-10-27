@@ -66,7 +66,11 @@ request and against the real default branch's catalog on main; see
 annotated tag (Framework CI fetches tags), the package source at HEAD against that release or
 its entry in `packages/pending-releases.yaml`, and each published release the runner pins
 (`support.PUBLISHED_RELEASES`) against its catalog entry, its tag object, peeled commit and
-package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. `tests/tooling/test_package_timers.py` feeds the
+package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. It
+also selects ranking and tg-channels from the catalog for core 2.4 and the current core and reads
+on their tags that the selected tg-channels provides ranking's required `tg-channels.posts.v1` and
+no older tg-channels release does; core 2.3 selects no ranking.
+`tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
 The ranking package's offline tests run in the unit lane through
@@ -320,7 +324,7 @@ registration bypasses (names, aliases, attributes, strings and unreadable files)
 tests/generated/environment trees, a binding naming another language key, registry drift and
 `--write`, and that the shipped template registry equals the render for both bot shapes.
 `tests/tooling/test_preflight.py` is the `check-install` regression matrix on a synthetic product
-and the actual tg-channels 0.1.2 source: fresh product `mechanical` (deterministic payload),
+and the actual tg-channels source: fresh product `mechanical` (deterministic payload),
 language redeclaration and a product `/channel` each `glue` with their sources and actions, all
 simultaneous conflicts in one sorted list, and every incompatible reason, including an old core
 and an unreachable catalog. Each case compares every product file, including environments, by
