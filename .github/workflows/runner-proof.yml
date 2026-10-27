@@ -80,7 +80,7 @@ jobs:
       # Pins of this proof; a caller passes other exact SHAs as inputs.
       ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha || 'ec96fa79c84937982420f0f01388d90000bd69eb' }}
       PLATFORM_SHA: ${{ inputs.platform_sha || '070dfb359f9a121546d1362ae84c9d0856cabf64' }}
-      # This repository's own runs prove the published tg-channels 0.1.2: a pull request against
+      # This repository's own runs prove the published tg-channels 0.2.0: a pull request against
       # the catalog it would publish (candidate_snapshot, prospective), main against the real
       # default branch's catalog (remote_head). A caller names all three explicitly.
       CALLED: ${{ inputs.kit_sha != '' }}
@@ -89,7 +89,7 @@ jobs:
         ${{ inputs.catalog_mode
         || (github.event_name == 'pull_request' && 'candidate_snapshot')
         || 'remote_head' }}
-      PACKAGE_VERSION: ${{ inputs.package_version || '0.1.2' }}
+      PACKAGE_VERSION: ${{ inputs.package_version || '0.2.0' }}
       PACKAGES: ${{ matrix.packages }}
     steps:
       # The deploy key is used only for a push to main and a same-repository pull request, also

@@ -12,7 +12,7 @@ Run with the orchestrator's environment, whose codegen-kit-tooling is the kit ca
     orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py --kit-dir kit \
         --kit-sha SHA --orchestrator-dir orchestrator --orchestrator-sha SHA \
         --platform-dir platform --platform-sha SHA --output-dir OUT \
-        --proof-mode published_release --catalog-mode remote_head --package-version 0.1.2 \
+        --proof-mode published_release --catalog-mode remote_head --package-version 0.2.0 \
         --packages tg-channels
 
 `--proof-mode published_release` installs the published tg-channels tag, read from the real

@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Package releases only, prepared and pending publication: no kit core, tooling, template or
-`CORE_VERSION` change, no tag and no catalog entry.
+Package releases only: no kit core, tooling, template or `CORE_VERSION` change. tg-channels 0.2.0
+and ranking 0.1.0 are published and listed in the catalog; nothing is pending.
 
 ### Added
 
@@ -22,6 +22,15 @@ Package releases only, prepared and pending publication: no kit core, tooling, t
 - A first package release is pinned in `packages/pending-releases.yaml` with `supersedes: null` and
   its catalog metadata in `catalog_package`; the pending fixture adds that package with its one
   version. See [pending releases](docs/CONTRACTS.md#pending-releases).
+- tg-channels 0.2.0 and ranking 0.1.0 in the catalog: tags `packages/tg-channels/v0.2.0` (object
+  `416f512`, package tree `910b218`) and `packages/ranking/v0.1.0` (object `4f7d3f8`, package tree
+  `ce81414`), both at commit `00a8313`. tg-channels gains the 0.2.0 version and `views` in its
+  catalog `digest` output; ranking is a new package entry with 0.1.0 as its first version. A new
+  product's `kit add tg-channels` selects 0.2.0 and `kit add ranking` 0.1.0 for core `>=2.4,<3`;
+  existing products are not upgraded. The pending document is empty.
+- The runner pins both tags in `support.PUBLISHED_RELEASES`, and the Runner Proof defaults to the
+  published tg-channels 0.2.0. ranking is proven by the bound-product integration leg, not the
+  runner proof.
 
 ## [0.12.0] - 2026-10-25 (prepared, not published)
 

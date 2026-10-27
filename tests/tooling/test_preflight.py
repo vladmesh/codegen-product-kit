@@ -274,8 +274,8 @@ def test_catalog_route_reads_the_exact_tag_without_a_live_default(tmp_path: Path
     source = tmp_path / "kit"
     (source / "packages").mkdir(parents=True)
     shutil.copy2(ROOT / "packages/catalog.yaml", source / "packages/catalog.yaml")
-    # The catalog's newest tg-channels is the published 0.1.2: copy its tagged tree, not HEAD.
-    tag = "refs/tags/packages/tg-channels/v0.1.2"
+    # The catalog's newest tg-channels is the published 0.2.0: copy its tagged tree, not HEAD.
+    tag = "refs/tags/packages/tg-channels/v0.2.0"
     published = subprocess.run(  # noqa: S603
         ["git", "archive", "--format=tar", tag, "--", "packages/codegen-kit-tg-channels"],  # noqa: S607
         cwd=ROOT,
@@ -288,7 +288,7 @@ def test_catalog_route_reads_the_exact_tag_without_a_live_default(tmp_path: Path
     _git("init", "--quiet", "--initial-branch=main", cwd=source)
     _git("add", "-A", cwd=source)
     _git("commit", "--quiet", "-m", "kit", cwd=source)
-    _git("tag", "--annotate", "packages/tg-channels/v0.1.2", "-m", "0.1.2", cwd=source)
+    _git("tag", "--annotate", "packages/tg-channels/v0.2.0", "-m", "0.2.0", cwd=source)
     product = _product(tmp_path / "product")
     before = _state(product)
     result = check_install(product, "tg-channels", catalog_source=str(source), catalog_ref="HEAD")
@@ -297,8 +297,8 @@ def test_catalog_route_reads_the_exact_tag_without_a_live_default(tmp_path: Path
     assert result.target is not None
     assert (result.target["route"], result.target["tag"], result.target["version"]) == (
         "catalog",
-        "packages/tg-channels/v0.1.2",
-        "0.1.2",
+        "packages/tg-channels/v0.2.0",
+        "0.2.0",
     )
     old = check_install(
         product, "tg-channels", catalog_source=str(source), catalog_ref="HEAD", version="0.1.1"
