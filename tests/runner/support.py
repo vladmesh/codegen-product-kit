@@ -245,21 +245,47 @@ def pending_release(document: Mapping, package: str) -> dict:
         or entry["tag"] != f"packages/{package}/v{version}"
     ):
         raise ValueError(f"pending releases: {package} catalog_entry disagrees with its version")
+    first = release.get("catalog_package")
+    if first is not None and (
+        release.get("supersedes") is not None
+        or not isinstance(first, Mapping)
+        or set(first) & {"name", "distribution", "path", "versions"}
+    ):
+        raise ValueError(
+            f"pending releases: {package} catalog_package is a first release's catalog metadata "
+            "without identity or versions, and supersedes nothing"
+        )
     return release
 
 
 def fixture_catalog(catalog: Mapping, release: Mapping) -> dict:
     """The published catalog plus the pending entry: the candidate release's catalog snapshot.
 
-    Only the package's `versions` list grows; every published entry is kept unchanged.
+    Only the package's `versions` list grows, or a first release (`catalog_package`) adds its
+    package entry with that one version; every published entry is kept unchanged.
     """
     document = copy.deepcopy(dict(catalog))
     package = next(
         (item for item in document.get("packages") or [] if item["name"] == release["package"]),
         None,
     )
+    first = release.get("catalog_package")
+    if package is None and first is not None:
+        document["packages"] = [
+            *(document.get("packages") or []),
+            {
+                "name": release["package"],
+                "distribution": release["distribution"],
+                "path": release["path"],
+                **copy.deepcopy(dict(first)),
+                "versions": [dict(release["catalog_entry"])],
+            },
+        ]
+        return document
     if package is None:
         raise ValueError(f"catalog has no package {release['package']}")
+    if first is not None:
+        raise ValueError(f"{release['package']} is in the catalog; its release is not the first")
     if package["distribution"] != release["distribution"] or package["path"] != release["path"]:
         raise ValueError(f"pending {release['package']} names another distribution or path")
     if any(str(item["version"]) == str(release["version"]) for item in package["versions"]):

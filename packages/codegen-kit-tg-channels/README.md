@@ -1,4 +1,4 @@
-# tg-channels 0.1.2
+# tg-channels 0.2.0
 
 In-process public Telegram channel reading through the platform's `tg-reader` Product API v1.
 There is no model, translation or content extraction. Text is delivered as plain text.
@@ -82,12 +82,24 @@ unused leases expire after the platform's seven-day TTL, rather than one user's 
 dropping another user's lease. The client uses only resolve and post reads.
 
 Digests read the caller's own channels over the last 72 hours, fold edits and tombstones by
-sequence, and return the latest 20 surviving posts by publication date. Work is bounded at
+sequence, and return the latest 20 surviving posts by publication date. Each digest item is
+`{channel, date, text, url, views}`; `views` is the reader's approximate view count of the folded
+post version, or `null` when the reader reports none. The `tg-channels.post` event payload does
+not carry views. The shipped `/digest` binding shows channel, date, text and link. Work is bounded at
 20 pages; a larger outstanding change feed asks the caller to try later rather than showing
 a partial, possibly deleted snapshot. Text is stripped and capped at 2500 characters so
 the channel, ISO timestamp and canonical `https://t.me/<channel>/<id>` URL fit one Telegram
 message. Content is never translated. Digest cursors are ephemeral and independent of the
 single product delivery cursor.
+
+The package provides the interface `tg-channels.posts.v1` for another in-process package that
+declares `requires: [tg-channels.posts.v1]` and lists `codegen_kit_tg_channels` in its
+`package_dependencies`. Its one read is
+`await codegen_kit_tg_channels.posts.recent_posts(user_ref)`: the verified caller's posts exactly
+as `digest` returns them, from the same store, window and limits. It raises
+`codegen_kit_tg_channels.posts.ActionError` with `code` `not_configured` or `try_later`, and HTTP
+503 before the package has started. The consumer passes the `user_ref` its own route received from
+`codegen_kit.caller_identity`.
 
 `contracts/openapi.json` is vendored byte-for-byte from `codegen-platform-services` commit
 `070dfb35`, `services/tg-reader/openapi.json` (API 0.1.0). Contract tests verify used operations,

@@ -39,10 +39,9 @@ failing remote never switches either of them; there is no fallback.
   installed distribution and the committed wheel must carry the version. No tag is created.
 - `candidate_release` proves a package release prepared in a candidate but not yet published:
   the pending entry of `packages/pending-releases.yaml`, through the pending fixture below. A
-  green candidate run proves the prepared package source, not a published release. Nothing is
-  pending now (tg-channels 0.1.2 was published and activated, see
-  [tg-channels 0.1.2](releases/tg-channels-0.1.2.md)); the mode stays for a future pending
-  release, is only ever invoked explicitly, and cannot satisfy this repository's own runs.
+  green candidate run proves the prepared package source, not a published release. The mode is
+  only ever invoked explicitly and cannot satisfy this repository's own runs, which keep proving
+  the pinned published tg-channels while tg-channels 0.2.0 and ranking 0.1.0 are pending.
 
 ## Catalog modes
 
@@ -92,7 +91,8 @@ the installs the real `HEAD` is cloned again and its catalog digest must be unch
    exact candidate commit and the kit checkout's published package tags (it fails if a catalog
    tag is missing).
 2. A fixture catalog commit on top of the candidate adds only the pending `catalog_entry` to the
-   package's `versions` (`support.fixture_catalog`); it becomes the fixture's `HEAD`.
+   package's `versions`, or for a first release the package from its `catalog_package` with that
+   one version (`support.fixture_catalog`); it becomes the fixture's `HEAD`.
 3. The intended tag is created there, annotated, at the candidate. It exists nowhere else and
    is never pushed.
 

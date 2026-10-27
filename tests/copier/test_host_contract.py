@@ -142,7 +142,7 @@ def test_preflight_matrix_in_a_fresh_generated_product(fresh_bot_product):
     try:
         fresh = _preflight(product)
         assert fresh.status == "mechanical" and fresh.glue == []
-        assert fresh.target["version"] == "0.1.2" and fresh.product_core == "2.6.0"
+        assert fresh.target["version"] == "0.2.0" and fresh.product_core == "2.6.0"
         assert host_contract.check_product(product).settings == {"language": "core"}
 
         _declare_conflicts(product, command=False)

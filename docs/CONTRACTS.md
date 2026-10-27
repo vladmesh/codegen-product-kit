@@ -450,14 +450,23 @@ releases:
     catalog_entry: {version: 0.1.3, tag: packages/tg-channels/v0.1.3, requires_core: '>=2.4,<3'}
 ```
 
+A package's first release cannot be listed under `packages` yet: every released catalog reader
+refuses a package without a version, and `kit add` reads the catalog live from the default branch.
+Its pending entry has `supersedes: null` and carries `catalog_package`, the package's catalog
+metadata without its identity or versions (`summary`, `capabilities`, `settings`, `environment`
+and optionally `actions`, `recommended_with`, `default_binding`).
+
 While an entry is pending, the package source at HEAD must be exactly that release and newer
 than the catalog's newest version, and the catalog must not list it. The runner proof's
 `candidate_release` mode (`catalog_mode=pending_fixture`) installs it from an isolated fixture
-catalog that appends only `catalog_entry` ([RUNNER_PROOF.md](RUNNER_PROOF.md)). Publication is
-a separate operation: the annotated tag at the reviewed merge commit, then a code change that
-appends `catalog_entry` to the catalog, removes the pending entry, pins the published tag
-(object, peeled commit, package tree) in the runner's `support.PUBLISHED_RELEASES` and proves
-the published release. A package release never adds its catalog entry before its tag exists.
+catalog that appends only `catalog_entry`, or for a first release adds the package from
+`catalog_package` with `catalog_entry` as its one version (`support.fixture_catalog`,
+[RUNNER_PROOF.md](RUNNER_PROOF.md)). Publication is a separate operation: the annotated tag at the
+reviewed merge commit, then a code change that appends `catalog_entry` to the catalog (for a first
+release, the package entry from `catalog_package` with that version), removes the pending entry,
+pins the published tag (object, peeled commit, package tree) in the runner's
+`support.PUBLISHED_RELEASES` and proves the published release. A package release never adds its
+catalog entry before its tag exists.
 
 That activation change is proven in two steps, because the planner and the install probe read
 the catalog at the real default branch's `HEAD`, which lists the new entry only after the merge:

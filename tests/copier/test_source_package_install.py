@@ -78,7 +78,7 @@ def test_product_source_packages_install_bind_and_restore_from_committed_wheels(
     )
     assert sorted(path.name for path in (product / "services/backend/packages").glob("*.whl")) == [
         "codegen_kit_synthetic_package-2.0.0-py3-none-any.whl",
-        "codegen_kit_tg_channels-0.1.2-py3-none-any.whl",
+        "codegen_kit_tg_channels-0.2.0-py3-none-any.whl",
     ]
     settings = runpy.run_path(str(product / "services/backend/src/generated/settings_schemas.py"))
     assert settings["SETTINGS_SCHEMAS"]["synthetic.enabled"] == {"type": "boolean"}
@@ -86,7 +86,7 @@ def test_product_source_packages_install_bind_and_restore_from_committed_wheels(
     active = runpy.run_path(str(product / "codegen_kit/_active_packages.py"))
     assert [(item["name"], item["version"]) for item in active["ACTIVE_PACKAGES"]] == [
         ("synthetic", "2.0.0"),
-        ("tg-channels", "0.1.2"),
+        ("tg-channels", "0.2.0"),
     ]
     expected = [
         "synthetic=synthetic_package:package",

@@ -156,7 +156,8 @@ async def scenario(locale):  # noqa: C901, PLR0915
         "text": "News",
         "url": "https://t.me/cyproplan/7",
     }
-    posts.append(post)
+    # The digest item carries views; the binding shows no views and the event carries none.
+    posts.append(post | {"views": 1520})
     displayed = "@cyproplan\n2026-10-07T21:00:00+00:00\nNews\nhttps://t.me/cyproplan/7"
     reply = await command(digest, "/digest")
     assert reply.args[0] == displayed and reply.kwargs["reply_markup"] is None

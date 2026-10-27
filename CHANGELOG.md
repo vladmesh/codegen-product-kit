@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Package releases only, prepared and pending publication: no kit core, tooling, template or
+`CORE_VERSION` change, no tag and no catalog entry.
+
+### Added
+
+- tg-channels 0.2.0: `digest` items carry the reader's `views` (integer or null), and the package
+  provides `tg-channels.posts.v1` with the in-process read
+  `codegen_kit_tg_channels.posts.recent_posts`. See [tg-channels 0.2.0](docs/releases/tg-channels-0.2.0.md).
+- ranking 0.1.0 (`codegen-kit-ranking`), the reviewed candidate with the owner's six required
+  changes: `POST /ranking/rank`, `GET /ranking/top` over the verified caller's tg-channels posts,
+  seeded `ranking.weights`, `ranking.keywords` and `ranking.top_count` defaults and a `/top`
+  default binding. It requires `tg-channels.posts.v1`. See [ranking 0.1.0](docs/releases/ranking-0.1.0.md).
+- A first package release is pinned in `packages/pending-releases.yaml` with `supersedes: null` and
+  its catalog metadata in `catalog_package`; the pending fixture adds that package with its one
+  version. See [pending releases](docs/CONTRACTS.md#pending-releases).
+
 ## [0.12.0] - 2026-10-25 (prepared, not published)
 
 Kit minor only: façade `CORE_VERSION` 2.6.0, package protocol 1, tooling/application distribution

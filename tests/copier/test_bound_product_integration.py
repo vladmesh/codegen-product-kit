@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tomllib
 
 import pytest
 import yaml
@@ -20,21 +21,34 @@ from tests.tooling.test_package_catalog import _commit, _git, _tag
 
 ROOT = Path(__file__).parents[2]
 CHANNELS_PATH = "packages/codegen-kit-tg-channels"
+RANKING_PATH = "packages/codegen-kit-ranking"
 UNCONFIGURED_WARNING = "tg-channels platform access is not configured"
+#: Packages the slow leg installs from the exact candidate commit, in install order.
+CANDIDATE_LEGS = {"tg-channels": ["tg-channels"], "ranking": ["tg-channels", "ranking"]}
 
 
-def _candidate_channels_source(candidate: str, tmp_path: Path) -> tuple[str, list[str]]:
-    """Release the candidate commit's tg-channels from a scratch catalog source.
+def _candidate_source(
+    candidate: str, tmp_path: Path, packages: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """Release the candidate commit's ``packages`` from one scratch catalog source.
 
-    The source is the candidate commit's catalog: unchanged when tg-channels is not pending (its
-    newest entry is then the candidate's published release, whose tree the candidate holds), or
-    with the pending release (packages/pending-releases.yaml) appended, as the runner proof's
-    candidate_release mode does. Either way the real default branch does not list a candidate's
-    catalog before it merges, so the package tree is exported from the exact candidate commit and
-    its tag exists only in the scratch source. Returns that version and the ``kit add`` catalog
-    arguments.
+    The source is the candidate commit's catalog with every pending release of ``packages``
+    (packages/pending-releases.yaml) appended, as the runner proof's candidate_release mode does;
+    a package that is not pending keeps its newest entry, the candidate's published release, whose
+    tree the candidate holds. The real default branch does not list a candidate's catalog before it
+    merges, so each package tree is exported from the exact candidate commit and its tag exists only
+    in the scratch source. Returns each package's version and the ``kit add`` catalog arguments.
     """
-    paths = ["packages/catalog.yaml", support.PENDING_RELEASES, CHANNELS_PATH]
+    catalog_document = yaml.safe_load(_git("show", f"{candidate}:packages/catalog.yaml", cwd=ROOT))
+    releases = yaml.safe_load(_git("show", f"{candidate}:{support.PENDING_RELEASES}", cwd=ROOT))
+    pending = {item["package"] for item in releases["releases"]}
+    for package in packages:
+        if package in pending:
+            catalog_document = support.fixture_catalog(
+                catalog_document, support.pending_release(releases, package)
+            )
+    catalog = parse_catalog(yaml.safe_dump(catalog_document), "candidate catalog")
+    paths = [catalog.get(package).path for package in packages]
     archive = subprocess.run(  # noqa: S603
         ["git", "archive", "--format=tar", candidate, "--", *paths],  # noqa: S607
         cwd=ROOT,
@@ -47,48 +61,63 @@ def _candidate_channels_source(candidate: str, tmp_path: Path) -> tuple[str, lis
     _git("init", "--quiet", cwd=source)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as exported:
         exported.extractall(source, filter="data")
-    pending = source / support.PENDING_RELEASES
-    releases = yaml.safe_load(pending.read_text())
-    pending.unlink()
-    published = source / "packages/catalog.yaml"
-    release = None
-    if any(item["package"] == "tg-channels" for item in releases["releases"]):
-        release = support.pending_release(releases, "tg-channels")
-        published.write_text(
-            yaml.safe_dump(support.fixture_catalog(yaml.safe_load(published.read_text()), release))
-        )
-    catalog = parse_catalog(published.read_text(), "candidate catalog")
-    newest = catalog.get("tg-channels").newest()
-    manifest = source / CHANNELS_PATH / "codegen_kit_tg_channels/package.yaml"
-    assert yaml.safe_load(manifest.read_text())["version"] == newest.version
-    assert release is None or release["version"] == newest.version
-    _commit(source, f"Candidate tg-channels {newest.version} at {candidate}")
-    _tag(source, newest.tag)
-    return newest.version, ["--catalog-source", str(source)]
+    (source / "packages/catalog.yaml").write_text(yaml.safe_dump(catalog_document))
+    versions = {}
+    for package in packages:
+        newest = catalog.get(package).newest()
+        project = tomllib.loads((source / catalog.get(package).path / "pyproject.toml").read_text())
+        assert project["project"]["version"] == newest.version
+        versions[package] = newest.version
+    _commit(source, f"Candidate {', '.join(packages)} at {candidate}")
+    for package in packages:
+        _tag(source, catalog.get(package).newest().tag)
+    return versions, ["--catalog-source", str(source)]
 
 
-def test_candidate_channels_source_releases_exactly_the_candidate_commit(tmp_path: Path) -> None:
+def test_candidate_source_releases_exactly_the_candidate_commit(tmp_path: Path) -> None:
     candidate = _git("rev-parse", "HEAD", cwd=ROOT).strip()
-    version, arguments = _candidate_channels_source(candidate, tmp_path)
+    versions, arguments = _candidate_source(candidate, tmp_path, CANDIDATE_LEGS["ranking"])
     assert arguments[0] == "--catalog-source"
-    channels = read_catalog(arguments[1], "HEAD").get("tg-channels")
-    release = channels.select("2.4.0")
-    assert release.version == version and release.tag == f"packages/tg-channels/v{version}"
-    workdir = tmp_path / "work"
-    workdir.mkdir()
-    exported = fetch_package_source(arguments[1], channels, release, workdir)
-    for name in ("pyproject.toml", "codegen_kit_tg_channels/__init__.py"):
-        expected = _git("show", f"{candidate}:{CHANNELS_PATH}/{name}", cwd=ROOT)
-        assert (exported / name).read_text() == expected
+    catalog = read_catalog(arguments[1], "HEAD")
+    for package, path in (("tg-channels", CHANNELS_PATH), ("ranking", RANKING_PATH)):
+        workdir = tmp_path / "work" / package
+        workdir.mkdir(parents=True)
+        entry = catalog.get(package)
+        release = entry.select("2.4.0")
+        assert release.version == versions[package]
+        assert release.tag == f"packages/{package}/v{versions[package]}"
+        exported = fetch_package_source(arguments[1], entry, release, workdir)
+        for name in ("pyproject.toml", f"{entry.distribution.replace('-', '_')}/__init__.py"):
+            expected = _git("show", f"{candidate}:{path}/{name}", cwd=ROOT)
+            assert (exported / name).read_text() == expected
+
+
+def _assert_unconfigured_platform_environment(product: Path, env_file: str) -> None:
+    """tg-channels declares its platform sources; the product environment carries no values."""
+    fragment = yaml.safe_load((product / "services/backend/packages/env.contract.yaml").read_text())
+    entries = fragment["entries"]
+    assert entries["PLATFORM_KEY"]["source"] == "platform_key"
+    assert entries["PLATFORM_BASE_URL"]["source"] == "platform_base_url"
+    assert entries["PLATFORM_KEY"]["service"] == "tg-reader"
+    assert entries["PLATFORM_KEY"]["scopes"] == ["tg-reader:read"]
+    assert entries["PLATFORM_KEY"]["quota"] == {
+        "channels_max": 50,
+        "requests_per_minute": 60,
+        "resolve_per_day": 200,
+    }
+    assert entries["PLATFORM_BASE_URL"]["url"] == "https://platform.vladmesh.dev/tg-reader"
+    # Like a real product CI, the integration environment has no platform values: the
+    # package starts not configured and its timer makes no platform request.
+    assert not re.search(r"^\s*PLATFORM_", env_file, re.M)
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("package", ["reminders", "tg-channels"])
+@pytest.mark.parametrize("package", ["reminders", "tg-channels", "ranking"])
 def test_published_bound_product_passes_own_integration(
     project_backend_tg_bot: Path, tmp_path: Path, package: str
 ) -> None:
-    # Reminders/textparse use their published tags. tg-channels uses the exact candidate commit's
-    # package release (see _candidate_channels_source); no working-tree source is substituted.
+    # Reminders/textparse use their published tags. tg-channels and ranking use the exact candidate
+    # commit's package releases (see _candidate_source); no working-tree source is substituted.
     assert os.environ.get("CI") == "true", "Published integration proof runs in CI only"
     requirement = os.environ["CODEGEN_TOOLING_REQUIREMENT"]
     assert " @ git+" in requirement
@@ -98,8 +127,11 @@ def test_published_bound_product_passes_own_integration(
     shutil.copytree(project_backend_tg_bot, product)
     versions = {"reminders": "0.5.0", "textparse": "0.1.0"}
     sources: dict[str, list[str]] = {}
-    if package == "tg-channels":
-        versions[package], sources[package] = _candidate_channels_source(candidate, tmp_path)
+    channels = package in CANDIDATE_LEGS
+    if channels:
+        candidates, arguments = _candidate_source(candidate, tmp_path, CANDIDATE_LEGS[package])
+        versions |= candidates
+        sources = dict.fromkeys(candidates, arguments)
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -128,14 +160,14 @@ def test_published_bound_product_passes_own_integration(
                             for path, content in contract.items()
                         },
                         "package_source": f"candidate {candidate} (scratch tag only)"
-                        if package == "tg-channels"
+                        if channels
                         else "published catalog tags",
                         "platform": "absent: no PLATFORM_KEY/PLATFORM_BASE_URL in product .env"
-                        if package == "tg-channels"
+                        if channels
                         else None,
                         "unconfigured_warning_logged": UNCONFIGURED_WARNING
                         in result.stdout + result.stderr
-                        if package == "tg-channels"
+                        if channels
                         else None,
                     },
                     indent=2,
@@ -167,7 +199,8 @@ def test_published_bound_product_passes_own_integration(
         )
     )
     assert tooling["vcs_info"]["commit_id"] == candidate
-    components = ["textparse", package] if package == "reminders" else [package]
+    components = ["textparse", package] if package == "reminders" else CANDIDATE_LEGS[package]
+    bound = [component for component in components if component != "textparse"]
     for component in components:
         installed = run(
             [
@@ -183,47 +216,33 @@ def test_published_bound_product_passes_own_integration(
         )
         version = versions[component]
         assert f"{component} {version} (packages/{component}/v{version})" in installed
-    run(
-        [
-            python,
-            "-m",
-            "framework.cli",
-            "bind",
-            package,
-            "--default",
-            "--product-root",
-            str(product),
-        ]
-    )
+    for component in bound:
+        run(
+            [
+                python,
+                "-m",
+                "framework.cli",
+                "bind",
+                component,
+                "--default",
+                "--product-root",
+                str(product),
+            ]
+        )
     run(["make", "generate-from-spec"])
-    binding = product / f"services/tg_bot/bindings/{package}.yaml"
-    assert yaml.safe_load(binding.read_text())["package"] == package
     for name in ("bindings.py", "binding_relay.py"):
         assert (product / "services/tg_bot/src/generated" / name).is_file()
     serialized = "bindings.py" if package == "reminders" else "bindings_v1.py"
-    assert package in (product / "services/tg_bot/src/generated" / serialized).read_text()
     active = (product / "codegen_kit/_active_packages.py").read_text()
-    assert package in active and versions[package] in active
+    for component in bound:
+        binding = product / f"services/tg_bot/bindings/{component}.yaml"
+        assert yaml.safe_load(binding.read_text())["package"] == component
+        assert component in (product / "services/tg_bot/src/generated" / serialized).read_text()
+        assert component in active and versions[component] in active
 
     env_file = (product / ".env.example").read_text()
-    if package == "tg-channels":
-        fragment = yaml.safe_load(
-            (product / "services/backend/packages/env.contract.yaml").read_text()
-        )
-        entries = fragment["entries"]
-        assert entries["PLATFORM_KEY"]["source"] == "platform_key"
-        assert entries["PLATFORM_BASE_URL"]["source"] == "platform_base_url"
-        assert entries["PLATFORM_KEY"]["service"] == "tg-reader"
-        assert entries["PLATFORM_KEY"]["scopes"] == ["tg-reader:read"]
-        assert entries["PLATFORM_KEY"]["quota"] == {
-            "channels_max": 50,
-            "requests_per_minute": 60,
-            "resolve_per_day": 200,
-        }
-        assert entries["PLATFORM_BASE_URL"]["url"] == "https://platform.vladmesh.dev/tg-reader"
-        # Like a real product CI, the integration environment has no platform values: the
-        # package starts not configured and its timer makes no platform request.
-        assert not re.search(r"^\s*PLATFORM_", env_file, re.M)
+    if channels:
+        _assert_unconfigured_platform_environment(product, env_file)
     (product / ".env").write_text(env_file)
     makefile = (product / "Makefile").read_text()
     assert re.search(r"^test-integration:\n", makefile, re.M)

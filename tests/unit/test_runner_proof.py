@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator
 import pytest
 import yaml
 
+from framework.catalog import parse_catalog
 from tests.runner import support
 from tests.runner.fixtures import platform_admin, reader, telegram_api
 
@@ -250,8 +251,7 @@ def test_runner_workflow_guards_the_platform_key_and_requires_the_evidence() -> 
     assert 'evidence["status"] == "passed"' in steps["Require passed SHA-bound evidence"]["run"]
 
 
-#: A pending release as packages/pending-releases.yaml pins one; nothing is pending now that
-#: tg-channels 0.1.2 is published, so the candidate_release helpers are checked on this sample.
+#: A pending release as packages/pending-releases.yaml pins one, independent of the real file.
 SAMPLE_PENDING = {
     "package": "tg-channels",
     "distribution": "codegen-kit-tg-channels",
@@ -278,9 +278,7 @@ def test_runner_default_is_the_pinned_newest_published_release() -> None:
     assert default is not None and newest["version"] == default.group(1)
     assert support.published_release("tg-channels", default.group(1)) == PIN
     assert newest == {"version": "0.1.2", "tag": PIN.tag, "requires_core": ">=2.4,<3"}
-    assert pending == {"format_version": 1, "releases": []}
-    with pytest.raises(ValueError, match="pending releases: expected one tg-channels entry"):
-        support.pending_release(pending, "tg-channels")
+    assert support.pending_release(pending, "tg-channels")["supersedes"] == default.group(1)
     with pytest.raises(ValueError, match="not a pinned published release"):
         support.published_release("tg-channels", "0.1.1")
 
@@ -324,6 +322,43 @@ def test_fixture_catalog_appends_only_the_pending_entry() -> None:
         support.fixture_catalog(published, release | {"version": listed["version"]})
     with pytest.raises(ValueError, match="another distribution"):
         support.fixture_catalog(published, release | {"distribution": "other"})
+
+
+def test_fixture_catalog_adds_a_first_release_with_its_one_version() -> None:
+    published = yaml.safe_load((ROOT / "packages/catalog.yaml").read_text())
+    metadata = {"summary": "Sample.", "capabilities": ["sample"], "settings": [], "environment": []}
+    first = {
+        "package": "sample",
+        "distribution": "codegen-kit-sample",
+        "path": "packages/codegen-kit-sample",
+        "version": "0.1.0",
+        "supersedes": None,
+        "notes": "docs/releases/sample-0.1.0.md",
+        "catalog_entry": {
+            "version": "0.1.0",
+            "tag": "packages/sample/v0.1.0",
+            "requires_core": ">=2.4,<3",
+        },
+        "catalog_package": metadata,
+    }
+    release = support.pending_release({"format_version": 1, "releases": [first]}, "sample")
+
+    snapshot = support.fixture_catalog(published, release)
+
+    assert support.catalog_package(snapshot, "sample") == {
+        "name": "sample",
+        "distribution": "codegen-kit-sample",
+        "path": "packages/codegen-kit-sample",
+        **metadata,
+        "versions": [first["catalog_entry"]],
+    }
+    assert snapshot["packages"][:-1] == published["packages"]
+    assert parse_catalog(yaml.safe_dump(snapshot)).get("sample").newest().version == "0.1.0"
+    for broken in (first | {"supersedes": "0.0.1"}, first | {"catalog_package": {"name": "x"}}):
+        with pytest.raises(ValueError, match="supersedes nothing"):
+            support.pending_release({"format_version": 1, "releases": [broken]}, "sample")
+    with pytest.raises(ValueError, match="not the first"):
+        support.fixture_catalog(published, SAMPLE_PENDING | {"catalog_package": metadata})
 
 
 def test_catalog_modes_pair_only_with_their_proof_mode() -> None:

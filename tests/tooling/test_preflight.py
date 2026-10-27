@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import tarfile
 import venv
 import zipfile
 
@@ -26,6 +28,7 @@ from framework.preflight import (
 ROOT = Path(__file__).parents[2]
 CHANNELS = ROOT / "packages/codegen-kit-tg-channels"
 MODULE = "codegen_kit_tg_channels"
+CHANNELS_VERSION = yaml.safe_load((CHANNELS / MODULE / "package.yaml").read_text())["version"]
 LANGUAGE = """version: 1
 settings_schema:
   $schema: https://json-schema.org/draft/2020-12/schema
@@ -90,13 +93,13 @@ def _check(root: Path, **kwargs):
     return result
 
 
-def test_fresh_product_with_published_channels_is_mechanical(tmp_path: Path) -> None:
+def test_fresh_product_with_channels_source_is_mechanical(tmp_path: Path) -> None:
     result = _check(_product(tmp_path))
     data = result.as_dict()
     assert data["result_version"] == RESULT_VERSION == 1
     assert (data["status"], data["glue"], data["incompatible"]) == ("mechanical", [], None)
     assert data["product_core"] == "2.6.0"
-    assert data["target"]["version"] == "0.1.2"
+    assert data["target"]["version"] == CHANNELS_VERSION
     assert data["target"]["requires_core"] == ">=2.4,<3"
     assert data["target"]["route"] == "package_source"
     assert len(data["target"]["metadata_sha256"]) == 64
@@ -271,11 +274,17 @@ def test_catalog_route_reads_the_exact_tag_without_a_live_default(tmp_path: Path
     source = tmp_path / "kit"
     (source / "packages").mkdir(parents=True)
     shutil.copy2(ROOT / "packages/catalog.yaml", source / "packages/catalog.yaml")
-    shutil.copytree(
-        CHANNELS,
-        source / "packages/codegen-kit-tg-channels",
-        ignore=shutil.ignore_patterns("__pycache__"),
+    # The catalog's newest tg-channels is the published 0.1.2: copy its tagged tree, not HEAD.
+    tag = "refs/tags/packages/tg-channels/v0.1.2"
+    published = subprocess.run(  # noqa: S603
+        ["git", "archive", "--format=tar", tag, "--", "packages/codegen-kit-tg-channels"],  # noqa: S607
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
     )
+    with tarfile.open(fileobj=io.BytesIO(published.stdout)) as exported:
+        exported.extractall(source, filter="data")
     _git("init", "--quiet", "--initial-branch=main", cwd=source)
     _git("add", "-A", cwd=source)
     _git("commit", "--quiet", "-m", "kit", cwd=source)
@@ -320,7 +329,7 @@ def test_cli_prints_the_versioned_payload_and_exit_code(
 
 
 def _wheel(tmp_path: Path) -> Path:
-    wheel = tmp_path / "codegen_kit_tg_channels-0.1.2-py3-none-any.whl"
+    wheel = tmp_path / f"codegen_kit_tg_channels-{CHANNELS_VERSION}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
         for relative in ("package.yaml", "bindings/default.yaml"):
             archive.write(CHANNELS / MODULE / relative, f"{MODULE}/{relative}")
@@ -329,7 +338,7 @@ def _wheel(tmp_path: Path) -> Path:
 
 def test_wheel_metadata_is_read_as_data(tmp_path: Path) -> None:
     metadata = metadata_from_wheel("tg-channels", _wheel(tmp_path))
-    assert metadata.manifest.version == "0.1.2"
+    assert metadata.manifest.version == CHANNELS_VERSION
     assert metadata.binding is not None and metadata.binding.package == "tg-channels"
     assert metadata.provenance["route"] == "wheel"
 

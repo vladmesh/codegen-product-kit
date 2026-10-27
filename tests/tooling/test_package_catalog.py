@@ -239,31 +239,57 @@ def _pending_releases() -> dict[str, Any]:
     return yaml.safe_load(PENDING_RELEASES.read_text())
 
 
+def _first_release_packages() -> list[CatalogPackage]:
+    """Packages whose first release is pending, as that release's catalog snapshot lists them."""
+    pending = _pending_releases()["releases"]
+    return [
+        parse_catalog(yaml.safe_dump(support.fixture_catalog(_document(), release))).get(
+            release["package"]
+        )
+        for release in pending
+        if "catalog_package" in release
+    ]
+
+
 def test_pending_releases_name_catalog_packages_not_their_published_versions() -> None:
     catalog = load_catalog(CATALOG)
+    listed = {package.name for package in catalog.packages}
     # An empty document stays valid: nothing is pending once a release is in the catalog.
     assert _pending_releases()["format_version"] == 1
     assert isinstance(_pending_releases()["releases"], list)
     for release in _pending_releases()["releases"]:
-        package = catalog.get(release["package"])
-        assert release == support.pending_release(_pending_releases(), package.name)
-        assert (release["distribution"], release["path"]) == (package.distribution, package.path)
-        assert release["version"] not in [item.version for item in package.versions]
-        assert release["supersedes"] == package.newest().version
-        assert Version(release["version"]) > Version(package.newest().version)
+        assert release == support.pending_release(_pending_releases(), release["package"])
         assert (KIT_ROOT / release["notes"]).is_file()
         # The candidate proof's catalog snapshot: this catalog plus exactly the pending entry.
         snapshot = parse_catalog(yaml.safe_dump(support.fixture_catalog(_document(), release)))
-        selected = snapshot.get(package.name).newest()
+        selected = snapshot.get(release["package"]).newest()
         assert (selected.version, selected.tag, selected.requires_core) == (
             release["version"],
             release["catalog_entry"]["tag"],
             release["catalog_entry"]["requires_core"],
         )
+        assert [item for item in snapshot.packages if item.name != release["package"]] == [
+            item for item in catalog.packages if item.name != release["package"]
+        ]
+        if "catalog_package" in release:
+            # A first release: the catalog lists no entry, so nothing is superseded.
+            assert release["package"] not in listed
+            assert release["supersedes"] is None
+            assert snapshot.get(release["package"]).versions == (selected,)
+            continue
+        package = catalog.get(release["package"])
+        assert (release["distribution"], release["path"]) == (package.distribution, package.path)
+        assert release["version"] not in [item.version for item in package.versions]
+        assert release["supersedes"] == package.newest().version
+        assert Version(release["version"]) > Version(package.newest().version)
         assert snapshot.get(package.name).versions[:-1] == package.versions
 
 
-@pytest.mark.parametrize("package", load_catalog(CATALOG).packages, ids=lambda item: item.name)
+@pytest.mark.parametrize(
+    "package",
+    [*load_catalog(CATALOG).packages, *_first_release_packages()],
+    ids=lambda item: item.name,
+)
 def test_package_source_at_head_is_its_newest_or_pending_release(package: CatalogPackage) -> None:
     """HEAD is the newest published release, or exactly the release pending publication."""
     project, entry_points, manifest = _source_metadata(
@@ -290,6 +316,7 @@ def test_package_source_at_head_is_its_newest_or_pending_release(package: Catalo
     assert [(item.name, item.required) for item in package.environment] == [
         (item.name, item.required) for item in manifest.environment
     ]
+    assert package.default_binding == manifest.default_binding
 
 
 # --- `kit add <name>` against a local catalog source ---------------------------------------

@@ -55,6 +55,9 @@ jobs:
       - name: Build public channel package
         run: uv build --wheel packages/codegen-kit-tg-channels
 
+      - name: Build ranking package
+        run: uv build --wheel packages/codegen-kit-ranking
+
       - name: Build textparse library
         run: uv build --wheel packages/codegen-kit-textparse
 

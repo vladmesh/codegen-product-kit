@@ -22,6 +22,10 @@ class PostView(BaseModel):
     url: str
 
 
+class DigestPost(PostView):
+    views: int | None
+
+
 class ResolvedChannel(BaseModel):
     channel: str
     status: Literal["ok", "pending", "no_preview", "not_found", "not_a_channel", "error"]
@@ -41,6 +45,7 @@ class Post(BaseModel):
     text: str
     edited: bool
     deleted: bool
+    views: int | None = None
 
     def view(self) -> PostView:
         return PostView(
@@ -49,6 +54,9 @@ class Post(BaseModel):
             text=self.text.strip()[:2500],
             url=f"https://t.me/{self.channel}/{self.id}",
         )
+
+    def digest_view(self) -> DigestPost:
+        return DigestPost(**self.view().model_dump(), views=self.views)
 
 
 class PostPage(BaseModel):

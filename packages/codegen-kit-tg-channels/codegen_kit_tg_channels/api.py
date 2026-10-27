@@ -5,7 +5,7 @@ from typing import Annotated
 from codegen_kit import caller_identity
 from fastapi import APIRouter, Depends, HTTPException
 
-from codegen_kit_tg_channels.models import ChannelInput, ChannelView, PostView
+from codegen_kit_tg_channels.models import ChannelInput, ChannelView, DigestPost
 from codegen_kit_tg_channels.service import ActionError, ChannelsService
 
 router = APIRouter()
@@ -35,8 +35,8 @@ async def list_channels(user_ref: CallerRef) -> list[ChannelView]:
         raise HTTPException(status_code=409, detail={"code": error.code}) from None
 
 
-@router.get("/digest", response_model=list[PostView])
-async def digest(user_ref: CallerRef) -> list[PostView]:
+@router.get("/digest", response_model=list[DigestPost])
+async def digest(user_ref: CallerRef) -> list[DigestPost]:
     try:
         return await service().digest(user_ref)
     except ActionError as error:
