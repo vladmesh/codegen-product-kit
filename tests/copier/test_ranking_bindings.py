@@ -25,7 +25,15 @@ ROOT = Path(__file__).parents[2]
 def ranking_product(request, tmp_path_factory):
     source_product = request.getfixturevalue("bound_product")
     product = tmp_path_factory.mktemp("ranking-product") / "product"
-    shutil.copytree(source_product, product, symlinks=True)
+    # Another module may have run `make` in the shared session product: skip its root artifacts.
+    shutil.copytree(
+        source_product,
+        product,
+        symlinks=True,
+        ignore=lambda directory, _names: (
+            {".venv", "artifacts"} if Path(directory) == source_product else set()
+        ),
+    )
     result = subprocess.run(
         [
             "uv",

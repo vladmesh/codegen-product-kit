@@ -27,7 +27,11 @@ KIT_ROOT = Path(__file__).parents[2]
 REMINDERS = KIT_ROOT / "packages/codegen-kit-reminders"
 CHANNELS = KIT_ROOT / "packages/codegen-kit-tg-channels"
 RANKING = KIT_ROOT / "packages/codegen-kit-ranking"
-RANKING_DISTRIBUTIONS = ("codegen-kit-ranking", "codegen-kit-tg-channels")
+#: Source and distribution of each package the ranking composition tests install.
+COMPOSED = {
+    "tg-channels": (CHANNELS, "codegen-kit-tg-channels"),
+    "ranking": (RANKING, "codegen-kit-ranking"),
+}
 # A reserved TLD never resolves: a package runtime that reaches for Redis fails fast.
 UNREACHABLE_REDIS_URL = "redis://redis.invalid:6379"
 LINT_LAYOUT_FIXTURES = (
@@ -697,7 +701,7 @@ def _generate(runtime_project: Path) -> subprocess.CompletedProcess[str]:
 
 @contextmanager
 def _ranking_activated(runtime_project: Path, python: Path, listed: list[str]) -> Iterator[None]:
-    """Install tg-channels and ranking from source and generate the runtime listing ``listed``."""
+    """Install exactly the ``listed`` sources of tg-channels and ranking and list them."""
 
     uv = shutil.which("uv")
     if uv is None:
@@ -707,7 +711,14 @@ def _ranking_activated(runtime_project: Path, python: Path, listed: list[str]) -
     product = yaml.safe_load(original_product)
     product["packages"] = ["synthetic", *listed]
     installed = subprocess.run(
-        [uv, "pip", "install", "--python", str(python), str(CHANNELS), str(RANKING)],
+        [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            *(str(COMPOSED[name][0]) for name in listed),
+        ],
         capture_output=True,
         text=True,
     )  # noqa: S603
@@ -719,7 +730,14 @@ def _ranking_activated(runtime_project: Path, python: Path, listed: list[str]) -
         product_manifest.write_text(original_product)
         # Other tests in this module share the runtime and list only the synthetic package.
         subprocess.run(
-            [uv, "pip", "uninstall", "--python", str(python), *RANKING_DISTRIBUTIONS],
+            [
+                uv,
+                "pip",
+                "uninstall",
+                "--python",
+                str(python),
+                *(COMPOSED[name][1] for name in listed),
+            ],
             capture_output=True,
             text=True,
         )  # noqa: S603

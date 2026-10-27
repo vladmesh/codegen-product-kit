@@ -45,7 +45,8 @@ class Post(BaseModel):
     text: str
     edited: bool
     deleted: bool
-    views: int | None = None
+    # Optional upstream without a declared default: absent reads as null, the schema shows none.
+    views: int | None = Field(default=None, json_schema_extra=lambda schema: schema.pop("default"))
 
     def view(self) -> PostView:
         return PostView(
