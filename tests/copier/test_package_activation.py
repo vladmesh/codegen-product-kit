@@ -25,6 +25,13 @@ from framework.lint.package_imports import lint_installed_packages
 FIXTURE = Path(__file__).parents[1] / "fixtures/synthetic_package"
 KIT_ROOT = Path(__file__).parents[2]
 REMINDERS = KIT_ROOT / "packages/codegen-kit-reminders"
+CHANNELS = KIT_ROOT / "packages/codegen-kit-tg-channels"
+RANKING = KIT_ROOT / "packages/codegen-kit-ranking"
+#: Source and distribution of each package the ranking composition tests install.
+COMPOSED = {
+    "tg-channels": (CHANNELS, "codegen-kit-tg-channels"),
+    "ranking": (RANKING, "codegen-kit-ranking"),
+}
 # A reserved TLD never resolves: a package runtime that reaches for Redis fails fast.
 UNREACHABLE_REDIS_URL = "redis://redis.invalid:6379"
 LINT_LAYOUT_FIXTURES = (
@@ -497,6 +504,309 @@ def test_generated_reminders_routes_act_only_for_the_verified_caller(
             product_test.unlink(missing_ok=True)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "3 passed" in result.stdout
+
+
+RANKING_PRODUCT_TEST = textwrap.dedent(
+    '''
+    """ranking composes with tg-channels in the product and acts only for the verified caller."""
+
+    from __future__ import annotations
+
+    from collections.abc import AsyncIterator, Iterator
+    from contextlib import asynccontextmanager
+    from datetime import UTC, datetime, timedelta
+    import json
+
+    from fastapi import FastAPI, status
+    import httpx
+    from httpx import AsyncClient
+    import pytest
+    import pytest_asyncio
+    from sqlalchemy import event
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+
+    from codegen_kit_ranking import api as ranking_api
+    from codegen_kit_tg_channels import api as channels_api
+    from codegen_kit_tg_channels.client import ReaderClient
+    from codegen_kit_tg_channels.service import ChannelsService
+    from services.backend.src.app.repositories.user import UserRepository
+    from services.backend.src.core.settings import get_settings
+
+    DEFAULTS = {
+        "ranking.weights": {
+            "views": 35, "reactions": 25, "forwards": 20, "freshness": 20, "keywords": 0
+        },
+        "ranking.keywords": [],
+        "ranking.top_count": 10,
+    }
+
+
+    def _empty_ranking_schema(dbapi_connection, _record, _proxy) -> None:
+        # The unit database is SQLite: an attached database stands in for the package schema.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA database_list")
+        if "ranking" not in {row[1] for row in cursor.fetchall()}:
+            cursor.execute("ATTACH DATABASE ':memory:' AS ranking")
+            cursor.execute(
+                "CREATE TABLE ranking.settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+        cursor.execute("DELETE FROM ranking.settings")
+        cursor.close()
+
+
+    @pytest.fixture(autouse=True)
+    def ranking_schema(db_engine: AsyncEngine) -> Iterator[None]:
+        event.listen(db_engine.sync_engine, "checkout", _empty_ranking_schema)
+        yield
+        event.remove(db_engine.sync_engine, "checkout", _empty_ranking_schema)
+
+
+    class Subscriptions:
+        async def list(self, user_ref: str) -> list[str]:
+            return ["cyproplan"] if user_ref == "telegram:101" else []
+
+
+    def _reader_post(number: int, hours_old: int, views: int | None) -> dict:
+        date = (datetime.now(UTC) - timedelta(hours=hours_old)).isoformat()
+        return {
+            "channel": "cyproplan", "id": number, "url": f"https://t.me/cyproplan/{number}",
+            "seq": number, "date": date, "text": f"Post {number}", "edited": False,
+            "deleted": False, "links": [], "media": [], "fetched_at": date, "views": views,
+        }
+
+
+    READER_PAGE = {
+        "items": [_reader_post(1, 2, 120), _reader_post(2, 2, 9000), _reader_post(3, 48, None)],
+        "next_cursor": "end",
+        "channels": [{"channel": "cyproplan", "status": "ok"}],
+        "has_more": False,
+    }
+
+
+    @pytest_asyncio.fixture
+    async def composed_app(
+        app: FastAPI, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> AsyncIterator[FastAPI]:
+        # Only the package schema session and the platform transport are replaced: the posts
+        # come through the real tg-channels digest, client and reader response contract.
+        @asynccontextmanager
+        async def transaction() -> AsyncIterator[AsyncSession]:
+            yield db_session
+
+        monkeypatch.setattr(ranking_api.store, "transaction", transaction)
+        reader = ReaderClient(
+            "https://reader.test",
+            "test-key",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json=READER_PAGE)),
+        )
+        monkeypatch.setattr(channels_api, "_service", ChannelsService(Subscriptions(), reader))
+        users = UserRepository(db_session)
+        await users.grant("telegram", "101")
+        await users.grant("telegram", "303")
+        await users.revoke("telegram", "303")
+        yield app
+        await reader.close()
+
+
+    def _as(external_id: str) -> dict[str, str]:
+        return {
+            "X-Identity-Capability": get_settings().user_identity_capability,
+            "X-User-Channel": "telegram",
+            "X-User-External-Id": external_id,
+        }
+
+
+    async def _seed(client: AsyncClient, key: str, value: object) -> httpx.Response:
+        return await client.post(
+            "/settings/set",
+            headers={"X-Settings-Capability": get_settings().settings_write_capability},
+            json={"contract_version": 1, "key": key, "scope": "product", "value": value},
+        )
+
+
+    RANK_BODY = {
+        "publications": [{"id": "p", "date": "2026-10-26T12:00:00+00:00", "views": 1}],
+        "settings": {"weights": DEFAULTS["ranking.weights"], "keywords": []},
+    }
+
+
+    @pytest.mark.asyncio
+    async def test_ranking_routes_refuse_a_caller_the_core_did_not_verify(
+        composed_app: FastAPI, client: AsyncClient
+    ) -> None:
+        for key, value in DEFAULTS.items():
+            assert (await _seed(client, key, value)).status_code == status.HTTP_200_OK
+        anonymous = [
+            await client.post("/ranking/rank", json=RANK_BODY),
+            await client.get("/ranking/top"),
+            await client.post(
+                "/ranking/rank", json=RANK_BODY, headers={"X-Identity-Capability": "wrong"}
+            ),
+        ]
+        assert {response.status_code for response in anonymous} == {
+            status.HTTP_401_UNAUTHORIZED
+        }
+        for external_id in ("303", "404"):
+            refused = [
+                await client.post("/ranking/rank", headers=_as(external_id), json=RANK_BODY),
+                await client.get("/ranking/top", headers=_as(external_id)),
+            ]
+            assert {response.status_code for response in refused} == {
+                status.HTTP_403_FORBIDDEN
+            }
+        verified = await client.post("/ranking/rank", headers=_as("101"), json=RANK_BODY)
+        assert verified.status_code == status.HTTP_200_OK
+
+
+    @pytest.mark.asyncio
+    async def test_rank_answers_out_of_bound_and_overflowing_numbers_with_422(
+        composed_app: FastAPI, client: AsyncClient
+    ) -> None:
+        publication = RANK_BODY["publications"][0]
+        refused = [
+            {**RANK_BODY, "freshness_half_life_hours": 8761},
+            {**RANK_BODY, "freshness_half_life_hours": 0},
+            {**RANK_BODY, "publications": [{**publication, "views": 10**12 + 1}]},
+            {**RANK_BODY, "publications": [{**publication, "views": -1}]},
+        ]
+        for body in refused:
+            response = await client.post("/ranking/rank", headers=_as("101"), json=body)
+            assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, body
+        for literal in ("1e309", "-1e309"):
+            for field in ("freshness_half_life_hours", "views"):
+                content = json.dumps(
+                    {**RANK_BODY, "freshness_half_life_hours": "N"}
+                    if field == "freshness_half_life_hours"
+                    else {**RANK_BODY, "publications": [{**publication, "views": "N"}]}
+                ).replace('"N"', literal)
+                response = await client.post(
+                    "/ranking/rank",
+                    headers=_as("101") | {"Content-Type": "application/json"},
+                    content=content,
+                )
+                assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY, content
+                assert response.json()["detail"]["code"] == "non_finite_number"
+
+
+    @pytest.mark.asyncio
+    async def test_top_ranks_the_verified_callers_channel_posts_under_seeded_settings(
+        composed_app: FastAPI, client: AsyncClient
+    ) -> None:
+        unconfigured = await client.get("/ranking/top", headers=_as("101"))
+        assert unconfigured.status_code == status.HTTP_409_CONFLICT
+        assert unconfigured.json() == {"detail": {"code": "not_configured"}}
+
+        too_many = [f"k{index}" for index in range(51)]
+        for key, value in (("ranking.top_count", 51), ("ranking.keywords", too_many)):
+            out_of_bounds = await _seed(client, key, value)
+            assert out_of_bounds.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        for key, value in DEFAULTS.items():
+            assert (await _seed(client, key, value)).status_code == status.HTTP_200_OK
+
+        ranked = await client.get("/ranking/top", headers=_as("101"))
+        assert ranked.status_code == status.HTTP_200_OK, ranked.text
+        items = ranked.json()
+        assert [item["url"] for item in items] == [
+            "https://t.me/cyproplan/2",
+            "https://t.me/cyproplan/1",
+            "https://t.me/cyproplan/3",
+        ]
+        assert [item["views"] for item in items] == ["9000", "120", "?"]
+        assert items[0]["score"] > items[1]["score"] > items[2]["score"]
+
+        assert (await _seed(client, "ranking.top_count", 1)).status_code == status.HTTP_200_OK
+        overridden = await client.get("/ranking/top", headers=_as("101"))
+        assert [item["url"] for item in overridden.json()] == ["https://t.me/cyproplan/2"]
+    '''
+)
+
+
+def _generate(runtime_project: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "framework.generate"],
+        cwd=runtime_project,
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+
+
+@contextmanager
+def _ranking_activated(runtime_project: Path, python: Path, listed: list[str]) -> Iterator[None]:
+    """Install exactly the ``listed`` sources of tg-channels and ranking and list them."""
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required to install the channel and ranking packages")
+    product_manifest = runtime_project / "services/backend/manifest.yaml"
+    original_product = product_manifest.read_text()
+    product = yaml.safe_load(original_product)
+    product["packages"] = ["synthetic", *listed]
+    installed = subprocess.run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            *(str(COMPOSED[name][0]) for name in listed),
+        ],
+        capture_output=True,
+        text=True,
+    )  # noqa: S603
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    try:
+        product_manifest.write_text(yaml.safe_dump(product, sort_keys=False))
+        yield
+    finally:
+        product_manifest.write_text(original_product)
+        # Other tests in this module share the runtime and list only the synthetic package.
+        subprocess.run(
+            [
+                uv,
+                "pip",
+                "uninstall",
+                "--python",
+                str(python),
+                *(COMPOSED[name][1] for name in listed),
+            ],
+            capture_output=True,
+            text=True,
+        )  # noqa: S603
+        _generate(runtime_project)
+
+
+def test_generated_product_refuses_ranking_without_its_channel_provider(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    runtime_project, python = generated_backend_runtime
+    with _ranking_activated(runtime_project, python, ["ranking"]):
+        generated = _generate(runtime_project)
+    assert generated.returncode != 0
+    assert "requires unprovided capability 'tg-channels.posts.v1'" in (
+        generated.stdout + generated.stderr
+    )
+
+
+def test_generated_ranking_top_composes_with_tg_channels_for_the_verified_caller(
+    generated_backend_runtime: tuple[Path, Path],
+) -> None:
+    runtime_project, python = generated_backend_runtime
+    product_test = runtime_project / "services/backend/tests/unit/test_ranking_composition.py"
+    with _ranking_activated(runtime_project, python, ["tg-channels", "ranking"]):
+        generated = _generate(runtime_project)
+        assert generated.returncode == 0, generated.stdout + generated.stderr
+        product_test.write_text(RANKING_PRODUCT_TEST)
+        try:
+            result = subprocess.run(
+                [str(python), "-m", "pytest", "-q", str(product_test.relative_to(runtime_project))],
+                cwd=runtime_project,
+                capture_output=True,
+                text=True,
+            )  # noqa: S603
+        finally:
+            product_test.unlink(missing_ok=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "3 passed" in result.stdout
 
 
 def test_generated_backend_unit_tests_pass_with_reminders_and_no_redis(

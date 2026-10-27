@@ -24,7 +24,7 @@ def modules(monkeypatch):
     monkeypatch.setitem(
         sys.modules, "codegen_kit_tg_channels.database", SimpleNamespace(database=None)
     )
-    names = ("models", "client", "service", "store", "polling", "api")
+    names = ("models", "client", "service", "store", "polling", "api", "posts")
     for name in names:
         monkeypatch.delitem(sys.modules, f"codegen_kit_tg_channels.{name}", raising=False)
     loaded = {name: importlib.import_module(f"codegen_kit_tg_channels.{name}") for name in names}

@@ -69,6 +69,16 @@ its entry in `packages/pending-releases.yaml`, and each published release the ru
 package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
+The ranking package's offline tests run in the unit lane through
+`tests/unit/test_ranking_package.py`. `tests/tooling/test_ranking_composition.py` loads the shipped
+tg-channels and ranking manifests over the template's core specs; ranking without tg-channels fails
+as a missing provider of `tg-channels.posts.v1`. In the fast Copier lane `test_package_activation.py`
+installs both package sources into a generated backend and runs a product unit test: both ranking
+routes refuse a caller the core did not verify, the seeds are written through `/settings/set`, and
+`top` ranks posts read through the real tg-channels digest from offline reader data; generation
+refuses ranking without tg-channels. `test_ranking_bindings.py` binds both defaults in a
+backend,tg_bot product, executes the generated `/top` in RU and EN and runs the product's drift and
+lint; its typecheck is slow.
 Jobs that pull, build or run containers (`test-generation`, `test-pytest`, both runner legs)
 first add the credential-free public mirror `https://mirror.gcr.io` to the runner's Docker daemon
 (keeping its other `daemon.json` keys), restart it and log the effective mirror and the `docker`
@@ -269,21 +279,30 @@ Test Copier Template leg; no local product typecheck or real Redis run is author
 The fast `test_v2_typecheck_dispatch_uses_selected_product` mocks the subprocess and verifies
 that each fixture resolves to its own product directory before the CI-only command is invoked.
 
-`test_bound_product_integration.py` adds two CI-only slow cases for the generated backend,tg_bot
+`test_bound_product_integration.py` adds three CI-only slow cases for the generated backend,tg_bot
 product's unchanged `make test-integration`, default-bound with exact candidate tooling:
-published reminders 0.5.0/textparse 0.1.0 through the default live catalog, and the candidate
-commit's tg-channels release. For channels, the test exports the candidate commit's catalog,
-pending release metadata and package tree into a scratch catalog source. Only when
-`packages/pending-releases.yaml` holds a tg-channels entry does it append that entry to the
-scratch catalog (the public catalog lists published tags only); otherwise it uses the candidate's
-committed catalog unchanged. It checks the newest entry against the package manifest, creates a
-synthetic release tag only in that scratch source and installs with `--catalog-source`. That
-scratch tag is a test artifact, distinct from the real published tag the mandatory runner proof
-requires. Channels verifies its platform environment
+published reminders 0.5.0/textparse 0.1.0 through the default live catalog, the candidate
+commit's tg-channels release, and the candidate commit's tg-channels and ranking releases installed
+and default-bound in that order. For the candidate legs, the test exports the candidate commit's
+catalog, pending release metadata and package trees into a scratch catalog source. It appends each
+pending entry of those packages in `packages/pending-releases.yaml` to the scratch catalog with
+`support.fixture_catalog` (the public catalog lists published tags only); a package that is not
+pending keeps the candidate's committed entry. It checks each newest entry against the package
+version, creates synthetic release tags only in that scratch source and installs with
+`--catalog-source`. Those scratch tags are test artifacts, distinct from the real published tags
+the mandatory runner proof requires. Channels verifies its platform environment
 declarations and, as in a real product CI, the product `.env` has no `PLATFORM_KEY` or
-`PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. The fast
-`test_candidate_channels_source_releases_exactly_the_candidate_commit` checks that scratch
-release against the real catalog reader and package-source export.
+`PLATFORM_BASE_URL`: the package starts not configured and makes no platform request. After that
+run the ranking leg proves the bound `/top` end to end on the product's unchanged integration
+Compose file (project `tests-connected-top`): the backend with both packages on real PostgreSQL
+and Redis reads a tg-reader double (`packages/codegen-kit-ranking/tests/connected_reader.py`)
+inside its own container, and `connected_top.py` runs the generated bot bindings in the
+integration-tests image against it. It grants the core caller, writes the ranking seeds, sends
+`/channel @cyproplan` and `/top` as Telegram update doubles in RU and EN, and asserts the ranked
+replies in order and the authorized reader read; `ranking-connected-top.log` and `.json` join the
+artifact. The fast
+`test_candidate_source_releases_exactly_the_candidate_commit` checks that scratch release of
+tg-channels and ranking against the real catalog reader and package-source export.
 The test checks Makefile, integration Compose and test bytes before and after execution;
 the required `bound-product-integration-<run-id>` artifact preserves complete command output,
 exit status, candidate/component identities and contract hashes, including failed runs.

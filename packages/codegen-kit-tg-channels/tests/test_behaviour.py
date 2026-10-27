@@ -412,3 +412,54 @@ def test_poll_rate_limit_preserves_cursor_or_auth_stops_without_key(modules, cap
 
     asyncio.run(exercise())
     assert KEY not in caplog.text
+
+
+def test_digest_and_provider_read_carry_reader_views_while_delivery_stays_closed(modules):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    reply = page(
+        [
+            post(views=1520),
+            post(id=8, seq=2, date="2026-10-07T21:30:00Z"),
+            post(seq=3, edited=True, text="revised", views=1600),
+        ]
+    )
+    client = modules.client.ReaderClient(
+        "https://service.test",
+        KEY,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=reply)),
+    )
+
+    async def exercise():
+        repository, memory = store(modules)
+        await repository.add("telegram:123", "cyproplan")
+        modules.api._service = modules.service.ChannelsService(repository, client)
+        digest = await modules.service.ChannelsService(repository, client).digest("telegram:123")
+        provided = await modules.posts.recent_posts("telegram:123")
+        await repository.accept_page(
+            memory,
+            modules.models.PostPage.model_validate(reply),
+            {"cyproplan": {"telegram:123": datetime(2026, 10, 7, tzinfo=UTC)}},
+            datetime(2026, 10, 7, 22, tzinfo=UTC),
+        )
+        return digest, provided, memory
+
+    try:
+        digest, provided, memory = asyncio.run(exercise())
+        assert [(item.url, item.views) for item in digest] == [
+            ("https://t.me/cyproplan/8", None),
+            ("https://t.me/cyproplan/7", 1600),
+        ]
+        assert provided == digest
+        app = FastAPI()
+        app.include_router(modules.api.router, prefix="/tg-channels")
+        response = TestClient(app).get("/tg-channels/digest")
+        assert response.status_code == 200
+        assert [item["views"] for item in response.json()] == [None, 1600]
+        assert {frozenset(row.payload) for row in memory.deliveries.values()} == {
+            frozenset({"user_ref", "channel", "date", "text", "url"})
+        }
+    finally:
+        modules.api._service = None
+        asyncio.run(client.close())

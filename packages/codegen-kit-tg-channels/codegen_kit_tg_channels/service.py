@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from codegen_kit_tg_channels.client import ReaderClient, ServiceError
-from codegen_kit_tg_channels.models import ChannelView, Post, PostView
+from codegen_kit_tg_channels.models import ChannelView, DigestPost, Post
 
 USERNAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{3,31}\Z")
 
@@ -77,7 +77,7 @@ class ChannelsService:
         await self.store.remove(user_ref, channel)
         return ChannelView(id=channel, channel=channel)
 
-    async def digest(self, user_ref: str) -> list[PostView]:
+    async def digest(self, user_ref: str) -> list[DigestPost]:
         channels = await self.store.list(user_ref)
         if not channels:
             return []
@@ -107,4 +107,4 @@ class ChannelsService:
             key=lambda post: (post.date, post.channel, post.id),
             reverse=True,
         )
-        return [post.view() for post in posts[:20]]
+        return [post.digest_view() for post in posts[:20]]
