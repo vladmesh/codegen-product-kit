@@ -1,4 +1,4 @@
-# tg-channels 0.2.0
+# tg-channels 0.2.1
 
 In-process public Telegram channel reading through the platform's `tg-reader` Product API v1.
 There is no model, translation or content extraction. Text is delivered as plain text.
