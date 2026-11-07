@@ -58,9 +58,9 @@ delayed fetches; a 409 restart also clips an older saved instant to that margin 
 interruption, so a changed channel union rescans a bounded window. Stored `(channel, id)`
 identities prevent repeat notifications. HTTP 429
 sets a durable retry deadline from `Retry-After` and retains the cursor. HTTP 401/403 stops
-future platform polls durably and writes a fixed credential-free error log. Correcting the
-deployment credential also requires an operator to clear `tg_channels.poll_state.stopped`;
-the bot has no administrative credential or recovery command.
+future platform polls durably and writes a fixed credential-free error log. Every backend start
+with a configured platform key clears that stop, so restarting with a corrected or rotated key
+resumes polling; the bot has no administrative credential or recovery command.
 
 Delivery eligibility is enforced in `accept_page`: the post must not be deleted, its
 `(channel, id)` must not have been seen for this product, and its publication time must be at

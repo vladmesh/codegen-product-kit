@@ -92,6 +92,11 @@ class Store:
             result.setdefault(row.channel, {})[row.user_ref] = row.subscribed_at
         return result
 
+    async def resume_polling(self) -> None:
+        """Clear a persisted auth stop so a start with a configured key polls again."""
+        async with self.transaction() as session:
+            await session.execute(sql("UPDATE poll_state SET stopped = false WHERE id = 1"))
+
     async def save_state(self, session: Any, state: dict[str, Any]) -> None:
         await session.execute(
             sql(
