@@ -2,7 +2,7 @@
 # ruff: noqa: PLR2004
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import importlib.util
 import logging
 import sys
@@ -14,7 +14,7 @@ from fastapi import FastAPI
 import httpx
 import pytest
 from test_behaviour import store
-from test_client_contract import KEY
+from test_client_contract import KEY, page
 
 BASE_URL = "https://platform.example.test/tg-reader"
 AT = datetime(2026, 10, 7, 21, tzinfo=UTC)
@@ -192,3 +192,44 @@ def test_failed_consumer_start_without_client_resets_the_service(modules, monkey
     with pytest.raises(RuntimeError, match="REDIS_URL is not set"):
         asyncio.run(context.package.startup(object()))
     assert modules.api._service is None
+
+
+def test_startup_with_rotated_key_resumes_polling_stopped_by_old_key(modules, monkeypatch):
+    rotated = "cps_test_ROTATED_KEY"
+    keys = []
+
+    def respond(request):
+        key = request.headers["Authorization"].removeprefix("Bearer ")
+        keys.append(key)
+        if key != rotated:
+            return httpx.Response(401, json={"detail": "unknown key"})
+        return httpx.Response(200, json=page())
+
+    transport = httpx.MockTransport(respond)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **options: real_client(**options | {"transport": transport})
+    )
+    stale = lifecycle(modules, monkeypatch, {"PLATFORM_BASE_URL": BASE_URL, "PLATFORM_KEY": KEY})
+    repository, memory = stale.package.store, stale.memory
+
+    async def run(key, at):
+        context = lifecycle(
+            modules, monkeypatch, {"PLATFORM_BASE_URL": BASE_URL, "PLATFORM_KEY": key}
+        )
+        context.package.store = repository
+        await context.package.startup(object())
+        (consumer,) = Consumer.instances
+        await consumer.poller.tick(at)
+        await context.package.shutdown(object())
+
+    async def exercise():
+        await repository.add("telegram:123", "cyproplan")
+        await run(KEY, AT)
+        assert memory.state["stopped"]
+        await run(rotated, AT + timedelta(minutes=1))
+        assert not memory.state["stopped"]
+        assert memory.state["cursor"] == "opaque-next"
+
+    asyncio.run(exercise())
+    assert keys == [KEY, rotated]

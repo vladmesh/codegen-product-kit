@@ -74,6 +74,8 @@ class MemorySession:
                     emitted_at=None,
                 ),
             )
+        elif query == "UPDATE poll_state SET stopped = false WHERE id = 1":
+            self.state["stopped"] = False
         elif query.startswith("UPDATE poll_state"):
             self.state = deepcopy(args)
         elif query.startswith("SELECT event_id, payload"):

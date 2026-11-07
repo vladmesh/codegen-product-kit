@@ -38,6 +38,9 @@ class ChannelsPackage:
         api._service = ChannelsService(self.store, self.client)
         self.consumer = ChannelConsumer(Poller(self.store, self.client, publish_event))
         try:
+            if self.client is not None:
+                # The key may have rotated since a 401/403 stopped polling.
+                await self.store.resume_polling()
             await self.consumer.start()
         except BaseException:
             if self.client is not None:
