@@ -523,14 +523,11 @@ _WAIT_SERVICES = {
 }
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("service", "wait_timeout", "ready"),
-    [("healthy", "120", True), ("unhealthy", "120", False), ("starting", "5", False)],
-)
-def test_real_compose_wait_bounds_readiness(
-    tmp_path: Path, service: str, wait_timeout: str, ready: bool
-) -> None:
+def _real_compose_wait(
+    tmp_path: Path, service: str, wait_timeout: str
+) -> tuple[subprocess.CompletedProcess[str], float, str]:
+    """Run real `up --wait` for one fixture service; return the result, its duration and the
+    container health status read before the project is removed."""
     if not shutil.which("docker"):
         pytest.skip("Docker is required for the real Compose readiness proof")
     compose = tmp_path / "compose.yml"
@@ -563,6 +560,20 @@ def test_real_compose_wait_bounds_readiness(
             timeout=180,
         )
         elapsed = time.monotonic() - started
+        container = subprocess.run(
+            [*command, "ps", "--all", "--quiet", service],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        ).stdout.strip()
+        health = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Health.Status}}", container],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        ).stdout.strip()
     finally:
         subprocess.run(
             [*command, "down", "-v", "--remove-orphans"],
@@ -570,8 +581,28 @@ def test_real_compose_wait_bounds_readiness(
             timeout=120,
             check=False,
         )
+    return result, elapsed, health
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(("service", "ready"), [("healthy", True), ("unhealthy", False)])
+def test_real_compose_wait_exit_follows_settled_health(
+    tmp_path: Path, service: str, ready: bool
+) -> None:
+    result, elapsed, health = _real_compose_wait(tmp_path, service, "120")
     assert (result.returncode == 0) == ready, result.stdout + result.stderr
+    assert health == service
     assert elapsed < 60
+
+
+@pytest.mark.slow
+def test_real_compose_wait_stops_at_timeout_while_starting(tmp_path: Path) -> None:
+    # Compose's waiter returns success when the timeout context ends while it sleeps between
+    # polls, so its exit code for a still-starting service is not part of the proof.
+    result, elapsed, health = _real_compose_wait(tmp_path, "starting", "5")
+    assert 5 <= elapsed < 60, result.stdout + result.stderr
+    assert health == "starting"
+    assert " Healthy" not in result.stderr
 
 
 def test_transport_upgrade_proof_is_in_ci_with_released_history() -> None:
