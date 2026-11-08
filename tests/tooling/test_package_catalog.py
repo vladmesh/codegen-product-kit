@@ -223,12 +223,15 @@ def test_catalog_selects_ranking_with_the_channels_release_that_provides_its_pos
         provider = channels.select(core)
         *_, consumer = _source_metadata(_at_tag(selected.tag, ranking), ranking)
         *_, producer = _source_metadata(_at_tag(provider.tag, channels), channels)
-        assert (selected.version, provider.version) == ("0.1.0", "0.2.0")
+        assert (selected.version, provider.version) == ("0.1.0", "0.2.1")
         assert consumer.requires == ["tg-channels.posts.v1"]
         assert set(consumer.requires) <= set(producer.provides)
-    for older in channels.versions[:-1]:
-        *_, manifest = _source_metadata(_at_tag(older.tag, channels), channels)
-        assert "tg-channels.posts.v1" not in manifest.provides
+    providers = []
+    for release in channels.versions:
+        *_, manifest = _source_metadata(_at_tag(release.tag, channels), channels)
+        if "tg-channels.posts.v1" in manifest.provides:
+            providers.append(release.version)
+    assert providers == ["0.2.0", "0.2.1"]
 
 
 @pytest.mark.parametrize(

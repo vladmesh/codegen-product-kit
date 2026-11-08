@@ -69,7 +69,7 @@ its entry in `packages/pending-releases.yaml`, and each published release the ru
 package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. It
 also selects ranking and tg-channels from the catalog for core 2.4 and the current core and reads
 on their tags that the selected tg-channels provides ranking's required `tg-channels.posts.v1` and
-no older tg-channels release does; core 2.3 selects no ranking.
+that exactly tg-channels 0.2.0 and 0.2.1 provide it; core 2.3 selects no ranking.
 `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.

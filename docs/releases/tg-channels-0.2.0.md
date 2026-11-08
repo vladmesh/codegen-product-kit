@@ -31,10 +31,6 @@ capability. Nothing requires the capability unless a package that declares it is
 
 ## Publication
 
-`packages/catalog.yaml` lists 0.2.0 as the newest tg-channels version, so `kit add tg-channels`
-selects it for a product core in `>=2.4,<3`; the catalog's `digest` action output carries `views`.
-Nothing is pending for tg-channels. The runner's `support.PUBLISHED_RELEASES` pins the tag object,
-commit and tree above, and the Runner Proof defaults to `proof_mode=published_release` with
-`package_version=0.2.0`: a pull request against its own catalog (`catalog_mode=candidate_snapshot`),
-a push to `main` against the real default branch's catalog (`catalog_mode=remote_head`); see
-[RUNNER_PROOF.md](../RUNNER_PROOF.md).
+`packages/catalog.yaml` lists 0.2.0, superseded by [tg-channels 0.2.1](tg-channels-0.2.1.md);
+the catalog's `digest` action output carries `views`. The runner's `support.PUBLISHED_RELEASES`
+pins the tag object, commit and tree above.

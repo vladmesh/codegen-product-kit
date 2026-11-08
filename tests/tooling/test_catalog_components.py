@@ -114,7 +114,7 @@ def test_actual_0_7_1_loader_preserves_package_fields_and_selection(source: Path
         assert modern.select("2.1.0").version == "0.4.0"
         if source == ROOT / "packages/catalog.yaml":
             assert reminders.select("2.2.0").version == modern.select("2.2.0").version == "0.5.0"
-            for name, version in (("tg-channels", "0.2.0"), ("ranking", "0.1.0")):
+            for name, version in (("tg-channels", "0.2.1"), ("ranking", "0.1.0")):
                 released = catalog.get(name)
                 assert released.select("2.4.0").version == version
                 modern_release = load_catalog(source).get(name).select("2.4.0")

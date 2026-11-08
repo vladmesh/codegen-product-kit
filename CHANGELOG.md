@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Package releases only: no kit core, tooling, template or `CORE_VERSION` change. tg-channels 0.2.0
-and ranking 0.1.0 are published and listed in the catalog; tg-channels 0.2.1 is pending.
+Package releases only: no kit core, tooling, template or `CORE_VERSION` change. tg-channels 0.2.0,
+tg-channels 0.2.1 and ranking 0.1.0 are published and listed in the catalog; nothing is pending.
 
 ### Fixed
 
-- tg-channels 0.2.1 (pending): a backend start with a configured platform key clears the poll
+- tg-channels 0.2.1: a backend start with a configured platform key clears the poll
   stop a 401/403 persisted, so a corrected or rotated key resumes polling. See
   [tg-channels 0.2.1](docs/releases/tg-channels-0.2.1.md).
 
@@ -37,6 +37,11 @@ and ranking 0.1.0 are published and listed in the catalog; tg-channels 0.2.1 is 
 - The runner pins both tags in `support.PUBLISHED_RELEASES`, and the Runner Proof defaults to the
   published tg-channels 0.2.0. ranking is proven by the bound-product integration leg, not the
   runner proof.
+- tg-channels 0.2.1 in the catalog: tag `packages/tg-channels/v0.2.1` (object `f7a49c9`, package
+  tree `a86492b`) at commit `bfa3f84`. A new product's `kit add tg-channels` selects 0.2.1 for core
+  `>=2.4,<3`; existing products are not upgraded. The pending document is empty. The runner pins
+  the tag in `support.PUBLISHED_RELEASES`, and the Runner Proof defaults to the published
+  tg-channels 0.2.1.
 
 ## [0.12.0] - 2026-10-25 (prepared, not published)
 

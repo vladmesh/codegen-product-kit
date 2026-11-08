@@ -66,8 +66,8 @@ kit bind tg-channels --default && kit bind ranking --default
 `packages/catalog.yaml` lists ranking with 0.1.0 as its only version, together with its catalog
 metadata: summary, capabilities, the settings `weights`, `keywords` and `top_count`, no
 environment, the `rank` and `top` actions and the default binding. `kit add ranking` selects 0.1.0
-for a product core in `>=2.4,<3`, where the catalog also selects tg-channels 0.2.0, the provider of
-`tg-channels.posts.v1`; no older tg-channels release provides it. Nothing is pending for ranking.
+for a product core in `>=2.4,<3`, where the catalog also selects tg-channels 0.2.1, a provider of
+`tg-channels.posts.v1`; of the tg-channels releases only 0.2.0 and 0.2.1 provide it. Nothing is pending for ranking.
 
 The runner's `support.PUBLISHED_RELEASES` pins the tag object, commit and tree above, and the kit
 tests bind them to the local tags fetched from the real remote. The Runner Proof installs

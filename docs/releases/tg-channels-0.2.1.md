@@ -1,9 +1,12 @@
-# tg-channels 0.2.1 preparation
+# tg-channels 0.2.1
 
 A package-only patch release. No kit core, tooling, template, orchestrator or `CORE_VERSION`
-change; `requires_core` stays `>=2.4,<3` and package protocol stays 1. Pending, not published:
-`packages/catalog.yaml` lists 0.2.0 as newest and `packages/tg-channels/v0.2.1` does not exist.
-The release is pinned in `packages/pending-releases.yaml` and supersedes 0.2.0.
+change; `requires_core` stays `>=2.4,<3` and package protocol stays 1.
+
+Release identity: distribution `codegen-kit-tg-channels` 0.2.1, entry point `tg-channels`,
+superseding 0.2.0. Published as the annotated tag `packages/tg-channels/v0.2.1`, object
+`f7a49c9c8e0b42517fe36a9d42edb01ba679a619`, at commit `bfa3f84c8f4c6928527168fb3b84939508a4cfa5`,
+package tree `a86492bca55e2c9418c7b7252a067ef90005bd1b`. Earlier tags are unchanged.
 
 ## Defect
 
@@ -25,17 +28,13 @@ The regression `tests/test_unconfigured.py::test_startup_with_rotated_key_resume
 starts the real package lifecycle with key A (the reader answers 401 and polling stops), then
 with key B over the same store; the second tick must read posts and clear the stop.
 
-## Publication (separate operation)
+## Publication
 
-From reviewed, merged main with a green Runner Proof on that merge commit `M`:
+`packages/catalog.yaml` lists 0.2.1 as the newest tg-channels version, so `kit add tg-channels`
+selects it for a product core in `>=2.4,<3`. Nothing is pending for tg-channels. The runner's
+`support.PUBLISHED_RELEASES` pins the tag object, commit and tree above, and the Runner Proof
+defaults to `proof_mode=published_release` with `package_version=0.2.1`: a pull request against
+its own catalog (`catalog_mode=candidate_snapshot`), a push to `main` against the real default
+branch's catalog (`catalog_mode=remote_head`); see [RUNNER_PROOF.md](../RUNNER_PROOF.md).
 
-1. Confirm `M` has version 0.2.1 in `pyproject.toml` and `package.yaml`, the pending entry, and
-   no 0.2.1 entry in `packages/catalog.yaml`.
-2. Record the package tree: `git rev-parse M:packages/codegen-kit-tg-channels`.
-3. Create the annotated tag `packages/tg-channels/v0.2.1` at `M` and push only that tag. Earlier
-   tags are unchanged.
-4. A following code change appends the pending `catalog_entry` to the tg-channels `versions`,
-   removes the pending entry, pins the tag in `support.PUBLISHED_RELEASES` and sets the Runner
-   Proof default to `package_version=0.2.1`. Until that merge, `kit add tg-channels` selects 0.2.0.
-
-Existing products on 0.2.0 upgrade afterwards with `kit add tg-channels`.
+Existing products on 0.2.0 upgrade with `kit add tg-channels`.
