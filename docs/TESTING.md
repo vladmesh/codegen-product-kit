@@ -69,7 +69,7 @@ its entry in `packages/pending-releases.yaml`, and each published release the ru
 package tree, and, while it is the newest and nothing is pending, the package tree at HEAD. It
 also selects ranking and tg-channels from the catalog for core 2.4 and the current core and reads
 on their tags that the selected tg-channels provides ranking's required `tg-channels.posts.v1` and
-no older tg-channels release does; core 2.3 selects no ranking.
+that exactly tg-channels 0.2.0 and 0.2.1 provide it; core 2.3 selects no ranking.
 `tests/tooling/test_package_timers.py` feeds the
 timer job name generated from tg-channels' shipped manifest (`JOB_TIMERS`) to the package's own
 consumer, so a consumer listening for any other name fails.
@@ -131,9 +131,12 @@ output, every required value refused before SSH, an SSH failure, the exact
 redeploy, readiness failure, empty/malformed/non-running status, a failing status pipeline, a
 positive `RestartCount`, empty and corrupt `DOTENV`, and bounded login/pull retries. These are
 controlled Docker results, not a host deployment. The slow
-`test_real_compose_wait_bounds_readiness` (CI `test-pytest` slow leg) runs real Compose
-`up --wait` on throwaway `redis:7-alpine` projects: healthy returns early, unhealthy fails and a
-never-healthy service fails at its `--wait-timeout`; each project is removed with its volumes.
+`test_real_compose_wait_*` cases (CI `test-pytest` slow leg) run real Compose `up --wait` on
+throwaway `redis:7-alpine` projects: a healthy service succeeds and an unhealthy one fails, each
+with that health status on its container, and a never-healthy service still `starting` makes
+`up --wait` return at its `--wait-timeout` without a healthy event. Compose's exit code at that
+timeout is not asserted: its waiter can return success when the timeout ends between polls.
+Each project is removed with its volumes.
 
 Real Copier update cases run `uv lock`, commit synthetic owned environment/application data,
 read back retained bytes and the updated workflow (checkout and key steps unchanged, copy and

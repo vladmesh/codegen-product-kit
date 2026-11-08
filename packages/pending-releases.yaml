@@ -12,14 +12,4 @@
 # installs exactly this entry from an isolated fixture repository, and the kit tests require
 # the package source at HEAD to match it (tests/tooling/test_package_catalog.py).
 format_version: 1
-releases:
-  - package: tg-channels
-    distribution: codegen-kit-tg-channels
-    path: packages/codegen-kit-tg-channels
-    version: 0.2.1
-    supersedes: 0.2.0
-    notes: docs/releases/tg-channels-0.2.1.md
-    catalog_entry:
-      version: 0.2.1
-      tag: packages/tg-channels/v0.2.1
-      requires_core: '>=2.4,<3'
+releases: []

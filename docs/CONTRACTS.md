@@ -414,10 +414,10 @@ packages:
       - {version: 0.5.0, tag: packages/reminders/v0.5.0, requires_core: ">=2.2,<3"}
 ```
 
-The catalog lists the packages reminders (0.3.0 to 0.5.0), tg-channels (0.1.0 to 0.2.0) and
+The catalog lists the packages reminders (0.3.0 to 0.5.0), tg-channels (0.1.0 to 0.2.1) and
 ranking (0.1.0), and the library textparse (0.1.0); each version is an independently published
 immutable package tag, and a later core release does not republish any of them. ranking requires
-`tg-channels.posts.v1`, which only tg-channels 0.2.0 provides.
+`tg-channels.posts.v1`, which tg-channels 0.2.0 and 0.2.1 provide.
 
 The loader refuses, with a named `CatalogError` subclass, an unknown `format_version`
 (`UnsupportedCatalogFormatError`), a missing or malformed field or a tag other than
@@ -446,10 +446,10 @@ releases:
   - package: tg-channels
     distribution: codegen-kit-tg-channels
     path: packages/codegen-kit-tg-channels
-    version: 0.2.1                        # example
-    supersedes: 0.2.0                     # the catalog's newest version
-    notes: docs/releases/tg-channels-0.2.1.md
-    catalog_entry: {version: 0.2.1, tag: packages/tg-channels/v0.2.1, requires_core: '>=2.4,<3'}
+    version: 0.2.2                        # example
+    supersedes: 0.2.1                     # the catalog's newest version
+    notes: docs/releases/tg-channels-0.2.2.md
+    catalog_entry: {version: 0.2.2, tag: packages/tg-channels/v0.2.2, requires_core: '>=2.4,<3'}
 ```
 
 A package's first release cannot be listed under `packages` yet: every released catalog reader
@@ -476,7 +476,7 @@ its pull request runs `published_release` against the candidate's own committed 
 as an isolated `HEAD` (`catalog_mode=candidate_snapshot`, evidence labelled prospective), and the
 push of the merge commit to `main` runs it against the real `HEAD` with no fixture
 (`catalog_mode=remote_head`). Only the latter shows the activated path. The runner pins every
-release activated this way: tg-channels 0.1.2 and 0.2.0 and ranking 0.1.0. The runner proof
+release activated this way: tg-channels 0.1.2, 0.2.0 and 0.2.1 and ranking 0.1.0. The runner proof
 installs tg-channels only; the published ranking is proven by the bound-product integration leg
 ([TESTING.md](TESTING.md)).
 

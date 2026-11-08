@@ -31,9 +31,9 @@ failing remote never switches either of them; there is no fallback.
   from the real remote: `git ls-remote --tags` and a fetch of every `refs/tags/packages/*` into
   a bare repository under its work directory. Every copied tag must be the object id the remote
   lists, and the target tag must be the pinned release of `support.PUBLISHED_RELEASES`; for
-  tg-channels 0.2.0 that is the annotated tag object `416f512f28b1a67fd3ccbc1c0f2e41d65cb30a25`,
-  peeled commit `00a8313d5b65af299b91a628c7388168d15b94e5` and package tree
-  `910b218b1475ee8607416703268383620d0dcb08`. An unpinned version is refused. After the install
+  tg-channels 0.2.1 that is the annotated tag object `f7a49c9c8e0b42517fe36a9d42edb01ba679a619`,
+  peeled commit `bfa3f84c8f4c6928527168fb3b84939508a4cfa5` and package tree
+  `a86492bca55e2c9418c7b7252a067ef90005bd1b`. An unpinned version is refused. After the install
   the probe's own source for tg-channels must be that tag object, commit and tree, and every
   other installed component (reminders, textparse) the real remote's tag object; the backend's
   installed distribution and the committed wheel must carry the version. No tag is created.
@@ -132,7 +132,7 @@ product sources. The template source and `_commit` come from GitHub as in produc
 | platform | `070dfb359f9a121546d1362ae84c9d0856cabf64` | `vladmesh/codegen-platform-services` (private) |
 | proof mode | `published_release` | this repository's runs; a caller must choose |
 | catalog mode | `candidate_snapshot` on a pull request, `remote_head` on a main push | a caller must choose |
-| tg-channels version | `0.2.0` | a pinned published release, or the pending entry in `candidate_release` |
+| tg-channels version | `0.2.1` | a pinned published release, or the pending entry in `candidate_release` |
 
 The platform is checked out with the read-only deploy key `PLATFORM_SERVICES_DEPLOY_KEY` over SSH,
 `persist-credentials: false`, into `platform/` outside the uploaded artifact path. The workflow
@@ -159,7 +159,7 @@ jobs:
       platform_sha: <platform sha>          # empty: the kit's pin above
       proof_mode: published_release         # or candidate_release; required, no fallback
       catalog_mode: remote_head             # candidate_snapshot | pending_fixture; required
-      package_version: 0.2.0                # the tg-channels version the planner must select
+      package_version: 0.2.1                # the tg-channels version the planner must select
     secrets:
       PLATFORM_SERVICES_DEPLOY_KEY: ${{ secrets.PLATFORM_SERVICES_DEPLOY_KEY }}
 ```
@@ -174,7 +174,7 @@ executed (it needs Docker and network); in CI it is:
 orchestrator/.venv/bin/python kit/tests/runner/fresh_product.py --kit-dir kit --kit-sha SHA \
     --orchestrator-dir orchestrator --orchestrator-sha SHA \
     --platform-dir platform --platform-sha SHA \
-    --proof-mode published_release --catalog-mode remote_head --package-version 0.2.0 \
+    --proof-mode published_release --catalog-mode remote_head --package-version 0.2.1 \
     --packages reminders,tg-channels \
     --output-dir "$RUNNER_TEMP/runner-proof"
 ```
